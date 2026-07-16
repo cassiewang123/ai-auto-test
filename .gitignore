@@ -1,23 +1,81 @@
-# Docker
+# Local environment and secrets
 .env
-.env.local
-.env.oracle
-.runtime/
+.env.*
+!.env.example
+!.env.*.example
+
+# Local databases
 *.db
-postgres_data/
-redis_data/
-minio_data/
-uploads/
+*.sqlite
+*.sqlite3
+
+# Runtime data and uploaded files
+.runtime/
 .uploads/
+uploads/
 !backend/uploads/
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+# Docker/local service volumes
+postgres_data/
+redis_data/
+minio_data/
+
+# Python cache, virtualenvs, and build outputs
+__pycache__/
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
+.venv/
+venv/
+env/
 *.egg-info/
-__pycache__/
-*.py[cod]
+build/
+dist/
+
+# Node/frontend dependencies and build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test, coverage, and report artifacts
+coverage/
+htmlcov/
+.coverage
+coverage.xml
+junit*.xml
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+reports/
+artifacts/
+
+# Local screenshots and temporary captures
+ai-page-screenshot.png
+frontend_error.png
+*-screenshot.png
+*screenshot*.png
+
+# Editor and OS local files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# Miscellaneous local/generated folders
 .trae-html-share-packages/
 (null)/
 /2.0.0
