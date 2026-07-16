@@ -1,0 +1,58 @@
+{
+  "root": {
+    "nodeId": "gen-project-shell",
+    "kind": "project-shell",
+    "pageIds": ["page-dashboard", "page-quick-test", "page-test-cases", "page-ai-assistant"],
+    "output": "partials/project-shell.html",
+    "sharedRegions": ["sidebar", "top-header", "content-wrapper"],
+    "privateRegions": [],
+    "mutableSlots": ["activeNavItem", "pageTitle", "pageContent"],
+    "status": "planned",
+    "children": [
+      {
+        "nodeId": "gen-page-dashboard",
+        "kind": "page-leaf",
+        "pageIds": ["page-dashboard"],
+        "output": "pages/dashboard.html",
+        "sharedRegions": [],
+        "privateRegions": ["dashboard stat cards + recent cases table"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "planned",
+        "children": []
+      },
+      {
+        "nodeId": "gen-page-quick-test",
+        "kind": "page-leaf",
+        "pageIds": ["page-quick-test"],
+        "output": "pages/quick-test.html",
+        "sharedRegions": [],
+        "privateRegions": ["URL bar + tabbed config + console"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "planned",
+        "children": []
+      },
+      {
+        "nodeId": "gen-page-test-cases",
+        "kind": "page-leaf",
+        "pageIds": ["page-test-cases"],
+        "output": "pages/test-cases.html",
+        "sharedRegions": [],
+        "privateRegions": ["filter toolbar + data table"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "planned",
+        "children": []
+      },
+      {
+        "nodeId": "gen-page-ai-assistant",
+        "kind": "page-leaf",
+        "pageIds": ["page-ai-assistant"],
+        "output": "pages/ai-assistant.html",
+        "sharedRegions": [],
+        "privateRegions": ["suggestion cards + chat thread + input bar"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "planned",
+        "children": []
+      }
+    ]
+  }
+}

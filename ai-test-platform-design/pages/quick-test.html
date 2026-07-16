@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>接口调试 - AI 接口自动化测试平台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    /* ===== Reset & Base ===== */
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-body);
+      background: var(--surface-base);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ===== Sidebar ===== */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 240px;
+      height: 100vh;
+      background: var(--surface-sidebar);
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 20;
+      box-shadow: var(--shadow-sidebar);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(203, 213, 225, 0.2);
+      border-radius: 4px;
+    }
+
+    /* Logo */
+    .sidebar-logo {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      color: var(--text-inverse);
+      font-size: 15px;
+      font-weight: 700;
+      font-family: var(--font-body);
+      letter-spacing: 0.02em;
+      border-bottom: 1px solid rgba(203, 213, 225, 0.1);
+      flex-shrink: 0;
+      gap: 8px;
+    }
+
+    .sidebar-logo svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      color: #99f6e4;
+    }
+
+    /* Nav section */
+    .nav-section {
+      padding: var(--space-3) var(--space-4);
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    /* Nav divider */
+    .nav-divider {
+      height: 1px;
+      background: rgba(203, 213, 225, 0.1);
+      margin: 8px 0;
+    }
+
+    /* Section header (small, uppercase label) */
+    .nav-section-header {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      padding: 12px 16px 4px 16px;
+      user-select: none;
+    }
+
+    /* Nav item */
+    .nav-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      color: var(--text-sidebar);
+      font-size: 14px;
+      font-weight: var(--font-medium);
+      cursor: pointer;
+      transition: background var(--transition-fast), color var(--transition-fast);
+      text-decoration: none;
+      white-space: nowrap;
+      border-left: 2px solid transparent;
+      border-radius: var(--radius-sm);
+      margin: 1px 0;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: var(--surface-sidebar-hover);
+      color: var(--text-inverse);
+    }
+
+    .nav-item[data-active="true"] {
+      background: var(--surface-sidebar-active);
+      color: var(--text-sidebar-active);
+      border-left-color: var(--color-primary);
+      border-radius: 0;
+      margin-left: 0;
+      padding-left: 16px;
+    }
+
+    .nav-item svg {
+      width: 16px;
+      height: 16px;
+      margin-right: 10px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .nav-item[data-active="true"] svg {
+      opacity: 1;
+    }
+
+    /* AI nav special glow */
+    .nav-item.ai-nav {
+      position: relative;
+    }
+    .nav-item.ai-nav[data-active="true"] {
+      border-left-color: var(--color-ai);
+      background: rgba(13, 148, 136, 0.1);
+    }
+    .nav-item.ai-nav::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      background: var(--color-ai);
+      border-radius: 2px;
+      box-shadow: 0 0 8px rgba(13, 148, 136, 0.5);
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+    .nav-item.ai-nav[data-active="true"]::before {
+      opacity: 1;
+    }
+    .nav-item.ai-nav svg {
+      color: var(--color-ai-muted);
+    }
+    .nav-item.ai-nav[data-active="true"] svg {
+      color: var(--color-ai-muted);
+    }
+
+    /* ===== Top Header ===== */
+    .top-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      height: 56px;
+      background: var(--surface-card);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #page-title-slot {
+      font-size: var(--text-lg);
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .env-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      background: var(--surface-card);
+      transition: border-color var(--transition-fast);
+      user-select: none;
+    }
+
+    .env-selector:hover {
+      border-color: var(--color-primary);
+    }
+
+    .env-selector svg {
+      width: 14px;
+      height: 14px;
+      color: var(--text-tertiary);
+    }
+
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--color-primary), #7c3aed);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ===== Main Content ===== */
+    .main-content {
+      margin-left: 240px;
+      min-height: calc(100vh - 56px);
+      padding: 24px;
+      background: var(--surface-base);
+    }
+
+    #page-content-slot {
+      min-height: 400px;
+    }
+
+    /* ===== Quick Test Page Styles ===== */
+
+    /* Card */
+    .qt-card {
+      background: var(--surface-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    /* Card header */
+    .qt-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-4) var(--space-6);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .qt-card-header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .qt-card-title {
+      font-size: var(--text-xl);
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+    }
+
+    .qt-card-subtitle {
+      font-size: var(--text-sm);
+      color: var(--text-tertiary);
+    }
+
+    .qt-card-header-right {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    /* Buttons */
+    .qt-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 16px;
+      border-radius: var(--radius-md);
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      border: 1px solid transparent;
+      white-space: nowrap;
+      user-select: none;
+      font-family: var(--font-body);
+    }
+
+    .qt-btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+
+    .qt-btn-outline {
+      background: var(--surface-card);
+      color: var(--text-secondary);
+      border-color: var(--border-color);
+    }
+
+    .qt-btn-outline:hover {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+    }
+
+    .qt-btn-primary {
+      background: var(--color-primary);
+      color: white;
+      border-color: var(--color-primary);
+    }
+
+    .qt-btn-primary:hover {
+      background: var(--color-primary-hover);
+      border-color: var(--color-primary-hover);
+    }
+
+    /* Request Row */
+    .qt-request-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-6);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .qt-method-select {
+      width: 120px;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .qt-method-trigger {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      background: var(--surface-card);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      transition: border-color var(--transition-fast);
+      user-select: none;
+      width: 100%;
+    }
+
+    .qt-method-trigger:hover {
+      border-color: var(--color-primary);
+    }
+
+    .qt-method-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      letter-spacing: 0.02em;
+    }
+
+    .qt-method-badge[data-method="GET"] { background: var(--method-get-bg); color: var(--method-get); }
+    .qt-method-badge[data-method="POST"] { background: var(--method-post-bg); color: var(--method-post); }
+    .qt-method-badge[data-method="PUT"] { background: var(--method-put-bg); color: var(--method-put); }
+    .qt-method-badge[data-method="DELETE"] { background: var(--method-delete-bg); color: var(--method-delete); }
+    .qt-method-badge[data-method="PATCH"] { background: var(--method-patch-bg); color: var(--method-patch); }
+
+    .qt-method-arrow {
+      margin-left: auto;
+      width: 12px;
+      height: 12px;
+      color: var(--text-tertiary);
+    }
+
+    .qt-url-input {
+      flex: 1;
+      min-width: 500px;
+      padding: 7px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      color: var(--text-primary);
+      background: var(--surface-card);
+      outline: none;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    }
+
+    .qt-url-input::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .qt-url-input:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    }
+
+    .qt-timeout-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .qt-timeout-label {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .qt-timeout-input {
+      width: 80px;
+      padding: 7px 8px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      font-size: var(--text-sm);
+      color: var(--text-primary);
+      text-align: center;
+      background: var(--surface-card);
+      outline: none;
+      font-family: var(--font-mono);
+      transition: border-color var(--transition-fast);
+    }
+
+    .qt-timeout-input:focus {
+      border-color: var(--color-primary);
+    }
+
+    /* Tabs */
+    .qt-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 var(--space-6);
+      gap: 0;
+    }
+
+    .qt-tab {
+      padding: 10px 16px;
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .qt-tab:hover {
+      color: var(--color-primary);
+    }
+
+    .qt-tab[data-active="true"] {
+      color: var(--color-primary);
+      border-bottom-color: var(--color-primary);
+    }
+
+    .qt-tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--border-subtle);
+      color: var(--text-tertiary);
+    }
+
+    .qt-tab[data-active="true"] .qt-tab-count {
+      background: var(--color-primary-light);
+      color: var(--color-primary);
+    }
+
+    /* Tab Panel */
+    .qt-tab-panel {
+      padding: var(--space-5) var(--space-6);
+      display: none;
+    }
+
+    .qt-tab-panel[data-active="true"] {
+      display: block;
+    }
+
+    /* Form fields */
+    .qt-field {
+      margin-bottom: var(--space-5);
+    }
+
+    .qt-field:last-child {
+      margin-bottom: 0;
+    }
+
+    .qt-field-label {
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      color: var(--text-secondary);
+      margin-bottom: var(--space-2);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .qt-field-label .qt-json-tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--color-primary-light);
+      color: var(--color-primary);
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+
+    .qt-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      color: var(--text-primary);
+      background: var(--surface-card);
+      resize: vertical;
+      outline: none;
+      line-height: 1.5;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+      box-sizing: border-box;
+    }
+
+    .qt-textarea::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .qt-textarea:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    }
+
+    /* File upload dragger */
+    .qt-dragger {
+      border: 2px dashed var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: var(--space-10) var(--space-6);
+      text-align: center;
+      cursor: pointer;
+      transition: border-color var(--transition-fast), background var(--transition-fast);
+    }
+
+    .qt-dragger:hover {
+      border-color: var(--color-primary);
+      background: var(--color-primary-light);
+    }
+
+    .qt-dragger-icon {
+      width: 40px;
+      height: 40px;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-3);
+    }
+
+    .qt-dragger-text {
+      font-size: var(--text-base);
+      color: var(--text-secondary);
+    }
+
+    .qt-dragger-hint {
+      font-size: var(--text-xs);
+      color: var(--text-tertiary);
+      margin-top: var(--space-1);
+    }
+
+    .qt-upload-info {
+      margin-top: var(--space-4);
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-ai-light);
+      border: 1px solid var(--color-ai-muted);
+      border-radius: var(--radius-md);
+      font-size: var(--text-sm);
+      color: var(--color-ai);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .qt-upload-info svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* Info boxes */
+    .qt-info-box {
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-md);
+      font-size: var(--text-sm);
+      line-height: var(--leading-normal);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .qt-info-box svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .qt-info-box-blue {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e40af;
+    }
+
+    .qt-info-box-green {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+    }
+
+    /* Empty state */
+    .qt-empty {
+      text-align: center;
+      padding: var(--space-10) var(--space-6);
+      color: var(--text-tertiary);
+      font-size: var(--text-sm);
+    }
+
+    .qt-dashed-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: var(--space-4);
+      padding: 8px 20px;
+      border: 1px dashed var(--border-color);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      font-family: var(--font-body);
+    }
+
+    .qt-dashed-btn:hover {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+      background: var(--color-primary-light);
+    }
+
+    .qt-dashed-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* ===== Execution Result Card ===== */
+    .qt-result-card {
+      background: var(--surface-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      margin-top: var(--space-4);
+    }
+
+    .qt-result-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-6);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .qt-result-title {
+      font-size: var(--text-xl);
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+    }
+
+    /* Tags */
+    .qt-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 10px;
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .qt-tag-success {
+      background: var(--state-success-bg);
+      color: var(--state-success);
+      border: 1px solid #a7f3d0;
+    }
+
+    .qt-tag-info {
+      background: var(--state-info-bg);
+      color: var(--state-info);
+      border: 1px solid #a5f3fc;
+    }
+
+    .qt-result-elapsed {
+      font-size: var(--text-sm);
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      margin-left: auto;
+    }
+
+    /* Result inner card */
+    .qt-result-inner {
+      padding: var(--space-4) var(--space-6);
+    }
+
+    .qt-response-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-3);
+    }
+
+    .qt-response-label {
+      font-size: var(--text-sm);
+      font-weight: var(--font-semibold);
+      color: var(--text-primary);
+    }
+
+    .qt-status-code {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: var(--text-sm);
+    }
+
+    .qt-response-meta {
+      font-size: var(--text-sm);
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+    }
+
+    /* Result tabs */
+    .qt-result-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: var(--space-3);
+    }
+
+    .qt-result-tab {
+      padding: 6px 12px;
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+      user-select: none;
+    }
+
+    .qt-result-tab:hover {
+      color: var(--color-primary);
+    }
+
+    .qt-result-tab[data-active="true"] {
+      color: var(--color-primary);
+      border-bottom-color: var(--color-primary);
+    }
+
+    /* Code block */
+    .qt-code-block {
+      background: #1a1a2e;
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      overflow-x: auto;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .qt-code-block::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    .qt-code-block::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .qt-code-block::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+
+    .qt-code-block pre {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: #e2e8f0;
+      white-space: pre;
+    }
+
+    /* JSON syntax colors */
+    .qt-json-key { color: #93c5fd; }
+    .qt-json-string { color: #86efac; }
+    .qt-json-number { color: #fbbf24; }
+    .qt-json-bracket { color: #94a3b8; }
+
+    /* ===== AI Suggestion Bar ===== */
+    .qt-ai-bar {
+      margin-top: var(--space-4);
+      padding: var(--space-3) var(--space-4);
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .qt-ai-bar-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--color-ai);
+      flex-shrink: 0;
+    }
+
+    .qt-ai-bar-text {
+      font-size: var(--text-sm);
+      color: var(--color-ai);
+      flex: 1;
+    }
+
+    .qt-ai-bar-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      flex-shrink: 0;
+    }
+
+    .qt-ai-link {
+      font-size: var(--text-sm);
+      color: var(--color-ai);
+      cursor: pointer;
+      font-weight: var(--font-medium);
+      text-decoration: none;
+      transition: color var(--transition-fast);
+    }
+
+    .qt-ai-link:hover {
+      color: var(--color-ai-hover);
+      text-decoration: underline;
+    }
+
+    .qt-ai-link-dim {
+      color: var(--text-tertiary);
+    }
+
+    .qt-ai-link-dim:hover {
+      color: var(--text-secondary);
+    }
+
+    /* ===== Console Card ===== */
+    .qt-console-card {
+      background: var(--surface-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      margin-top: var(--space-4);
+    }
+
+    .qt-console-header {
+      display: flex;
+      align-items: center;
+      padding: var(--space-3) var(--space-4);
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+
+    .qt-console-title {
+      font-size: var(--text-sm);
+      font-weight: var(--font-semibold);
+      color: #e2e8f0;
+    }
+
+    .qt-console-body {
+      background: #0f172a;
+      padding: var(--space-3) var(--space-4);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .qt-console-line {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .qt-console-line-blue { color: #60a5fa; }
+    .qt-console-line-green { color: #4ade80; }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Fixed Left Sidebar ===== -->
+  <aside class="sidebar">
+    <!-- Logo -->
+    <div class="sidebar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"/>
+      </svg>
+      AI 测试平台
+    </div>
+
+    <nav class="nav-section">
+      <!-- 仪表盘 -->
+      <a class="nav-item" data-nav-key="dashboard" data-dom-id="nav-dashboard" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        仪表盘
+      </a>
+
+      <div class="nav-divider"></div>
+
+      <!-- API 测试 section header -->
+      <div class="nav-section-header">API 测试</div>
+
+      <a class="nav-item" data-nav-key="api-define" data-dom-id="nav-api-define-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        接口定义
+      </a>
+
+      <a class="nav-item" data-nav-key="quick-test" data-active="true" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        接口调试
+      </a>
+
+      <a class="nav-item" data-nav-key="test-cases" data-dom-id="nav-test-cases" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        用例管理
+      </a>
+
+      <a class="nav-item" data-nav-key="test-plans" data-dom-id="nav-test-plans-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        测试计划
+      </a>
+
+      <a class="nav-item" data-nav-key="api-import" data-dom-id="nav-api-import-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        接口导入
+      </a>
+
+      <a class="nav-item" data-nav-key="mock-service" data-dom-id="nav-mock-service-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Mock 服务
+      </a>
+
+      <!-- 测试管理 section header -->
+      <div class="nav-section-header">测试管理</div>
+
+      <a class="nav-item" data-nav-key="ui-cases" data-dom-id="nav-ui-cases-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        UI 用例管理
+      </a>
+
+      <a class="nav-item" data-nav-key="element-lib" data-dom-id="nav-element-lib-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/>
+        </svg>
+        元素对象库
+      </a>
+
+      <!-- 性能测试 section header -->
+      <div class="nav-section-header">性能测试</div>
+
+      <a class="nav-item" data-nav-key="perf-scene" data-dom-id="nav-perf-scene-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        压测场景
+      </a>
+
+      <a class="nav-item" data-nav-key="perf-report" data-dom-id="nav-perf-report-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        性能报告
+      </a>
+
+      <div class="nav-divider"></div>
+
+      <!-- 测试报告 -->
+      <a class="nav-item" data-nav-key="reports" data-dom-id="nav-reports-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/>
+        </svg>
+        测试报告
+      </a>
+
+      <!-- 定时任务 -->
+      <a class="nav-item" data-nav-key="cron-task" data-dom-id="nav-cron-task-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        定时任务
+      </a>
+
+      <!-- 环境管理 -->
+      <a class="nav-item" data-nav-key="environments" data-dom-id="nav-environments-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+        </svg>
+        环境管理
+      </a>
+
+      <!-- 项目管理 -->
+      <a class="nav-item" data-nav-key="projects" data-dom-id="nav-projects-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        项目管理
+      </a>
+
+      <!-- 历史记录 -->
+      <a class="nav-item" data-nav-key="history" data-dom-id="nav-history-hidden" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/>
+        </svg>
+        历史记录
+      </a>
+
+      <div class="nav-divider"></div>
+
+      <!-- AI 助手 (special teal glow) -->
+      <a class="nav-item ai-nav" data-nav-key="ai" data-dom-id="nav-ai" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l2 4 4.5.7-3.3 3.1.8 4.5L12 12l-4 2.3.8-4.5L5.5 6.7 10 6z"/>
+          <path d="M12 14v4"/><circle cx="12" cy="20" r="1" fill="currentColor"/>
+        </svg>
+        AI 助手
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ===== Sticky Top Header ===== -->
+  <header class="top-header">
+    <div class="header-left">
+      <span id="page-title-slot">接口调试</span>
+    </div>
+    <div class="header-right">
+      <div class="env-selector">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+        </svg>
+        开发环境
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <div class="user-avatar" title="用户">A</div>
+    </div>
+  </header>
+
+  <!-- ===== Main Content Area ===== -->
+  <main class="main-content">
+    <div id="page-content-slot">
+
+      <!-- ===== Main Card: 快速测试 ===== -->
+      <div class="qt-card">
+        <!-- Card Header -->
+        <div class="qt-card-header">
+          <div class="qt-card-header-left">
+            <div>
+              <div class="qt-card-title">快速测试</div>
+              <div class="qt-card-subtitle">支持 Postman 式文件上传、前置条件、变量提取链</div>
+            </div>
+          </div>
+          <div class="qt-card-header-right">
+            <!-- 保存到接口列表 (outline) -->
+            <button class="qt-btn qt-btn-outline">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+              </svg>
+              保存到接口列表
+            </button>
+            <!-- 发送请求 (primary filled) -->
+            <button class="qt-btn qt-btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+              发送请求
+            </button>
+          </div>
+        </div>
+
+        <!-- Request Row: Method + URL + Timeout -->
+        <div class="qt-request-row">
+          <!-- Method Select -->
+          <div class="qt-method-select">
+            <div class="qt-method-trigger">
+              <span class="qt-method-badge" data-method="GET">GET</span>
+              <svg class="qt-method-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+          <!-- URL Input -->
+          <input class="qt-url-input" type="text" placeholder="https://api.example.com/users" />
+          <!-- Timeout -->
+          <div class="qt-timeout-group">
+            <span class="qt-timeout-label">超时(s):</span>
+            <input class="qt-timeout-input" type="number" value="30" />
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="qt-tabs">
+          <div class="qt-tab" data-tab="request-config" data-active="true">请求配置</div>
+          <div class="qt-tab" data-tab="file-upload">文件上传 <span class="qt-tab-count">0</span></div>
+          <div class="qt-tab" data-tab="preconditions">前置条件 <span class="qt-tab-count">0</span></div>
+          <div class="qt-tab" data-tab="assertions">断言规则 <span class="qt-tab-count">0</span></div>
+          <div class="qt-tab" data-tab="env-vars">环境变量</div>
+        </div>
+
+        <!-- Tab 1: 请求配置 (active) -->
+        <div class="qt-tab-panel" data-panel="request-config" data-active="true">
+          <div class="qt-field">
+            <div class="qt-field-label">
+              Headers
+              <span class="qt-json-tag">JSON</span>
+            </div>
+            <textarea class="qt-textarea" rows="3" placeholder='{"Content-Type": "application/json"}'></textarea>
+          </div>
+          <div class="qt-field">
+            <div class="qt-field-label">
+              Query Params
+              <span class="qt-json-tag">JSON</span>
+            </div>
+            <textarea class="qt-textarea" rows="3" placeholder='{"page": 1, "size": 20}'></textarea>
+          </div>
+          <div class="qt-field">
+            <div class="qt-field-label">
+              Body
+              <span class="qt-json-tag">JSON</span>
+            </div>
+            <textarea class="qt-textarea" rows="5" placeholder='{"name": "Ada", "email": "ada@example.com"}'></textarea>
+          </div>
+        </div>
+
+        <!-- Tab 2: 文件上传 -->
+        <div class="qt-tab-panel" data-panel="file-upload">
+          <div class="qt-dragger">
+            <svg class="qt-dragger-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <div class="qt-dragger-text">点击或拖拽文件到此处</div>
+            <div class="qt-dragger-hint">支持单个或多个文件上传</div>
+          </div>
+          <div class="qt-upload-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            上传文件后，主请求将以 multipart/form-data 方式发送
+          </div>
+        </div>
+
+        <!-- Tab 3: 前置条件 -->
+        <div class="qt-tab-panel" data-panel="preconditions">
+          <div class="qt-info-box qt-info-box-blue" style="margin-bottom: var(--space-4);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>前置请求会在主请求之前执行，可用于登录获取 Token、初始化测试数据等。支持从响应中提取变量，在后续请求中使用。</span>
+          </div>
+          <div class="qt-empty">
+            暂无前置条件
+            <div>
+              <button class="qt-dashed-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                添加前置请求
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: 断言规则 -->
+        <div class="qt-tab-panel" data-panel="assertions">
+          <div class="qt-empty">
+            <div style="margin-bottom: var(--space-3);">暂无断言规则</div>
+            <button class="qt-dashed-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              + 添加断言
+            </button>
+          </div>
+        </div>
+
+        <!-- Tab 5: 环境变量 -->
+        <div class="qt-tab-panel" data-panel="env-vars">
+          <div class="qt-info-box qt-info-box-green" style="margin-bottom: var(--space-4);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>可在请求 URL、Headers、Body 中使用 <code style="font-family: var(--font-mono); background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 3px; font-size: 12px;">{{variable_name}}</code> 语法引用环境变量。</span>
+          </div>
+          <div class="qt-field">
+            <div class="qt-field-label">
+              环境变量
+              <span class="qt-json-tag">JSON</span>
+            </div>
+            <textarea class="qt-textarea" rows="6" placeholder='{"base_url": "https://api.example.com", "token": "{{login_token}}"}'></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Execution Result Card ===== -->
+      <div class="qt-result-card">
+        <div class="qt-result-header">
+          <span class="qt-result-title">执行结果</span>
+          <span class="qt-tag qt-tag-success">passed</span>
+          <span class="qt-result-elapsed">耗时 0.342s</span>
+        </div>
+        <div class="qt-result-inner">
+          <div class="qt-response-header">
+            <span class="qt-response-label">响应</span>
+            <span class="qt-tag qt-tag-success" style="font-family: var(--font-mono);">200</span>
+            <span class="qt-response-meta">0.3420s</span>
+          </div>
+
+          <!-- Result sub-tabs -->
+          <div class="qt-result-tabs">
+            <div class="qt-result-tab" data-active="true">Body</div>
+            <div class="qt-result-tab">Headers</div>
+            <div class="qt-result-tab">Cookies</div>
+          </div>
+
+          <!-- Code Block -->
+          <div class="qt-code-block">
+            <pre><span class="qt-json-bracket">{</span>
+  <span class="qt-json-key">"code"</span>: <span class="qt-json-number">200</span>,
+  <span class="qt-json-key">"message"</span>: <span class="qt-json-string">"success"</span>,
+  <span class="qt-json-key">"data"</span>: <span class="qt-json-bracket">{</span>
+    <span class="qt-json-key">"id"</span>: <span class="qt-json-number">1</span>,
+    <span class="qt-json-key">"name"</span>: <span class="qt-json-string">"Ada Lovelace"</span>,
+    <span class="qt-json-key">"email"</span>: <span class="qt-json-string">"ada@example.com"</span>,
+    <span class="qt-json-key">"role"</span>: <span class="qt-json-string">"admin"</span>
+  <span class="qt-json-bracket">}</span>,
+  <span class="qt-json-key">"total"</span>: <span class="qt-json-number">156</span>
+<span class="qt-json-bracket">}</span></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== AI Suggestion Bar ===== -->
+      <div class="qt-ai-bar">
+        <svg class="qt-ai-bar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/>
+          <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
+        </svg>
+        <span class="qt-ai-bar-text">AI 建议：根据响应结构，建议补充分页参数断言</span>
+        <div class="qt-ai-bar-actions">
+          <a class="qt-ai-link" href="#">查看建议</a>
+          <a class="qt-ai-link qt-ai-link-dim" href="#">忽略</a>
+        </div>
+      </div>
+
+      <!-- ===== Console Window Card ===== -->
+      <div class="qt-console-card">
+        <div class="qt-console-header">
+          <span class="qt-console-title">控制台</span>
+        </div>
+        <div class="qt-console-body">
+          <div class="qt-console-line qt-console-line-blue">
+            <span>&gt;&gt; GET https://api.example.com/users</span>
+          </div>
+          <div class="qt-console-line qt-console-line-green">
+            <span>&lt;&lt; 200 OK (342ms)</span>
+          </div>
+          <div class="qt-console-line qt-console-line-green">
+            <span>&#10003; status_code: 200 eq 200 &rarr; PASS</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+</body>
+</html>

@@ -1,0 +1,163 @@
+{
+  "project": {
+    "name": "AI 接口自动化测试平台",
+    "path": "e:\\xlwang\\AIRETEST\\ai-test-platform-design",
+    "operation": "create",
+    "deviceType": "desktop",
+    "language": "zh-CN",
+    "dashboardMode": false,
+    "replicationMode": null,
+    "sourceUrl": null,
+    "visualSpecExcerpt": null,
+    "styleDefinitionBrief": "B2B dev-tool dashboard, dark navy sidebar + cool blue primary, Inter + JetBrains Mono, compact data density, professional utilitarian",
+    "designRead": "QA test platform dashboard / developers & QA engineers / industrial utilitarian trust / medium-high density / avoid neon AI hero",
+    "designDials": {
+      "layoutVariance": 2,
+      "motionIntensity": 1,
+      "visualDensity": 4
+    },
+    "styleContinuityAnchors": {
+      "colorSystem": {
+        "primaryColorRole": "single blue brand hue for primary actions and active states",
+        "brandHuePolicy": "no secondary/accent brand hue; identities use neutral or primary tints; method colors via semantic tokens",
+        "stateColors": "semantic success/warning/error/info tokens for status badges and tags"
+      },
+      "shapeSystem": "restrained radius: sm=4px, md=8px, lg=12px, full=9999px",
+      "typographySystem": "Inter for body/display, JetBrains Mono for code/URLs; 14px base, tight leading for data",
+      "spacingSystem": "8px base grid, compact toolbar rhythm",
+      "componentLanguage": "border-led cards, minimal shadow, monospace for code values",
+      "surfaceAndDepth": "border-first surfaces; shadow only for floating layers (modals/dropdowns)",
+      "imageryAndIconography": "SVG icons inline, no decorative images in dashboard",
+      "interactionTone": "crisp, responsive, utilitarian feedback"
+    },
+    "specsConstraints": null,
+    "sharedProjectShellContract": {
+      "navigationShell": "fixed left sidebar (240px, dark navy #0f172a) + sticky top header with page title + date",
+      "primaryColorSystem": "#3b82f6 primary, no secondary brand hue",
+      "typographySystem": "Inter body/display, JetBrains Mono code, 14px base",
+      "radiusScale": "sm=4px, md=8px, lg=12px",
+      "surfaceDepthModel": "border-first cards (1px #e2e8f0), shadow only for elevated/floating",
+      "ctaStyle": "filled blue primary, ghost/outline secondary, 8px radius",
+      "alignmentRules": "8px base grid, 16px section gaps, 24px page padding"
+    },
+    "generationTree": {
+      "root": {
+        "nodeId": "gen-project-shell",
+        "kind": "project-shell",
+        "pageIds": ["page-dashboard", "page-quick-test", "page-test-cases", "page-ai-assistant"],
+        "output": "partials/project-shell.html",
+        "sharedRegions": ["sidebar", "top-header", "content-wrapper"],
+        "privateRegions": [],
+        "mutableSlots": ["activeNavItem", "pageTitle", "pageContent"],
+        "status": "planned",
+        "children": [
+          { "nodeId": "gen-page-dashboard", "kind": "page-leaf", "pageIds": ["page-dashboard"], "output": "pages/dashboard.html", "sharedRegions": [], "privateRegions": ["dashboard body"], "mutableSlots": ["activeNavItem", "pageTitle"], "status": "planned", "children": [] },
+          { "nodeId": "gen-page-quick-test", "kind": "page-leaf", "pageIds": ["page-quick-test"], "output": "pages/quick-test.html", "sharedRegions": [], "privateRegions": ["quick-test body"], "mutableSlots": ["activeNavItem", "pageTitle"], "status": "planned", "children": [] },
+          { "nodeId": "gen-page-test-cases", "kind": "page-leaf", "pageIds": ["page-test-cases"], "output": "pages/test-cases.html", "sharedRegions": [], "privateRegions": ["test-cases body"], "mutableSlots": ["activeNavItem", "pageTitle"], "status": "planned", "children": [] },
+          { "nodeId": "gen-page-ai-assistant", "kind": "page-leaf", "pageIds": ["page-ai-assistant"], "output": "pages/ai-assistant.html", "sharedRegions": [], "privateRegions": ["ai-assistant body"], "mutableSlots": ["activeNavItem", "pageTitle"], "status": "planned", "children": [] }
+        ]
+      }
+    }
+  },
+  "designSource": {
+    "operatingMode": "free-explore",
+    "libraryIdentity": { "name": null, "id": null, "version": null, "scope": null, "path": null, "versionSource": null },
+    "brandCSSPath": "e:\\xlwang\\AIRETEST\\ai-test-platform-design\\colors_and_type.css",
+    "iconAssets": []
+  },
+  "pages": [
+    {
+      "nodeId": "page-dashboard",
+      "title": "仪表盘",
+      "htmlSrc": "pages/dashboard.html",
+      "pageIndex": 1,
+      "pageType": "information-dense",
+      "visualNorthStar": "clean data dashboard with 4 stat cards + recent activity table, minimal decoration, fast data scanning",
+      "compositionPattern": null,
+      "continuityAnchors": {
+        "sidebarTreatment": "dark navy sidebar with active blue highlight",
+        "surfaceModel": "white cards on #f8fafc background, 1px border",
+        "typographyRhythm": "Inter 14px base, mono for values/URLs"
+      },
+      "imagePlan": [],
+      "chartsRequired": false,
+      "componentPlan": { "contractKind": "free-explore", "contractFile": null },
+      "soulElement": "stat cards use colored left-border accent instead of icon prefix for cleaner data scanning"
+    },
+    {
+      "nodeId": "page-quick-test",
+      "title": "快速测试",
+      "htmlSrc": "pages/quick-test.html",
+      "pageIndex": 2,
+      "pageType": "task-driven",
+      "visualNorthStar": "Postman-like interface with URL bar at top, tabbed config below, dark code console at bottom",
+      "compositionPattern": null,
+      "continuityAnchors": {
+        "sidebarTreatment": "dark navy sidebar with active blue highlight",
+        "surfaceModel": "white cards on #f8fafc background, 1px border",
+        "typographyRhythm": "Inter 14px base, mono for URLs/code"
+      },
+      "imagePlan": [],
+      "chartsRequired": false,
+      "componentPlan": { "contractKind": "free-explore", "contractFile": null },
+      "soulElement": "method selector uses colored pill badges (GET=blue, POST=green) instead of plain dropdown for instant visual identification"
+    },
+    {
+      "nodeId": "page-test-cases",
+      "title": "用例管理",
+      "htmlSrc": "pages/test-cases.html",
+      "pageIndex": 3,
+      "pageType": "information-dense",
+      "visualNorthStar": "data table with filters toolbar at top, inline method badges, compact row layout for scanning many cases",
+      "compositionPattern": null,
+      "continuityAnchors": {
+        "sidebarTreatment": "dark navy sidebar with active blue highlight",
+        "surfaceModel": "white cards on #f8fafc background, 1px border",
+        "typographyRhythm": "Inter 14px base, mono for URLs"
+      },
+      "imagePlan": [],
+      "chartsRequired": false,
+      "componentPlan": { "contractKind": "free-explore", "contractFile": null },
+      "soulElement": "colored method pills (GET/POST/PUT/DELETE) as the primary visual anchor in each row for fast scanning"
+    },
+    {
+      "nodeId": "page-ai-assistant",
+      "title": "AI 助手",
+      "htmlSrc": "pages/ai-assistant.html",
+      "pageIndex": 4,
+      "pageType": "task-driven",
+      "visualNorthStar": "chat-style layout with suggestion cards at top, conversation thread below, input bar at bottom",
+      "compositionPattern": null,
+      "continuityAnchors": {
+        "sidebarTreatment": "dark navy sidebar with active blue highlight",
+        "surfaceModel": "white cards on #f8fafc background, 1px border",
+        "typographyRhythm": "Inter 14px base, mono for code blocks"
+      },
+      "imagePlan": [],
+      "chartsRequired": false,
+      "componentPlan": { "contractKind": "free-explore", "contractFile": null },
+      "soulElement": "AI suggestion cards with subtle gradient border-left accent, suggesting intelligence without being flashy"
+    }
+  ],
+  "assets": [],
+  "wiringPlan": [
+    { "sourcePageId": "page-dashboard", "domId": "nav-quick-test", "targetPageId": "page-quick-test", "label": "快速测试" },
+    { "sourcePageId": "page-quick-test", "domId": "nav-test-cases", "targetPageId": "page-test-cases", "label": "用例管理" },
+    { "sourcePageId": "page-test-cases", "domId": "nav-ai", "targetPageId": "page-ai-assistant", "label": "AI 助手" },
+    { "sourcePageId": "page-ai-assistant", "domId": "nav-dashboard", "targetPageId": "page-dashboard", "label": "仪表盘" }
+  ],
+  "hiddenInteractionPlan": [
+    { "sourcePageId": "page-dashboard", "domId": "nav-quick-test-hidden", "targetPageId": "page-quick-test", "hideEdge": true },
+    { "sourcePageId": "page-dashboard", "domId": "nav-test-cases-hidden", "targetPageId": "page-test-cases", "hideEdge": true },
+    { "sourcePageId": "page-dashboard", "domId": "nav-ai-hidden", "targetPageId": "page-ai-assistant", "hideEdge": true },
+    { "sourcePageId": "page-quick-test", "domId": "nav-dashboard-hidden", "targetPageId": "page-dashboard", "hideEdge": true },
+    { "sourcePageId": "page-quick-test", "domId": "nav-test-cases-hidden", "targetPageId": "page-test-cases", "hideEdge": true },
+    { "sourcePageId": "page-quick-test", "domId": "nav-ai-hidden", "targetPageId": "page-ai-assistant", "hideEdge": true },
+    { "sourcePageId": "page-test-cases", "domId": "nav-dashboard-hidden", "targetPageId": "page-dashboard", "hideEdge": true },
+    { "sourcePageId": "page-test-cases", "domId": "nav-quick-test-hidden", "targetPageId": "page-quick-test", "hideEdge": true },
+    { "sourcePageId": "page-test-cases", "domId": "nav-ai-hidden", "targetPageId": "page-ai-assistant", "hideEdge": true },
+    { "sourcePageId": "page-ai-assistant", "domId": "nav-dashboard-hidden", "targetPageId": "page-dashboard", "hideEdge": true },
+    { "sourcePageId": "page-ai-assistant", "domId": "nav-quick-test-hidden", "targetPageId": "page-quick-test", "hideEdge": true },
+    { "sourcePageId": "page-ai-assistant", "domId": "nav-test-cases-hidden", "targetPageId": "page-test-cases", "hideEdge": true }
+  ]
+}

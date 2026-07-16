@@ -1,0 +1,23 @@
+[project]
+name = "airetest-engine"
+version = "0.1.0"
+description = "AIRETEST Test Engine"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.24.0",
+    "sqlglot>=23.0.0",
+    "jsonpath-ng>=1.6.0",
+    "jsonschema>=4.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+# 将 test-engine/ 目录下的源码暴露为 test_engine 包
+# （目录名含连字符无法直接作为 Python 包名，故用 package-dir 映射为下划线名）
+[tool.setuptools]
+packages = ["test_engine"]
+
+[tool.setuptools.package-dir]
+test_engine = "."

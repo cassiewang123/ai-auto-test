@@ -1,0 +1,314 @@
+# WARNING: all fallback credentials in this file are development-only.
+# Production deployments must provide a private .env and pass the static
+# preflight documented in ORACLE部署与迁移.md before starting services.
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle_dev}
+      APP_USER: ${ORACLE_APP_USER:-airetest}
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD:-airetest_dev}
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["object-storage"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-airetest}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-airetest_dev}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: python -m alembic upgrade head
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - AUTO_CREATE_SCHEMA=false
+    depends_on:
+      oracle:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - TASK_DISPATCH_MODE=${TASK_DISPATCH_MODE:-celery}
+      - TASK_FALLBACK_MODE=${TASK_FALLBACK_MODE:-disabled}
+      - TASK_EAGER_IN_TESTS=${TASK_EAGER_IN_TESTS:-true}
+      - CELERY_API_QUEUE=${CELERY_API_QUEUE:-airetest.api}
+      - CELERY_UI_QUEUE=${CELERY_UI_QUEUE:-airetest.ui}
+      - CELERY_PERFORMANCE_QUEUE=${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+      - CELERY_TASK_ACKS_LATE=${CELERY_TASK_ACKS_LATE:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_TERMINATE_SIGNAL=${CELERY_TERMINATE_SIGNAL:-SIGTERM}
+      - SECRET_KEY=${SECRET_KEY:-change-this-to-a-random-secret-key}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-B05PSgXbYda2gKpXbQ_2YvL5P4MzlSlRV03Kpd64NqU=}
+      - SECRET_ENCRYPTION_KEY_VERSION=${SECRET_ENCRYPTION_KEY_VERSION:-v1}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTO_CREATE_SCHEMA=false
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - ARTIFACT_ROOT=/app/uploads
+      - ALLOW_DIRECT_FILE_PATHS=false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  # 默认个人本地拓扑：单 Worker 串行监听全部任务队列。
+  worker-local:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: >-
+      celery -A app.tasks.celery_app worker --loglevel=info
+      --hostname=local@%h --concurrency=1
+      -Q ${CELERY_API_QUEUE:-airetest.api},${CELERY_UI_QUEUE:-airetest.ui},${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - TASK_DISPATCH_MODE=${TASK_DISPATCH_MODE:-celery}
+      - TASK_FALLBACK_MODE=${TASK_FALLBACK_MODE:-disabled}
+      - TASK_EAGER_IN_TESTS=${TASK_EAGER_IN_TESTS:-true}
+      - CELERY_API_QUEUE=${CELERY_API_QUEUE:-airetest.api}
+      - CELERY_UI_QUEUE=${CELERY_UI_QUEUE:-airetest.ui}
+      - CELERY_PERFORMANCE_QUEUE=${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+      - CELERY_TASK_ACKS_LATE=${CELERY_TASK_ACKS_LATE:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_TERMINATE_SIGNAL=${CELERY_TERMINATE_SIGNAL:-SIGTERM}
+      - SECRET_KEY=${SECRET_KEY:-change-this-to-a-random-secret-key}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-B05PSgXbYda2gKpXbQ_2YvL5P4MzlSlRV03Kpd64NqU=}
+      - SECRET_ENCRYPTION_KEY_VERSION=${SECRET_ENCRYPTION_KEY_VERSION:-v1}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTO_CREATE_SCHEMA=false
+      - ARTIFACT_ROOT=/app/uploads
+      - ALLOW_DIRECT_FILE_PATHS=false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --destination local@$${HOSTNAME} --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # 分布式拓扑需显式启用：
+  # docker compose --profile distributed up --scale worker-local=0
+  # Celery Worker（API 测试）
+  worker-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["distributed"]
+    command: >-
+      celery -A app.tasks.celery_app worker --loglevel=info
+      --hostname=api@%h -Q ${CELERY_API_QUEUE:-airetest.api}
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - TASK_DISPATCH_MODE=${TASK_DISPATCH_MODE:-celery}
+      - TASK_FALLBACK_MODE=${TASK_FALLBACK_MODE:-disabled}
+      - TASK_EAGER_IN_TESTS=${TASK_EAGER_IN_TESTS:-true}
+      - CELERY_API_QUEUE=${CELERY_API_QUEUE:-airetest.api}
+      - CELERY_UI_QUEUE=${CELERY_UI_QUEUE:-airetest.ui}
+      - CELERY_PERFORMANCE_QUEUE=${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+      - CELERY_TASK_ACKS_LATE=${CELERY_TASK_ACKS_LATE:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_TERMINATE_SIGNAL=${CELERY_TERMINATE_SIGNAL:-SIGTERM}
+      - SECRET_KEY=${SECRET_KEY:-change-this-to-a-random-secret-key}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-B05PSgXbYda2gKpXbQ_2YvL5P4MzlSlRV03Kpd64NqU=}
+      - SECRET_ENCRYPTION_KEY_VERSION=${SECRET_ENCRYPTION_KEY_VERSION:-v1}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTO_CREATE_SCHEMA=false
+      - ARTIFACT_ROOT=/app/uploads
+      - ALLOW_DIRECT_FILE_PATHS=false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --destination api@$${HOSTNAME} --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Celery Worker（UI 测试）
+  worker-ui:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["distributed"]
+    command: >-
+      celery -A app.tasks.celery_app worker --loglevel=info
+      --hostname=ui@%h -Q ${CELERY_UI_QUEUE:-airetest.ui}
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - TASK_DISPATCH_MODE=${TASK_DISPATCH_MODE:-celery}
+      - TASK_FALLBACK_MODE=${TASK_FALLBACK_MODE:-disabled}
+      - TASK_EAGER_IN_TESTS=${TASK_EAGER_IN_TESTS:-true}
+      - CELERY_API_QUEUE=${CELERY_API_QUEUE:-airetest.api}
+      - CELERY_UI_QUEUE=${CELERY_UI_QUEUE:-airetest.ui}
+      - CELERY_PERFORMANCE_QUEUE=${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+      - CELERY_TASK_ACKS_LATE=${CELERY_TASK_ACKS_LATE:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_TERMINATE_SIGNAL=${CELERY_TERMINATE_SIGNAL:-SIGTERM}
+      - SECRET_KEY=${SECRET_KEY:-change-this-to-a-random-secret-key}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-B05PSgXbYda2gKpXbQ_2YvL5P4MzlSlRV03Kpd64NqU=}
+      - SECRET_ENCRYPTION_KEY_VERSION=${SECRET_ENCRYPTION_KEY_VERSION:-v1}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTO_CREATE_SCHEMA=false
+      - ARTIFACT_ROOT=/app/uploads
+      - ALLOW_DIRECT_FILE_PATHS=false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --destination ui@$${HOSTNAME} --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Celery Worker（性能测试）
+  worker-performance:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["distributed"]
+    command: >-
+      celery -A app.tasks.celery_app worker --loglevel=info
+      --hostname=performance@%h -Q ${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+    environment:
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-oracle+oracledb://airetest:airetest_dev@oracle:1521/?service_name=FREEPDB1}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - TASK_DISPATCH_MODE=${TASK_DISPATCH_MODE:-celery}
+      - TASK_FALLBACK_MODE=${TASK_FALLBACK_MODE:-disabled}
+      - TASK_EAGER_IN_TESTS=${TASK_EAGER_IN_TESTS:-true}
+      - CELERY_API_QUEUE=${CELERY_API_QUEUE:-airetest.api}
+      - CELERY_UI_QUEUE=${CELERY_UI_QUEUE:-airetest.ui}
+      - CELERY_PERFORMANCE_QUEUE=${CELERY_PERFORMANCE_QUEUE:-airetest.performance}
+      - CELERY_TASK_ACKS_LATE=${CELERY_TASK_ACKS_LATE:-true}
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      - CELERY_TERMINATE_SIGNAL=${CELERY_TERMINATE_SIGNAL:-SIGTERM}
+      - SECRET_KEY=${SECRET_KEY:-change-this-to-a-random-secret-key}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-B05PSgXbYda2gKpXbQ_2YvL5P4MzlSlRV03Kpd64NqU=}
+      - SECRET_ENCRYPTION_KEY_VERSION=${SECRET_ENCRYPTION_KEY_VERSION:-v1}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTO_CREATE_SCHEMA=false
+      - ARTIFACT_ROOT=/app/uploads
+      - ALLOW_DIRECT_FILE_PATHS=false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --destination performance@$${HOSTNAME} --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  oracle_data:
+  redis_data:
+  minio_data:
+  uploads_data:

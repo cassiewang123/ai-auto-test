@@ -1,0 +1,9 @@
+# Backend
+__pycache__
+*.pyc
+*.db
+.env
+.venv
+pytest_cache
+.mypy_cache
+.ruff_cache

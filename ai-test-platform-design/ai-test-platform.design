@@ -1,0 +1,74 @@
+{
+  "data": [
+    {
+      "id": "page-dashboard",
+      "title": "仪表盘",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1752192000000,
+      "canvasData": { "x": 0, "y": 0, "group": 0 },
+      "devMetadata": {
+        "htmlSrc": "pages/dashboard.html",
+        "interactions": [
+          { "domId": "nav-quick-test", "targetPageId": "page-quick-test", "hideEdge": false },
+          { "domId": "nav-test-cases", "targetPageId": "page-test-cases", "hideEdge": true },
+          { "domId": "nav-ai", "targetPageId": "page-ai-assistant", "hideEdge": true }
+        ]
+      }
+    },
+    {
+      "id": "page-quick-test",
+      "title": "接口调试",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1752192000000,
+      "canvasData": { "x": 0, "y": 0, "group": 0 },
+      "devMetadata": {
+        "htmlSrc": "pages/quick-test.html",
+        "interactions": [
+          { "domId": "nav-dashboard", "targetPageId": "page-dashboard", "hideEdge": false },
+          { "domId": "nav-test-cases", "targetPageId": "page-test-cases", "hideEdge": true },
+          { "domId": "nav-ai", "targetPageId": "page-ai-assistant", "hideEdge": true }
+        ]
+      }
+    },
+    {
+      "id": "page-test-cases",
+      "title": "用例管理",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1752192000000,
+      "canvasData": { "x": 0, "y": 0, "group": 0 },
+      "devMetadata": {
+        "htmlSrc": "pages/test-cases.html",
+        "interactions": [
+          { "domId": "nav-dashboard", "targetPageId": "page-dashboard", "hideEdge": true },
+          { "domId": "nav-quick-test", "targetPageId": "page-quick-test", "hideEdge": false },
+          { "domId": "nav-ai", "targetPageId": "page-ai-assistant", "hideEdge": true }
+        ]
+      }
+    },
+    {
+      "id": "page-ai-assistant",
+      "title": "AI 助手",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1752192000000,
+      "canvasData": { "x": 0, "y": 0, "group": 0 },
+      "devMetadata": {
+        "htmlSrc": "pages/ai-assistant.html",
+        "interactions": [
+          { "domId": "nav-dashboard", "targetPageId": "page-dashboard", "hideEdge": false },
+          { "domId": "nav-quick-test", "targetPageId": "page-quick-test", "hideEdge": true },
+          { "domId": "nav-test-cases", "targetPageId": "page-test-cases", "hideEdge": true }
+        ]
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "AI 接口自动化测试平台 V2",
+    "designLibrary": null
+  }
+}

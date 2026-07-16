@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 接口自动化测试平台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    /* ===== Reset & Base ===== */
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-body);
+      background: var(--surface-base);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ===== Sidebar (200px, dark #0f172a, fixed left) ===== */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 200px;
+      height: 100vh;
+      background: #0f172a;
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 20;
+      box-shadow: 1px 0 4px rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(203, 213, 225, 0.2);
+      border-radius: 4px;
+    }
+
+    /* Logo area (48px height) */
+    .sidebar-logo {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: var(--font-body);
+      letter-spacing: 0.02em;
+      border-bottom: 1px solid rgba(203, 213, 225, 0.1);
+      flex-shrink: 0;
+    }
+
+    .sidebar-logo svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      color: #99f6e4;
+      margin-right: 8px;
+    }
+
+    /* Nav section */
+    .nav-section {
+      padding: 12px 16px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    /* Nav divider */
+    .nav-divider {
+      height: 1px;
+      background: rgba(203, 213, 225, 0.1);
+      margin: 8px 0;
+    }
+
+    /* Section header (10px uppercase #64748b, 12px top padding) */
+    .nav-section-header {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      padding: 12px 16px 4px 16px;
+      user-select: none;
+    }
+
+    /* Nav item */
+    .nav-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      color: #94a3b8;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 150ms ease, color 150ms ease;
+      text-decoration: none;
+      white-space: nowrap;
+      border-left: 2px solid transparent;
+      border-radius: 6px;
+      margin: 1px 0;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: #1e293b;
+      color: #f9fafb;
+    }
+
+    .nav-item[data-active="true"] {
+      background: #1e293b;
+      color: #ffffff;
+      border-left-color: #4f46e5;
+      border-radius: 0;
+      margin-left: 0;
+      padding-left: 16px;
+    }
+
+    .nav-item svg {
+      width: 16px;
+      height: 16px;
+      margin-right: 10px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .nav-item[data-active="true"] svg {
+      opacity: 1;
+    }
+
+    /* AI nav special teal glow */
+    .nav-item.ai-nav {
+      position: relative;
+    }
+    .nav-item.ai-nav[data-active="true"] {
+      border-left-color: #0d9488;
+      background: rgba(13, 148, 136, 0.1);
+    }
+    .nav-item.ai-nav::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      background: #0d9488;
+      border-radius: 2px;
+      box-shadow: 0 0 8px rgba(13, 148, 136, 0.5);
+      opacity: 0;
+      transition: opacity 150ms ease;
+    }
+    .nav-item.ai-nav[data-active="true"]::before {
+      opacity: 1;
+    }
+    .nav-item.ai-nav svg {
+      color: #99f6e4;
+    }
+    .nav-item.ai-nav[data-active="true"] svg {
+      color: #99f6e4;
+    }
+
+    /* ===== Top Header (white, sticky, 56px height) ===== */
+    .top-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      height: 56px;
+      background: #ffffff;
+      border-bottom: 1px solid #e5e7eb;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #page-title-slot {
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-date {
+      font-size: 13px;
+      color: #6b7280;
+      user-select: none;
+    }
+
+    /* ===== Main Content Area ===== */
+    .main-content {
+      margin-left: 200px;
+      min-height: calc(100vh - 56px);
+      padding: 24px;
+      background: var(--surface-base);
+    }
+
+    .content-card {
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 24px;
+      min-height: 400px;
+    }
+
+    #page-content-slot {
+      min-height: 400px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Fixed Left Sidebar (200px, dark #0f172a) ===== -->
+  <aside class="sidebar">
+    <!-- Logo area (48px height): "AI 测试平台" centered, white, bold 15px -->
+    <div class="sidebar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"/>
+      </svg>
+      AI 测试平台
+    </div>
+
+    <nav class="nav-section">
+      <!-- 1. 仪表盘 -->
+      <a class="nav-item" data-nav-key="dashboard" data-dom-id="nav-dashboard" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        仪表盘
+      </a>
+
+      <!-- 2. section divider -->
+      <div class="nav-divider"></div>
+
+      <!-- 3. Section label: "API 测试" -->
+      <div class="nav-section-header">API 测试</div>
+
+      <a class="nav-item" data-nav-key="api-list" data-dom-id="nav-api-list" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        接口定义
+      </a>
+
+      <a class="nav-item" data-nav-key="quick-test" data-dom-id="nav-quick-test" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        接口调试
+      </a>
+
+      <a class="nav-item" data-nav-key="test-cases" data-dom-id="nav-test-cases" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        用例管理
+      </a>
+
+      <a class="nav-item" data-nav-key="test-plans" data-dom-id="nav-test-plans" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        测试计划
+      </a>
+
+      <a class="nav-item" data-nav-key="import" data-dom-id="nav-import" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        接口导入
+      </a>
+
+      <a class="nav-item" data-nav-key="mock-service" data-dom-id="nav-mock-service" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Mock 服务
+      </a>
+
+      <!-- 4. Section label: "UI 测试" -->
+      <div class="nav-section-header">UI 测试</div>
+
+      <a class="nav-item" data-nav-key="ui-test-cases" data-dom-id="nav-ui-test-cases" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        UI 用例管理
+      </a>
+
+      <a class="nav-item" data-nav-key="ui-elements" data-dom-id="nav-ui-elements" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/>
+        </svg>
+        元素对象库
+      </a>
+
+      <a class="nav-item" data-nav-key="ui-test-records" data-dom-id="nav-ui-test-records" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        调用记录
+      </a>
+
+      <a class="nav-item" data-nav-key="ui-test-logs" data-dom-id="nav-ui-test-logs" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+        </svg>
+        日志查询
+      </a>
+
+      <!-- 5. Section label: "性能测试" -->
+      <div class="nav-section-header">性能测试</div>
+
+      <a class="nav-item" data-nav-key="perf-tests" data-dom-id="nav-perf-tests" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        压测场景
+      </a>
+
+      <a class="nav-item" data-nav-key="perf-reports" data-dom-id="nav-perf-reports" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        性能报告
+      </a>
+
+      <!-- 6. section divider -->
+      <div class="nav-divider"></div>
+
+      <!-- 7. 测试报告 -->
+      <a class="nav-item" data-nav-key="reports" data-dom-id="nav-reports" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/>
+        </svg>
+        测试报告
+      </a>
+
+      <!-- 8. 定时任务 -->
+      <a class="nav-item" data-nav-key="scheduled-tasks" data-dom-id="nav-scheduled-tasks" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        定时任务
+      </a>
+
+      <!-- 9. 环境管理 -->
+      <a class="nav-item" data-nav-key="environments" data-dom-id="nav-environments" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+        </svg>
+        环境管理
+      </a>
+
+      <!-- 10. 项目管理 -->
+      <a class="nav-item" data-nav-key="projects" data-dom-id="nav-projects" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        项目管理
+      </a>
+
+      <!-- 11. 历史记录 -->
+      <a class="nav-item" data-nav-key="history" data-dom-id="nav-history" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/>
+        </svg>
+        历史记录
+      </a>
+
+      <!-- 12. section divider -->
+      <div class="nav-divider"></div>
+
+      <!-- 13. AI 助手 (with teal glow ring) -->
+      <a class="nav-item ai-nav" data-nav-key="ai" data-dom-id="nav-ai" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l2 4 4.5.7-3.3 3.1.8 4.5L12 12l-4 2.3.8-4.5L5.5 6.7 10 6z"/>
+          <path d="M12 14v4"/><circle cx="12" cy="20" r="1" fill="currentColor"/>
+        </svg>
+        AI 助手
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ===== Sticky Top Header (white, 56px, box-shadow) ===== -->
+  <header class="top-header">
+    <div class="header-left">
+      <span id="page-title-slot">Page Title</span>
+    </div>
+    <div class="header-right">
+      <span class="header-date">2026-07-08 星期三</span>
+    </div>
+  </header>
+
+  <!-- ===== Main Content Area (margin-left: 200px, white card, 8px radius) ===== -->
+  <main class="main-content">
+    <div class="content-card">
+      <div id="page-content-slot"></div>
+    </div>
+  </main>
+
+</body>
+</html>

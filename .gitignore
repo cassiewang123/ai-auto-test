@@ -1,0 +1,23 @@
+# Docker
+.env
+.env.local
+.env.oracle
+.runtime/
+*.db
+postgres_data/
+redis_data/
+minio_data/
+uploads/
+.uploads/
+!backend/uploads/
+backend/uploads/*
+!backend/uploads/.gitkeep
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.trae-html-share-packages/
+(null)/
+/2.0.0
