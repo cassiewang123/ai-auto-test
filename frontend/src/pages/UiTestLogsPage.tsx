@@ -36,14 +36,28 @@ const levelConfig: Record<string, { color: string; text: string }> = {
 interface LogItem {
   id?: string;
   executed_at?: string;
+  timestamp?: string;
   level?: string;
   case_title?: string;
   project_name?: string;
-  message?: string;
-  step_info?: string;
+  message?: unknown;
+  step_info?: unknown;
   case_id?: string;
   record_id?: string;
   [key: string]: any;
+}
+
+function formatLogValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export default function UiTestLogsPage() {
@@ -108,8 +122,10 @@ export default function UiTestLogsPage() {
       title: '时间',
       dataIndex: 'executed_at',
       width: 170,
-      render: (t: string) =>
-        t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-',
+      render: (t: string, record) => {
+        const timestamp = t || record.timestamp;
+        return timestamp ? dayjs(timestamp).format('YYYY-MM-DD HH:mm:ss') : '-';
+      },
     },
     {
       title: '级别',
@@ -140,28 +156,32 @@ export default function UiTestLogsPage() {
       title: '消息内容',
       dataIndex: 'message',
       ellipsis: true,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <span style={{ wordBreak: 'break-all' }}>{v}</span>
+      render: (v: unknown) => {
+        const text = formatLogValue(v);
+        return text ? (
+          <Tooltip title={text}>
+            <span style={{ wordBreak: 'break-all' }}>{text}</span>
           </Tooltip>
         ) : (
           '-'
-        ),
+        );
+      },
     },
     {
       title: '步骤信息',
       dataIndex: 'step_info',
       width: 150,
       ellipsis: true,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <code style={{ fontSize: 12 }}>{v}</code>
+      render: (v: unknown) => {
+        const text = formatLogValue(v);
+        return text ? (
+          <Tooltip title={text}>
+            <code style={{ fontSize: 12 }}>{text}</code>
           </Tooltip>
         ) : (
           '-'
-        ),
+        );
+      },
     },
     {
       title: '操作',

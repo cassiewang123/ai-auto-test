@@ -1,5 +1,8 @@
-﻿[CmdletBinding()]
-param()
+[CmdletBinding()]
+param(
+    [ValidateRange(1024, 65535)]
+    [int]$BackendPort = 8001
+)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
@@ -20,42 +23,44 @@ try {
         -CommandMarker "vite.js"
 
     $backendText = if ($backend.Exists -and $backend.Managed) {
-        "运行中（PID $($backend.ProcessId)）"
+        "running (PID $($backend.ProcessId))"
     }
     elseif ($backend.Exists) {
-        "PID 文件已被其他进程复用"
+        "PID file belongs to another process"
     }
     else {
-        "未运行"
+        "not running"
     }
     $frontendText = if ($frontend.Exists -and $frontend.Managed) {
-        "运行中（PID $($frontend.ProcessId)）"
+        "running (PID $($frontend.ProcessId))"
     }
     elseif ($frontend.Exists) {
-        "PID 文件已被其他进程复用"
+        "PID file belongs to another process"
     }
     else {
-        "未运行"
+        "not running"
     }
 
-    $backendReady = Test-AiretestHttp -Uri "http://127.0.0.1:8000/health/ready"
+    $backendReady = Test-AiretestHttp `
+        -Uri "http://127.0.0.1:$BackendPort/health/ready"
     $frontendReady = Test-AiretestHttp -Uri "http://127.0.0.1:5173"
 
-    Write-Host "AIRETEST 轻量单机状态："
-    Write-Host "  后端进程：$backendText"
-    Write-Host "  后端 Ready：$backendReady"
-    Write-Host "  前端进程：$frontendText"
-    Write-Host "  前端页面：$frontendReady"
+    Write-Host "AIRETEST local status:"
+    Write-Host "  Backend process: $backendText"
+    Write-Host "  Backend URL: http://127.0.0.1:$BackendPort"
+    Write-Host "  Backend ready: $backendReady"
+    Write-Host "  Frontend process: $frontendText"
+    Write-Host "  Frontend ready: $frontendReady"
 
     if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
         $database = Get-Item -LiteralPath $databasePath
-        Write-Host "  SQLite：$($database.FullName)（$($database.Length) bytes）"
+        Write-Host "  SQLite: $($database.FullName) ($($database.Length) bytes)"
     }
     else {
-        Write-Host "  SQLite：尚未创建"
+        Write-Host "  SQLite: not created"
     }
-    Write-Host "  Artifact：$artifactPath"
-    Write-Host "  日志目录：$logDir"
+    Write-Host "  Artifacts: $artifactPath"
+    Write-Host "  Logs: $logDir"
 
     if (-not $backendReady) {
         exit 1
@@ -63,6 +68,6 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Host ("[错误] {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host ("[ERROR] {0}" -f $_.Exception.Message) -ForegroundColor Red
     exit 1
 }

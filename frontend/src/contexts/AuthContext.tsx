@@ -51,6 +51,17 @@ interface PageData<T = any> extends ApiResponse<T[]> {
   page_size: number;
 }
 
+function unwrapApiData<T>(response: ApiResponse<T> | T): T {
+  if (
+    response &&
+    typeof response === 'object' &&
+    'data' in response
+  ) {
+    return (response as ApiResponse<T>).data;
+  }
+  return response as T;
+}
+
 export interface UserCreatePayload {
   username: string;
   email: string;
@@ -180,7 +191,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = useCallback(async () => {
     try {
       const res = await authApi.getMe();
-      setUser(res.data);
+      const currentUser = unwrapApiData<UserInfo>(res);
+      if (!currentUser?.id || !currentUser.username) {
+        throw new Error('认证服务返回了无效的用户信息');
+      }
+      setUser(currentUser);
     } catch {
       logout();
     }
@@ -198,10 +213,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (username: string, password: string) => {
       const res = await authApi.login(username, password);
-      const t = res.data.access_token;
+      const tokenData = unwrapApiData<TokenData>(res);
+      if (!tokenData?.access_token || !tokenData.user) {
+        throw new Error('登录服务响应格式异常，请确认 AIRETEST 后端已启动');
+      }
+      const t = tokenData.access_token;
       localStorage.setItem(TOKEN_KEY, t);
       setToken(t);
-      setUser(res.data.user);
+      setUser(tokenData.user);
     },
     []
   );

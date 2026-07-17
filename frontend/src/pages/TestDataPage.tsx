@@ -22,8 +22,7 @@ import {
   ReloadOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
-import { testCaseApi, environmentApi } from '../services/api';
+import { apiClient, testCaseApi, environmentApi } from '../services/api';
 
 const { TextArea } = Input;
 
@@ -73,29 +72,15 @@ interface EnvironmentOption {
 }
 
 // ========== 本地 API（不能修改 api.ts，在此定义） ==========
-const localApi = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-localApi.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const msg = error.response?.data?.message || error.message || '请求失败';
-    return Promise.reject(new Error(msg));
-  }
-);
-
 const testDataApi = {
   list: (params?: { test_case_id?: string; page?: number; page_size?: number }) =>
-    localApi.get('/test-data', { params }),
-  get: (id: string) => localApi.get(`/test-data/${id}`),
-  create: (data: any) => localApi.post('/test-data', data),
-  update: (id: string, data: any) => localApi.put(`/test-data/${id}`, data),
-  delete: (id: string) => localApi.delete(`/test-data/${id}`),
-  preview: (id: string) => localApi.post(`/test-data/${id}/preview`),
-  execute: (data: any) => localApi.post('/test-data/execute', data),
+    apiClient.get('/test-data', { params }),
+  get: (id: string) => apiClient.get(`/test-data/${id}`),
+  create: (data: any) => apiClient.post('/test-data', data),
+  update: (id: string, data: any) => apiClient.put(`/test-data/${id}`, data),
+  delete: (id: string) => apiClient.delete(`/test-data/${id}`),
+  preview: (id: string) => apiClient.post(`/test-data/${id}/preview`),
+  execute: (data: any) => apiClient.post('/test-data/execute', data),
 };
 
 // ========== 客户端解析辅助函数 ==========

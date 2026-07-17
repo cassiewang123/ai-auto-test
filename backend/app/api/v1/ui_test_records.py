@@ -322,6 +322,7 @@ def search_logs(
                     "level": "error",
                     "message": record.error,
                     "timestamp": executed_at_str,
+                    "executed_at": executed_at_str,
                     "step_info": None,
                 })
 
@@ -356,6 +357,7 @@ def search_logs(
                 "level": log_level,
                 "message": message,
                 "timestamp": executed_at_str,
+                "executed_at": executed_at_str,
                 "step_info": step_info,
             })
 

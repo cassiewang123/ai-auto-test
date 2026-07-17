@@ -98,8 +98,22 @@ export default function UiTestSuitesPage() {
   async function loadAllCases() {
     try {
       // 拉取所有用例供套件选择
-      const res = await uiTestCaseApi.list({ page: 1, page_size: 200 });
-      setAllCases(res.data || []);
+      const pageSize = 100;
+      const firstPage = await uiTestCaseApi.list({ page: 1, page_size: pageSize });
+      const cases = [...(firstPage.data || [])];
+      const total = firstPage.total || cases.length;
+
+      for (let currentPage = 2; cases.length < total; currentPage += 1) {
+        const nextPage = await uiTestCaseApi.list({
+          page: currentPage,
+          page_size: pageSize,
+        });
+        const items = nextPage.data || [];
+        if (items.length === 0) break;
+        cases.push(...items);
+      }
+
+      setAllCases(cases);
     } catch (e: any) {
       message.error(e.message);
     }

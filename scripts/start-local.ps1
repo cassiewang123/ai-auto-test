@@ -2,6 +2,9 @@
 param(
     [switch]$SkipFrontend,
 
+    [ValidateRange(1024, 65535)]
+    [int]$BackendPort = 8001,
+
     [ValidateRange(15, 300)]
     [int]$WaitSeconds = 90
 )
@@ -76,7 +79,11 @@ print(s.ARTIFACT_ROOT)
     }
 
     $previousDatabaseUrl = $env:DATABASE_URL
+    $previousBackendPort = $env:AIRETEST_BACKEND_PORT
+    $previousApiTarget = $env:AIRETEST_API_TARGET
     $env:DATABASE_URL = $migrationUrl
+    $env:AIRETEST_BACKEND_PORT = [string]$BackendPort
+    $env:AIRETEST_API_TARGET = "http://127.0.0.1:$BackendPort"
     try {
         Write-Host "正在升级 SQLite 数据库..."
         Push-Location $backendDir
@@ -96,8 +103,8 @@ print(s.ARTIFACT_ROOT)
             Write-Host "后端已运行，PID：$($backend.ProcessId)"
         }
         else {
-            if (Test-AiretestPortInUse -Port 8000) {
-                throw "端口 8000 已被非 AIRETEST 进程占用。"
+            if (Test-AiretestPortInUse -Port $BackendPort) {
+                throw "端口 $BackendPort 已被非 AIRETEST 进程占用。"
             }
             Remove-Item -LiteralPath $backendPidFile -Force `
                 -ErrorAction SilentlyContinue
@@ -116,7 +123,7 @@ print(s.ARTIFACT_ROOT)
             Write-Host "后端启动中，PID：$($backendProcess.Id)"
         }
 
-        if (-not (Wait-AiretestHttp -Uri "http://127.0.0.1:8000/health/ready" `
+        if (-not (Wait-AiretestHttp -Uri "http://127.0.0.1:$BackendPort/health/ready" `
             -TimeoutSeconds $WaitSeconds)) {
             $errorTail = if (Test-Path -LiteralPath (Join-Path $logDir "backend.err.log")) {
                 (Get-Content -LiteralPath (Join-Path $logDir "backend.err.log") `
@@ -185,6 +192,8 @@ print(s.ARTIFACT_ROOT)
     }
     finally {
         $env:DATABASE_URL = $previousDatabaseUrl
+        $env:AIRETEST_BACKEND_PORT = $previousBackendPort
+        $env:AIRETEST_API_TARGET = $previousApiTarget
     }
 
     Write-Host ""
@@ -192,8 +201,8 @@ print(s.ARTIFACT_ROOT)
     if (-not $SkipFrontend) {
         Write-Host "  前端：http://localhost:5173"
     }
-    Write-Host "  后端：http://localhost:8000"
-    Write-Host "  API 文档：http://localhost:8000/docs"
+    Write-Host "  后端：http://localhost:$BackendPort"
+    Write-Host "  API 文档：http://localhost:$BackendPort/docs"
     Write-Host "  数据库：$migrationUrl"
     Write-Host "  日志：$logDir"
 }

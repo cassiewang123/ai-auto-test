@@ -3,6 +3,7 @@
 保持 Python 默认的 ProactorEventLoop；Playwright 在 Windows 上需要它创建
 浏览器子进程。这里只提前初始化 WinSock，避免旧环境中的 WinError 10038。
 """
+import os
 import sys
 
 if sys.platform == "win32":
@@ -17,10 +18,11 @@ if sys.platform == "win32":
 import uvicorn
 
 if __name__ == "__main__":
+    port = int(os.getenv("AIRETEST_BACKEND_PORT", "8001"))
     uvicorn.run(
         "app.main:app",
         host="127.0.0.1",
-        port=8000,
+        port=port,
         reload=False,
         loop="asyncio",
     )

@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
+const apiTarget = process.env.AIRETEST_API_TARGET || 'http://127.0.0.1:8001'
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -8,7 +10,7 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api/v1': {
-        target: 'http://127.0.0.1:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
     },
