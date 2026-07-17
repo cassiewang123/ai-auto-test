@@ -29,7 +29,7 @@ const methodColor: Record<string, string> = {
   GET: 'green', POST: 'orange', PUT: 'blue', PATCH: 'purple', DELETE: 'red',
 };
 const statusColor: Record<string, string> = {
-  passed: 'green', failed: 'red', error: 'orange',
+  passed: 'green', failed: 'red', error: 'orange', skipped: 'default',
 };
 
 export default function HistoryPage() {
@@ -95,7 +95,7 @@ export default function HistoryPage() {
   async function handleClear() {
     try {
       await historyApi.clear();
-      message.success('已清空全部历史记录');
+      message.success('已清空全部调用历史，执行任务记录已保留');
       loadData(1, pageSize);
       loadStats();
     } catch (e: any) {
@@ -160,8 +160,11 @@ export default function HistoryPage() {
         }
         extra={
           <Space>
-            <Popconfirm title="确认清空全部历史记录？此操作不可恢复" onConfirm={handleClear}>
-              <Button danger icon={<ClearOutlined />}>清空全部</Button>
+            <Popconfirm
+              title="确认清空全部调用历史？执行任务记录不会被删除，此操作不可恢复"
+              onConfirm={handleClear}
+            >
+              <Button danger icon={<ClearOutlined />}>清空调用历史</Button>
             </Popconfirm>
           </Space>
         }
@@ -178,6 +181,7 @@ export default function HistoryPage() {
               { label: 'passed', value: 'passed' },
               { label: 'failed', value: 'failed' },
               { label: 'error', value: 'error' },
+              { label: 'skipped', value: 'skipped' },
             ]}
           />
           <Select
@@ -276,12 +280,12 @@ export default function HistoryPage() {
             {
               title: '操作',
               width: 60,
-              render: (_, record) => (
-                <Popconfirm title="确认删除？" onConfirm={(e) => { e?.stopPropagation(); handleDelete(record.id); }}>
-                  <Button size="small" danger icon={<DeleteOutlined />}
-                    onClick={(e) => e.stopPropagation()} />
-                </Popconfirm>
-              ),
+              render: (_, record) => record.deletable ? (
+                  <Popconfirm title="确认删除？" onConfirm={(e) => { e?.stopPropagation(); handleDelete(record.id); }}>
+                    <Button size="small" danger icon={<DeleteOutlined />}
+                      onClick={(e) => e.stopPropagation()} />
+                  </Popconfirm>
+                ) : null,
             },
           ]}
         />
@@ -289,7 +293,7 @@ export default function HistoryPage() {
 
       {/* 详情 Modal */}
       <Modal
-        title="调用详情"
+        title={detail?.record_kind === 'execution_job' ? '执行任务详情' : '调用详情'}
         open={detailOpen}
         onCancel={() => setDetailOpen(false)}
         footer={null}

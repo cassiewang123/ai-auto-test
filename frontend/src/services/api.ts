@@ -140,16 +140,24 @@ export const reportApi = {
 };
 
 // ========== 报告导出 ==========
-// 导出使用 window.open 下载文件流，这里提供 URL 构造方法
+async function downloadReport(runId: string, format: 'html' | 'pdf') {
+  const blob = await api.get<unknown, Blob>(
+    `/report-export/${runId}/${format}`,
+    { responseType: 'blob' }
+  );
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `测试报告_${runId.slice(0, 8)}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export const reportExportApi = {
-  // 导出 HTML 报告
-  exportHtmlUrl: (runId: string) => `/api/v1/report-export/${runId}/html`,
-  // 导出 PDF 报告
-  exportPdfUrl: (runId: string) => `/api/v1/report-export/${runId}/pdf`,
-  // 触发 HTML 导出
-  exportHtml: (runId: string) => window.open(reportExportApi.exportHtmlUrl(runId), '_blank'),
-  // 触发 PDF 导出
-  exportPdf: (runId: string) => window.open(reportExportApi.exportPdfUrl(runId), '_blank'),
+  exportHtml: (runId: string) => downloadReport(runId, 'html'),
+  exportPdf: (runId: string) => downloadReport(runId, 'pdf'),
 };
 
 // ========== 接口覆盖率 ==========
@@ -287,6 +295,8 @@ export const executionApi = {
 // ========== 历史调用记录 ==========
 export interface CallHistoryRecord {
   id: string;
+  record_kind: 'call_history' | 'execution_job';
+  deletable: boolean;
   method: string;
   url: string;
   status_code: number | null;
@@ -295,8 +305,10 @@ export interface CallHistoryRecord {
   has_files: boolean;
   source: string;
   test_case_id: string | null;
+  project_id?: string | null;
   error_message: string | null;
   executed_at: string;
+  title?: string | null;
   // 详情字段
   headers?: Record<string, string>;
   params?: Record<string, any>;
@@ -313,6 +325,7 @@ export interface HistoryStats {
   passed: number;
   failed: number;
   error: number;
+  skipped: number;
   pass_rate: number;
   avg_duration: number;
 }
@@ -324,13 +337,20 @@ export const historyApi = {
     status?: string;
     method?: string;
     url?: string;
+    project_id?: string;
   }) => api.get<unknown, PageResponse<CallHistoryRecord>>('/history', { params }),
   get: (id: string) =>
     api.get<unknown, ApiResponse<CallHistoryRecord>>(`/history/${id}`),
   delete: (id: string) =>
     api.delete<unknown, ApiResponse<any>>(`/history/${id}`),
-  clear: () => api.delete<unknown, ApiResponse<any>>('/history'),
-  stats: () => api.get<unknown, ApiResponse<HistoryStats>>('/history/stats'),
+  clear: (projectId?: string) =>
+    api.delete<unknown, ApiResponse<any>>('/history', {
+      params: projectId ? { project_id: projectId } : undefined,
+    }),
+  stats: (projectId?: string) =>
+    api.get<unknown, ApiResponse<HistoryStats>>('/history/stats', {
+      params: projectId ? { project_id: projectId } : undefined,
+    }),
 };
 
 // ========== 接口导入 ==========

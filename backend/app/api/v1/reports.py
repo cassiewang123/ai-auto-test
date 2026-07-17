@@ -1,8 +1,8 @@
 """测试报告 API.
 
 提供两套报告能力：
-1. 基于批次汇总（TestRunSummary）的近期执行列表、单次执行详情、通过率趋势；
-2. 基于 TestResult 明细的按 run_id 查询结果、汇总统计、历史趋势（按天聚合）。
+1. 以 ExecutionJob 为主、合并 TestRunSummary 的近期执行报告；
+2. 基于 TestResult 明细的旧版查询、汇总与历史趋势。
 """
 
 from __future__ import annotations
@@ -11,12 +11,13 @@ from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.database import get_db
 from app.models import TestCase, TestResult
+from app.models.execution_job import ExecutionJob
 from app.models.test_run_summary import TestRunSummary
 from app.models.user import User
 from app.schemas.common import DataResponse, PageResponse
@@ -28,6 +29,11 @@ from app.schemas.test_result import (
     TestRunSummary as TestRunSummarySchema,
 )
 from app.services.auth_service import get_current_user
+from app.services.execution.job_reporting import (
+    normalize_job_run,
+    scoped_execution_jobs,
+    sort_created_at,
+)
 from app.services.project_access import (
     ensure_project_role,
     ensure_resource_role,
@@ -36,6 +42,8 @@ from app.services.project_access import (
 from app.services.security.data_redaction import redact_sensitive_data
 
 router = APIRouter()
+
+_REPORTABLE_JOB_STATUSES = {"succeeded", "failed", "cancelled", "timed_out"}
 
 
 def _status_sum(status: str):
@@ -83,8 +91,143 @@ def _scoped_run_statement(
     return stmt
 
 
+def _legacy_result_details(db: Session, run_id: str) -> list[dict]:
+    results = db.execute(select(TestResult).where(TestResult.run_id == run_id)).scalars().all()
+    detail_results = []
+    for result in results:
+        test_case = db.get(TestCase, result.test_case_id)
+        detail_results.append(
+            {
+                "case_id": result.test_case_id,
+                "title": test_case.title if test_case else "(已删除)",
+                "method": test_case.method if test_case else "",
+                "url": test_case.url if test_case else "",
+                "status": result.status,
+                "duration": round(result.duration, 4),
+                "status_code": (
+                    result.response_snapshot.get("status_code")
+                    if result.response_snapshot
+                    else None
+                ),
+                "error": result.error_message,
+            }
+        )
+    return detail_results
+
+
+def _normalize_legacy_run(
+    db: Session,
+    summary: TestRunSummary,
+    *,
+    include_results: bool = False,
+) -> dict:
+    total = summary.total or 0
+    if summary.failed:
+        status = "failed"
+    elif summary.error:
+        status = "error"
+    elif total > 0 and summary.skipped == total:
+        status = "skipped"
+    else:
+        status = "passed"
+
+    run = {
+        "run_id": summary.run_id,
+        "project_id": summary.project_id,
+        "source": summary.source,
+        "total": total,
+        "passed": summary.passed or 0,
+        "failed": summary.failed or 0,
+        "error": summary.error or 0,
+        "skipped": summary.skipped or 0,
+        "duration": round(summary.duration or 0.0, 3),
+        "created_at": summary.created_at,
+        "pass_rate": round((summary.passed or 0) / total * 100, 1) if total else 0.0,
+        "status": status,
+        "summary": summary.summary,
+    }
+    if include_results:
+        run["results"] = _legacy_result_details(db, summary.run_id)
+    return run
+
+
+def _list_run_payload(run: dict) -> dict:
+    """Return the stable, compact contract consumed by the reports page."""
+    keys = (
+        "run_id",
+        "job_id",
+        "project_id",
+        "source",
+        "job_type",
+        "resource_id",
+        "title",
+        "total",
+        "passed",
+        "failed",
+        "error",
+        "skipped",
+        "duration",
+        "created_at",
+        "pass_rate",
+        "status",
+        "job_status",
+        "error_message",
+    )
+    return {key: run.get(key) for key in keys if key in run}
+
+
+def _detail_payload(run: dict) -> dict:
+    summary = _list_run_payload(run)
+    if run.get("summary") is not None:
+        summary["result_summary"] = run["summary"]
+    return {
+        "run_id": run["run_id"],
+        "summary": summary,
+        "results": run.get("results") or [],
+    }
+
+
+def _merged_runs(
+    db: Session,
+    user: User,
+    *,
+    project_id: str | None = None,
+) -> list[dict]:
+    """Merge reportable jobs with legacy summaries; ExecutionJob wins duplicates."""
+    legacy_rows = (
+        db.execute(
+            _scoped_run_statement(
+                user,
+                project_id=project_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    merged = {
+        row.run_id: _normalize_legacy_run(db, row)
+        for row in legacy_rows
+    }
+
+    jobs = (
+        db.execute(
+            scoped_execution_jobs(
+                user,
+                project_id=project_id,
+                reportable_only=True,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for job in jobs:
+        merged[job.id] = normalize_job_run(db, job)
+
+    return sorted(merged.values(), key=sort_created_at, reverse=True)
+
+
 # ---------------------------------------------------------------------------
-# 基于批次汇总（TestRunSummary）的新报告接口
+# 统一执行任务与旧批次汇总的新报告接口
 # ---------------------------------------------------------------------------
 
 
@@ -98,33 +241,8 @@ def list_recent_runs(
     """获取最近 N 次执行批次（用于趋势图）."""
     if project_id is not None:
         ensure_project_role(db, current_user, project_id, "viewer")
-    runs = (
-        db.execute(
-            _scoped_run_statement(
-                current_user,
-                project_id=project_id,
-            )
-            .order_by(desc(TestRunSummary.created_at))
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
-    data = [
-        {
-            "run_id": r.run_id,
-            "project_id": r.project_id,
-            "total": r.total,
-            "passed": r.passed,
-            "failed": r.failed,
-            "error": r.error,
-            "duration": round(r.duration, 3),
-            "source": r.source,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "pass_rate": round(r.passed / r.total * 100, 1) if r.total > 0 else 0,
-        }
-        for r in runs
-    ]
+    runs = _merged_runs(db, current_user, project_id=project_id)[:limit]
+    data = [_list_run_payload(run) for run in runs]
     return DataResponse(data=data)
 
 
@@ -135,47 +253,20 @@ def get_run_detail(
     current_user: User = Depends(get_current_user),
 ):
     """获取单次执行的详细信息（用于饼图和详情列表）."""
+    job = db.get(ExecutionJob, run_id)
+    if job is not None and job.status in _REPORTABLE_JOB_STATUSES:
+        ensure_resource_role(db, current_user, job, "viewer")
+        run = normalize_job_run(db, job, include_results=True)
+        return DataResponse(data=redact_sensitive_data(_detail_payload(run)))
+
     summary = _get_run_summary(db, run_id)
     if not summary:
         if not current_user.is_superuser:
             raise NotFoundError("执行记录", run_id)
         return DataResponse(data={"error": "未找到执行记录"})
     ensure_resource_role(db, current_user, summary, "viewer")
-    # 获取该批次的所有用例结果
-    results = db.execute(select(TestResult).where(TestResult.run_id == run_id)).scalars().all()
-    detail_results = []
-    for r in results:
-        case = db.get(TestCase, r.test_case_id)
-        detail_results.append(
-            {
-                "case_id": r.test_case_id,
-                "title": case.title if case else "(已删除)",
-                "method": case.method if case else "",
-                "url": case.url if case else "",
-                "status": r.status,
-                "duration": round(r.duration, 4),
-                "status_code": r.response_snapshot.get("status_code") if r.response_snapshot else None,
-                "error": r.error_message,
-            }
-        )
-    return DataResponse(
-        data=redact_sensitive_data(
-            {
-                "run_id": run_id,
-                "summary": {
-                    "total": summary.total,
-                    "passed": summary.passed,
-                    "failed": summary.failed,
-                    "error": summary.error,
-                    "duration": round(summary.duration, 3),
-                    "created_at": summary.created_at.isoformat() if summary.created_at else None,
-                    "source": summary.source,
-                    "project_id": summary.project_id,
-                },
-                "results": detail_results,
-            }
-        )
-    )
+    run = _normalize_legacy_run(db, summary, include_results=True)
+    return DataResponse(data=redact_sensitive_data(_detail_payload(run)))
 
 
 @router.get("/trend", response_model=DataResponse[dict])
@@ -188,25 +279,21 @@ def get_trend(
     """获取趋势数据（近 N 次执行的通过率趋势）."""
     if project_id is not None:
         ensure_project_role(db, current_user, project_id, "viewer")
-    runs = (
-        db.execute(
-            _scoped_run_statement(
-                current_user,
-                project_id=project_id,
-            )
-            .order_by(desc(TestRunSummary.created_at))
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
-    runs = list(reversed(runs))  # 按时间正序
+    runs = list(reversed(_merged_runs(db, current_user, project_id=project_id)[:limit]))
     data = {
-        "labels": [r.created_at.strftime("%m-%d %H:%M") if r.created_at else "" for r in runs],
-        "pass_rates": [round(r.passed / r.total * 100, 1) if r.total > 0 else 0 for r in runs],
-        "totals": [r.total for r in runs],
-        "passed": [r.passed for r in runs],
-        "failed": [r.failed + r.error for r in runs],
+        "labels": [
+            run["created_at"].strftime("%m-%d %H:%M")
+            if isinstance(run.get("created_at"), datetime)
+            else ""
+            for run in runs
+        ],
+        "pass_rates": [run.get("pass_rate", 0.0) for run in runs],
+        "totals": [run.get("total", 0) for run in runs],
+        "passed": [run.get("passed", 0) for run in runs],
+        "failed": [
+            run.get("failed", 0) + run.get("error", 0)
+            for run in runs
+        ],
     }
     return DataResponse(data=data)
 

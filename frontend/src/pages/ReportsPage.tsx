@@ -320,6 +320,18 @@ export default function ReportsPage() {
     }
   }
 
+  async function exportReport(runId: string, format: 'html' | 'pdf') {
+    try {
+      if (format === 'html') {
+        await reportExportApi.exportHtml(runId);
+      } else {
+        await reportExportApi.exportPdf(runId);
+      }
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
+
   const detailResults: any[] = detail
     ? pick(detail, ['results', 'test_results', 'items']) || []
     : [];
@@ -435,7 +447,7 @@ export default function ReportsPage() {
               size="small"
               type="link"
               icon={<FileTextOutlined />}
-              onClick={() => reportExportApi.exportHtml(runId)}
+              onClick={() => exportReport(runId, 'html')}
               data-testid="export-html-btn"
             >
               导出HTML
@@ -444,7 +456,7 @@ export default function ReportsPage() {
               size="small"
               type="link"
               icon={<DownloadOutlined />}
-              onClick={() => reportExportApi.exportPdf(runId)}
+              onClick={() => exportReport(runId, 'pdf')}
               data-testid="export-pdf-btn"
             >
               导出PDF

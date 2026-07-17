@@ -13,15 +13,22 @@ from __future__ import annotations
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.database import get_db
 from app.models.call_history import CallHistory
+from app.models.execution_job import ExecutionJob
+from app.models.job_artifact import JobArtifact
 from app.models.user import User
 from app.schemas.common import DataResponse, PageResponse
 from app.services.auth_service import get_current_user
+from app.services.execution.job_reporting import (
+    normalize_job_run,
+    scoped_execution_jobs,
+    sort_created_at,
+)
 from app.services.project_access import (
     ensure_project_role,
     ensure_resource_role,
@@ -39,6 +46,8 @@ def _serialize(record: CallHistory) -> dict[str, Any]:
         redact_sensitive_data(
             {
                 "id": record.id,
+                "record_kind": "call_history",
+                "deletable": True,
                 "method": record.method,
                 "url": record.url,
                 "status_code": record.status_code,
@@ -63,6 +72,127 @@ def _serialize(record: CallHistory) -> dict[str, Any]:
             }
         ),
     )
+
+
+def _serialize_job(
+    job: ExecutionJob,
+    run: dict[str, Any],
+    *,
+    has_files: bool = False,
+) -> dict[str, Any]:
+    """将统一执行任务转换为历史记录响应结构."""
+    created_at = run.get("created_at")
+    response_body = {
+        "summary": run.get("summary"),
+        "metrics": run.get("metrics"),
+    }
+    if "results" in run:
+        response_body["results"] = run["results"]
+
+    return cast(
+        dict[str, Any],
+        redact_sensitive_data(
+            {
+                "id": job.id,
+                "record_kind": "execution_job",
+                "deletable": False,
+                "method": run.get("method") or job.job_type.upper(),
+                "url": run.get("url") or f"job://{job.id}",
+                "status_code": run.get("status_code"),
+                "status": run.get("status"),
+                "duration": float(run.get("duration") or 0.0),
+                "has_files": has_files,
+                "source": job.job_type,
+                "test_case_id": job.resource_id,
+                "project_id": job.project_id,
+                "created_by": job.created_by,
+                "error_message": run.get("error_message"),
+                "executed_at": created_at.isoformat() if created_at else None,
+                "headers": run.get("headers"),
+                "params": run.get("params"),
+                "body": run.get("body"),
+                "response_headers": None,
+                "response_body": response_body,
+                "response_text": run.get("summary"),
+                "assertion_results": [],
+                "pre_request_results": [],
+                "title": run.get("title"),
+            }
+        ),
+    )
+
+
+def _collect_history_items(
+    db: Session,
+    current_user: User,
+    *,
+    status: str | None = None,
+    method: str | None = None,
+    url: str | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """聚合当前用户可见的调用历史和终态执行任务."""
+    call_stmt = scope_project_resources(
+        select(CallHistory),
+        CallHistory,
+        current_user,
+    )
+    if status:
+        call_stmt = call_stmt.where(CallHistory.status == status)
+    if method:
+        call_stmt = call_stmt.where(CallHistory.method == method.upper())
+    if url:
+        call_stmt = call_stmt.where(CallHistory.url.ilike(f"%{url}%"))
+    if project_id is not None:
+        call_stmt = call_stmt.where(CallHistory.project_id == project_id)
+
+    sortable_items = [
+        {
+            "created_at": record.executed_at,
+            "data": _serialize(record),
+        }
+        for record in db.execute(call_stmt).scalars().all()
+    ]
+
+    job_stmt = scoped_execution_jobs(
+        current_user,
+        project_id=project_id,
+    )
+    normalized_method = method.upper() if method else None
+    normalized_url = url.casefold() if url else None
+    jobs = list(db.execute(job_stmt).scalars().all())
+    artifact_job_ids = (
+        set(
+            db.execute(
+                select(JobArtifact.job_id)
+                .where(JobArtifact.job_id.in_([job.id for job in jobs]))
+                .distinct()
+            ).scalars()
+        )
+        if jobs
+        else set()
+    )
+    for job in jobs:
+        run = normalize_job_run(db, job)
+        if status and run.get("status") != status:
+            continue
+        if normalized_method and str(run.get("method") or "").upper() != normalized_method:
+            continue
+        if normalized_url and normalized_url not in str(run.get("url") or "").casefold():
+            continue
+        sortable_items.append(
+            {
+                "created_at": run.get("created_at"),
+                "data": _serialize_job(
+                    job,
+                    run,
+                    has_files=job.id in artifact_job_ids,
+                ),
+            }
+        )
+
+    sortable_items.sort(key=sort_created_at, reverse=True)
+    return sortable_items
 
 
 def save_history(
@@ -144,29 +274,20 @@ def list_history(
     if project_id is not None:
         ensure_project_role(db, current_user, project_id, "viewer")
 
-    stmt = scope_project_resources(
-        select(CallHistory),
-        CallHistory,
+    items = _collect_history_items(
+        db,
         current_user,
+        status=status,
+        method=method,
+        url=url,
+        project_id=project_id,
     )
-    if status:
-        stmt = stmt.where(CallHistory.status == status)
-    if method:
-        stmt = stmt.where(CallHistory.method == method.upper())
-    if url:
-        stmt = stmt.where(CallHistory.url.ilike(f"%{url}%"))
-    if project_id is not None:
-        stmt = stmt.where(CallHistory.project_id == project_id)
-
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-    records = (
-        db.execute(stmt.order_by(CallHistory.executed_at.desc()).offset((page - 1) * page_size).limit(page_size))
-        .scalars()
-        .all()
-    )
+    total = len(items)
+    start = (page - 1) * page_size
+    records = items[start : start + page_size]
 
     return PageResponse(
-        data=[_serialize(r) for r in records],
+        data=[item["data"] for item in records],
         total=total,
         page=page,
         page_size=page_size,
@@ -183,28 +304,24 @@ def get_stats(
     if project_id is not None:
         ensure_project_role(db, current_user, project_id, "viewer")
 
-    stmt = scope_project_resources(
-        select(CallHistory),
-        CallHistory,
-        current_user,
-    )
-    if project_id is not None:
-        stmt = stmt.where(CallHistory.project_id == project_id)
-    scoped = stmt.subquery()
-    row = db.execute(
-        select(
-            func.count().label("total"),
-            func.sum(case((scoped.c.status == "passed", 1), else_=0)).label("passed"),
-            func.sum(case((scoped.c.status == "failed", 1), else_=0)).label("failed"),
-            func.sum(case((scoped.c.status == "error", 1), else_=0)).label("errored"),
-            func.avg(scoped.c.duration).label("avg_duration"),
+    records = [
+        item["data"]
+        for item in _collect_history_items(
+            db,
+            current_user,
+            project_id=project_id,
         )
-    ).one()
-    total = int(row.total or 0)
-    passed = int(row.passed or 0)
-    failed = int(row.failed or 0)
-    errored = int(row.errored or 0)
-    avg_duration = float(row.avg_duration or 0)
+    ]
+    total = len(records)
+    passed = sum(record.get("status") == "passed" for record in records)
+    failed = sum(record.get("status") == "failed" for record in records)
+    errored = sum(record.get("status") == "error" for record in records)
+    skipped = sum(record.get("status") == "skipped" for record in records)
+    avg_duration = (
+        sum(float(record.get("duration") or 0.0) for record in records) / total
+        if total
+        else 0.0
+    )
 
     return DataResponse(
         data={
@@ -212,6 +329,7 @@ def get_stats(
             "passed": passed,
             "failed": failed,
             "error": errored,
+            "skipped": skipped,
             "pass_rate": round(passed / total * 100, 1) if total else 0,
             "avg_duration": round(float(avg_duration), 4),
         }
@@ -226,10 +344,24 @@ def get_history(
 ):
     """获取单条历史记录详情."""
     record = db.query(CallHistory).filter(CallHistory.id == record_id).first()
-    if not record:
-        raise NotFoundError("CallHistory", record_id)
-    ensure_resource_role(db, current_user, record, "viewer")
-    return DataResponse(data=_serialize(record))
+    if record:
+        ensure_resource_role(db, current_user, record, "viewer")
+        return DataResponse(data=_serialize(record))
+
+    job = (
+        db.execute(
+            scoped_execution_jobs(current_user).where(ExecutionJob.id == record_id)
+        )
+        .scalars()
+        .one_or_none()
+    )
+    if not job:
+        raise NotFoundError("HistoryRecord", record_id)
+    run = normalize_job_run(db, job, include_results=True)
+    has_files = db.execute(
+        select(JobArtifact.id).where(JobArtifact.job_id == job.id).limit(1)
+    ).scalar_one_or_none() is not None
+    return DataResponse(data=_serialize_job(job, run, has_files=has_files))
 
 
 @router.delete("/{record_id}", response_model=DataResponse[dict])

@@ -6,20 +6,27 @@ PDF 导出尝试使用 reportlab，若不可用则降级返回 HTML 并提示用
 from __future__ import annotations
 
 import html
-import json
 from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.database import get_db
 from app.models import TestCase, TestResult
+from app.models.execution_job import ExecutionJob
 from app.models.test_run_summary import TestRunSummary
+from app.models.user import User
+from app.services.auth_service import get_current_user
+from app.services.execution.job_reporting import normalize_job_run
+from app.services.project_access import ensure_resource_role
 
 router = APIRouter()
+
+_REPORTABLE_JOB_STATUSES = {"succeeded", "failed", "cancelled", "timed_out"}
 
 
 def _status_sum(status: str):
@@ -27,14 +34,49 @@ def _status_sum(status: str):
     return func.sum(case((TestResult.status == status, 1), else_=0))
 
 
-def _gather_run_data(run_id: str, db: Session) -> dict:
+def _job_export_data(db: Session, job: ExecutionJob) -> dict:
+    run = normalize_job_run(db, job, include_results=True)
+    return {
+        "run_id": run["run_id"],
+        "total": run.get("total", 0),
+        "passed": run.get("passed", 0),
+        "failed": run.get("failed", 0),
+        "error": run.get("error", 0),
+        "skipped": run.get("skipped", 0),
+        "duration": round(float(run.get("duration") or 0.0), 3),
+        "pass_rate": run.get("pass_rate", 0.0),
+        "created_at": run.get("created_at"),
+        "source": run.get("source") or "job",
+        "results": [
+            {
+                "title": str(result.get("title") or "(已删除)"),
+                "method": str(result.get("method") or ""),
+                "url": str(result.get("url") or ""),
+                "status": str(result.get("status") or "unknown"),
+                "duration": round(float(result.get("duration") or 0.0), 4),
+                "status_code": result.get("status_code"),
+                "error": result.get("error") or result.get("error_message"),
+            }
+            for result in run.get("results", [])
+            if isinstance(result, dict)
+        ],
+    }
+
+
+def _gather_run_data(run_id: str, db: Session, user: User) -> dict:
     """汇总某次执行的数据，供渲染报告使用."""
+    job = db.get(ExecutionJob, run_id)
+    if job is not None and job.status in _REPORTABLE_JOB_STATUSES:
+        ensure_resource_role(db, user, job, "viewer")
+        return _job_export_data(db, job)
+
     summary = db.execute(
         select(TestRunSummary).where(TestRunSummary.run_id == run_id)
     ).scalars().first()
 
     # 优先使用 TestRunSummary，没有则从 TestResult 聚合
     if summary:
+        ensure_resource_role(db, user, summary, "viewer")
         total = summary.total
         passed = summary.passed
         failed = summary.failed
@@ -44,6 +86,8 @@ def _gather_run_data(run_id: str, db: Session) -> dict:
         created_at = summary.created_at
         source = summary.source
     else:
+        if not user.is_superuser:
+            raise NotFoundError("执行记录", run_id)
         row = db.execute(
             select(
                 func.count().label("total"),
@@ -249,9 +293,13 @@ def _render_html_report(data: dict) -> str:
 
 
 @router.get("/{run_id}/html")
-def export_html(run_id: str, db: Session = Depends(get_db)):
+def export_html(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """导出 HTML 格式的测试报告."""
-    data = _gather_run_data(run_id, db)
+    data = _gather_run_data(run_id, db, current_user)
     html_content = _render_html_report(data)
     filename = quote(f"测试报告_{run_id[:8]}.html")
     return Response(
@@ -264,29 +312,34 @@ def export_html(run_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{run_id}/pdf")
-def export_pdf(run_id: str, db: Session = Depends(get_db)):
+def export_pdf(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """导出 PDF 格式的测试报告.
 
     尝试使用 reportlab 生成 PDF；若 reportlab 不可用，则降级返回 HTML
     并通过响应头提示用户使用浏览器打印为 PDF。
     """
-    data = _gather_run_data(run_id, db)
+    data = _gather_run_data(run_id, db, current_user)
 
     try:
+        import io
+
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.platypus import (
-            SimpleDocTemplate,
             Paragraph,
+            SimpleDocTemplate,
             Spacer,
             Table,
             TableStyle,
         )
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        import io
 
         # 尝试注册中文字体
         font_name = "Helvetica"

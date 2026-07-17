@@ -35,6 +35,7 @@ from app.models.execution_job import (
     JobEvent,
 )
 from app.models.project_member import ProjectMember
+from app.services.execution.job_reporting import RESULT_METRICS_CONFIG_KEY
 from app.services.security.data_redaction import redact_sensitive_data
 
 logger = logging.getLogger(__name__)
@@ -383,12 +384,16 @@ class JobService:
         error_code: str | None = None
         error_message: str | None = None
         artifacts: list[dict[str, Any]] = []
+        result_metrics: dict[str, Any] = {}
         try:
             run_result = self._run(job)
             result_status = run_result.get("status", "succeeded")
             result_summary = run_result.get("summary")
             error_code = run_result.get("error_code")
             error_message = run_result.get("error_message")
+            raw_metrics = run_result.get("metrics")
+            if isinstance(raw_metrics, dict):
+                result_metrics = raw_metrics
             raw_artifacts = run_result.get("artifacts", [])
             if isinstance(raw_artifacts, list):
                 artifacts = [
@@ -451,6 +456,20 @@ class JobService:
 
         result_summary = redact_sensitive_data(result_summary)
         error_message = redact_sensitive_data(error_message)
+        if not result_metrics:
+            result_metrics = {
+                "total": 1,
+                "passed": 1 if result_status == "succeeded" else 0,
+                "failed": 1 if result_status == "failed" else 0,
+                "error": 1 if result_status == "timed_out" else 0,
+                "skipped": 0,
+                "duration": round(duration, 4),
+                "results": [],
+            }
+        result_metrics = redact_sensitive_data(result_metrics)
+        config = dict(job.config or {})
+        config[RESULT_METRICS_CONFIG_KEY] = result_metrics
+        job.config = config
         job.status = result_status
         job.finished_at = finished_at
         job.result_summary = result_summary
@@ -482,6 +501,7 @@ class JobService:
                 "error_code": error_code,
                 "error_message": error_message,
                 "artifacts": persisted_artifacts,
+                "metrics": result_metrics,
             },
         )
         self.db.commit()
@@ -542,6 +562,7 @@ class JobService:
                 "error_code": str|None,
                 "error_message": str|None,
                 "artifacts": list[dict],
+                "metrics": dict,
             }
         """
         if job.job_type == "api_case":
@@ -642,16 +663,40 @@ class JobService:
         )
 
         # passed -> succeeded；failed/error -> failed
+        status_code = result.response.status_code if result.response else None
+        metrics = {
+            "total": 1,
+            "passed": 1 if result.status == "passed" else 0,
+            "failed": 1 if result.status == "failed" else 0,
+            "error": 1 if result.status not in {"passed", "failed"} else 0,
+            "skipped": 0,
+            "duration": round(result.duration, 4),
+            "status_code": status_code,
+            "results": [
+                {
+                    "case_id": case.id,
+                    "title": case.title,
+                    "method": case.method,
+                    "url": case.url,
+                    "status": result.status,
+                    "duration": round(result.duration, 4),
+                    "status_code": status_code,
+                    "error": result.error_message,
+                }
+            ],
+        }
         if result.status == "passed":
             return {
                 "status": "succeeded",
                 "summary": f"用例执行通过（{result.duration:.2f}s）",
+                "metrics": metrics,
             }
         return {
             "status": "failed",
             "summary": f"用例执行{result.status}（{result.duration:.2f}s）",
             "error_code": result.status,
             "error_message": result.error_message or f"用例执行状态：{result.status}",
+            "metrics": metrics,
         }
 
     def _run_ui_case(self, job: ExecutionJob) -> dict[str, Any]:
@@ -742,6 +787,29 @@ class JobService:
                 result.get("error") or f"UI 用例执行状态：{ui_status}"
             ),
             "artifacts": artifacts,
+            "metrics": {
+                "total": record.total_steps,
+                "passed": record.passed_steps,
+                "failed": record.failed_steps,
+                "error": max(
+                    record.total_steps - record.passed_steps - record.failed_steps,
+                    0,
+                ),
+                "skipped": 0,
+                "duration": duration,
+                "results": [
+                    {
+                        "case_id": case.id,
+                        "title": case.title,
+                        "method": "UI",
+                        "url": case.url,
+                        "status": ui_status,
+                        "duration": duration,
+                        "status_code": None,
+                        "error": result.get("error"),
+                    }
+                ],
+            },
         }
 
     def _run_ui_suite(self, job: ExecutionJob) -> dict[str, Any]:
@@ -951,6 +1019,27 @@ class JobService:
                 first_error or f"{failed_count} 个 UI 用例执行失败"
             ),
             "artifacts": artifacts,
+            "metrics": {
+                "total": suite_run.total,
+                "passed": passed_count,
+                "failed": failed_count,
+                "error": 0,
+                "skipped": 0,
+                "duration": duration,
+                "results": [
+                    {
+                        "case_id": result.get("case_id"),
+                        "title": result.get("case_title"),
+                        "method": "UI",
+                        "url": result.get("url"),
+                        "status": result.get("status"),
+                        "duration": round(float(result.get("duration") or 0.0), 4),
+                        "status_code": None,
+                        "error": result.get("error"),
+                    }
+                    for result in results
+                ],
+            },
         }
 
     def _run_performance(self, job: ExecutionJob) -> dict[str, Any]:
@@ -1007,6 +1096,15 @@ class JobService:
                 "error_code": "performance_failed",
                 "error_message": error_message,
                 "artifacts": [],
+                "metrics": {
+                    "total": 1,
+                    "passed": 0,
+                    "failed": 0,
+                    "error": 1,
+                    "skipped": 0,
+                    "duration": 0.0,
+                    "results": [],
+                },
             }
 
         failed_reason: str | None = None
@@ -1064,6 +1162,31 @@ class JobService:
             "error_code": "performance_assertion_failed" if failed_reason else None,
             "error_message": failed_reason,
             "artifacts": [report],
+            "metrics": {
+                "total": result.total_requests,
+                "passed": result.success_requests,
+                "failed": result.fail_requests,
+                "error": 0,
+                "skipped": 0,
+                "duration": result.duration,
+                "p95": result.p95,
+                "p99": result.p99,
+                "rps": result.rps,
+                "error_rate": result.error_rate,
+                "sla_status": result.sla_status,
+                "results": [
+                    {
+                        "case_id": test.id,
+                        "title": test.name,
+                        "method": "PERF",
+                        "url": f"performance://{test.name}",
+                        "status": "failed" if failed_reason else "passed",
+                        "duration": result.duration,
+                        "status_code": None,
+                        "error": failed_reason,
+                    }
+                ],
+            },
         }
 
     @staticmethod

@@ -1,145 +1,302 @@
-"""接口覆盖率看板 API.
+"""API coverage statistics backed by legacy results and execution jobs."""
 
-统计接口定义与测试覆盖情况：
-- total_endpoints: 按 method+url 去重的接口数
-- covered: 有测试用例覆盖的接口数
-- by_method: 按请求方法分布的覆盖率
-- by_group: 按分组统计覆盖率
-- recent_runs: 最近执行的覆盖率趋势
-"""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import TestCase, TestResult
 from app.models.test_run_summary import TestRunSummary
+from app.models.user import User
 from app.schemas.common import DataResponse
+from app.services.auth_service import get_current_user
+from app.services.execution.job_reporting import (
+    normalize_job_run,
+    scoped_execution_jobs,
+    sort_created_at,
+)
+from app.services.project_access import (
+    ensure_project_role,
+    scope_project_resources,
+)
 
 router = APIRouter()
+
+_UNGROUPED = "未分组"
+_RECENT_RUN_LIMIT = 10
+
+
+def _scoped_legacy_runs(
+    user: User,
+    *,
+    project_id: str | None = None,
+):
+    stmt = scope_project_resources(
+        select(TestRunSummary),
+        TestRunSummary,
+        user,
+    )
+    if project_id is not None:
+        stmt = stmt.where(TestRunSummary.project_id == project_id)
+    return stmt
+
+
+def _legacy_covered_case_ids(
+    db: Session,
+    user: User,
+    *,
+    project_id: str | None,
+) -> set[str]:
+    stmt = select(TestResult.test_case_id).join(
+        TestCase,
+        TestCase.id == TestResult.test_case_id,
+    )
+    if project_id is not None:
+        stmt = stmt.where(TestCase.project_id == project_id)
+
+    if not user.is_superuser:
+        run_ids = scope_project_resources(
+            select(TestRunSummary.run_id),
+            TestRunSummary,
+            user,
+        )
+        if project_id is not None:
+            run_ids = run_ids.where(TestRunSummary.project_id == project_id)
+        stmt = stmt.where(TestResult.run_id.in_(run_ids))
+
+    return set(db.execute(stmt).scalars().all())
+
+
+def _visible_cases(
+    db: Session,
+    user: User,
+    *,
+    project_id: str | None,
+    referenced_case_ids: set[str],
+) -> list[TestCase]:
+    stmt = scope_project_resources(select(TestCase), TestCase, user)
+    if project_id is not None:
+        stmt = stmt.where(TestCase.project_id == project_id)
+    cases = list(db.execute(stmt).scalars().all())
+
+    # TestCase has no creator field. An unscoped legacy case is visible to a
+    # non-superuser only when one of their scoped runs/jobs references it.
+    if (
+        not user.is_superuser
+        and project_id is None
+        and referenced_case_ids
+    ):
+        legacy_cases = (
+            db.execute(
+                select(TestCase).where(
+                    TestCase.project_id.is_(None),
+                    TestCase.id.in_(referenced_case_ids),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        known_ids = {case.id for case in cases}
+        cases.extend(case for case in legacy_cases if case.id not in known_ids)
+
+    return cases
+
+
+def _normalize_legacy_run(summary: TestRunSummary) -> dict[str, Any]:
+    total = int(summary.total or 0)
+    passed = int(summary.passed or 0)
+    return {
+        "run_id": summary.run_id,
+        "project_id": summary.project_id,
+        "source": summary.source,
+        "total": total,
+        "passed": passed,
+        "failed": int(summary.failed or 0),
+        "error": int(summary.error or 0),
+        "pass_rate": round(passed / total * 100, 1) if total else 0.0,
+        "created_at": summary.created_at,
+    }
+
+
+def _serialize_recent_run(run: dict[str, Any]) -> dict[str, Any]:
+    created_at = run.get("created_at")
+    return {
+        "run_id": run["run_id"],
+        "total": int(run.get("total") or 0),
+        "passed": int(run.get("passed") or 0),
+        "failed": int(run.get("failed") or 0),
+        "error": int(run.get("error") or 0),
+        "pass_rate": float(run.get("pass_rate") or 0.0),
+        "created_at": (
+            created_at.strftime("%m-%d %H:%M")
+            if isinstance(created_at, datetime)
+            else ""
+        ),
+    }
 
 
 @router.get("", response_model=DataResponse[dict])
 def get_coverage(
-    project_id: str | None = Query(None, description="按项目筛选"),
+    project_id: str | None = Query(None, description="Filter by project"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取接口覆盖率统计."""
-    # 基础过滤条件
-    case_filter = []
+    """Return API endpoint coverage and recent unified execution runs."""
     if project_id is not None:
-        case_filter.append(TestCase.project_id == project_id)
+        ensure_project_role(db, current_user, project_id, "viewer")
 
-    # 1. 按 method+url 去重统计已定义接口数
-    endpoint_query = select(
-        TestCase.method,
-        TestCase.url,
-    ).where(*case_filter).group_by(TestCase.method, TestCase.url)
-    endpoints = db.execute(endpoint_query).all()
-
-    total_endpoints = len(endpoints)
-
-    # 2. 统计有执行记录覆盖的接口数（method+url 在 TestResult 关联的 TestCase 中出现过）
-    # 通过 TestCase 与 TestResult 关联，找出有执行结果的 method+url 组合
-    covered_query = (
-        select(TestCase.method, TestCase.url)
-        .join(TestResult, TestResult.test_case_id == TestCase.id)
-        .where(*case_filter)
-        .group_by(TestCase.method, TestCase.url)
+    jobs = (
+        db.execute(
+            scoped_execution_jobs(
+                current_user,
+                project_id=project_id,
+            )
+        )
+        .scalars()
+        .all()
     )
-    covered_endpoints = db.execute(covered_query).all()
-    covered_set = {(r.method, r.url) for r in covered_endpoints}
-    covered = len(covered_set)
+    job_case_ids = {
+        job.resource_id
+        for job in jobs
+        if job.job_type == "api_case" and job.resource_id
+    }
+    legacy_case_ids = _legacy_covered_case_ids(
+        db,
+        current_user,
+        project_id=project_id,
+    )
+    covered_case_ids = legacy_case_ids | job_case_ids
 
-    coverage_rate = round(covered / total_endpoints * 100, 1) if total_endpoints > 0 else 0.0
+    cases = _visible_cases(
+        db,
+        current_user,
+        project_id=project_id,
+        referenced_case_ids=covered_case_ids,
+    )
 
-    # 3. 按方法分布统计
-    by_method_map: dict[str, dict] = {}
-    for ep in endpoints:
-        m = ep.method or "UNKNOWN"
-        if m not in by_method_map:
-            by_method_map[m] = {"total": 0, "covered": 0}
-        by_method_map[m]["total"] += 1
-        if (ep.method, ep.url) in covered_set:
-            by_method_map[m]["covered"] += 1
+    endpoint_groups: dict[tuple[str | None, str], set[str]] = {}
+    endpoint_case_ids: dict[tuple[str | None, str], set[str]] = {}
+    for case in cases:
+        endpoint = (case.method, case.url)
+        endpoint_groups.setdefault(endpoint, set()).add(
+            case.group_path or _UNGROUPED
+        )
+        endpoint_case_ids.setdefault(endpoint, set()).add(case.id)
+
+    endpoints = set(endpoint_case_ids)
+    covered_endpoints = {
+        endpoint
+        for endpoint, case_ids in endpoint_case_ids.items()
+        if case_ids & covered_case_ids
+    }
+    total_endpoints = len(endpoints)
+    covered = len(covered_endpoints)
+    coverage_rate = (
+        round(covered / total_endpoints * 100, 1)
+        if total_endpoints
+        else 0.0
+    )
+
+    by_method_map: dict[str, dict[str, int]] = {}
+    for endpoint in endpoints:
+        method = endpoint[0] or "UNKNOWN"
+        counts = by_method_map.setdefault(
+            method,
+            {"total": 0, "covered": 0},
+        )
+        counts["total"] += 1
+        if endpoint in covered_endpoints:
+            counts["covered"] += 1
 
     by_method = []
-    for m, v in sorted(by_method_map.items()):
-        rate = round(v["covered"] / v["total"] * 100, 1) if v["total"] > 0 else 0.0
-        by_method.append({
-            "method": m,
-            "total": v["total"],
-            "covered": v["covered"],
-            "uncovered": v["total"] - v["covered"],
-            "coverage_rate": rate,
-        })
-
-    # 4. 按分组统计覆盖率
-    group_query = (
-        select(
-            func.coalesce(TestCase.group_path, "未分组").label("group_path"),
-            func.count(func.distinct(func.concat(TestCase.method, TestCase.url))).label("total"),
+    for method, counts in sorted(by_method_map.items()):
+        total = counts["total"]
+        method_covered = counts["covered"]
+        by_method.append(
+            {
+                "method": method,
+                "total": total,
+                "covered": method_covered,
+                "uncovered": total - method_covered,
+                "coverage_rate": (
+                    round(method_covered / total * 100, 1)
+                    if total
+                    else 0.0
+                ),
+            }
         )
-        .where(*case_filter)
-        .group_by(func.coalesce(TestCase.group_path, "未分组"))
-    )
-    group_rows = db.execute(group_query).all()
 
-    # 各分组覆盖数
-    group_covered_query = (
-        select(
-            func.coalesce(TestCase.group_path, "未分组").label("group_path"),
-            func.count(func.distinct(func.concat(TestCase.method, TestCase.url))).label("covered"),
-        )
-        .join(TestResult, TestResult.test_case_id == TestCase.id)
-        .where(*case_filter)
-        .group_by(func.coalesce(TestCase.group_path, "未分组"))
-    )
-    group_covered_rows = db.execute(group_covered_query).all()
-    group_covered_map = {r.group_path: r.covered for r in group_covered_rows}
+    by_group_map: dict[str, dict[str, int]] = {}
+    for endpoint, groups in endpoint_groups.items():
+        for group_path in groups:
+            counts = by_group_map.setdefault(
+                group_path,
+                {"total": 0, "covered": 0},
+            )
+            counts["total"] += 1
+            if endpoint in covered_endpoints:
+                counts["covered"] += 1
 
     by_group = []
-    for gr in group_rows:
-        gcov = group_covered_map.get(gr.group_path, 0)
-        rate = round(gcov / gr.total * 100, 1) if gr.total > 0 else 0.0
-        by_group.append({
-            "group_path": gr.group_path,
-            "total": gr.total,
-            "covered": gcov,
-            "uncovered": gr.total - gcov,
-            "coverage_rate": rate,
-        })
-    by_group.sort(key=lambda x: x["total"], reverse=True)
+    for group_path, counts in by_group_map.items():
+        total = counts["total"]
+        group_covered = counts["covered"]
+        by_group.append(
+            {
+                "group_path": group_path,
+                "total": total,
+                "covered": group_covered,
+                "uncovered": total - group_covered,
+                "coverage_rate": (
+                    round(group_covered / total * 100, 1)
+                    if total
+                    else 0.0
+                ),
+            }
+        )
+    by_group.sort(key=lambda item: (-item["total"], item["group_path"]))
 
-    # 5. 最近执行的覆盖率趋势（基于 TestRunSummary）
-    recent_runs_query = (
-        select(TestRunSummary)
-        .order_by(desc(TestRunSummary.created_at))
-        .limit(10)
+    legacy_runs = (
+        db.execute(
+            _scoped_legacy_runs(
+                current_user,
+                project_id=project_id,
+            )
+        )
+        .scalars()
+        .all()
     )
-    if project_id is not None:
-        recent_runs_query = recent_runs_query.where(TestRunSummary.project_id == project_id)
-    recent_runs = db.execute(recent_runs_query).scalars().all()
-    recent_runs = list(reversed(recent_runs))  # 时间正序
+    runs_by_id = {
+        summary.run_id: _normalize_legacy_run(summary)
+        for summary in legacy_runs
+    }
+    for job in jobs:
+        normalized = normalize_job_run(db, job)
+        runs_by_id[normalized["run_id"]] = normalized
 
-    recent_runs_data = [{
-        "run_id": r.run_id,
-        "total": r.total,
-        "passed": r.passed,
-        "failed": r.failed,
-        "error": r.error,
-        "pass_rate": round(r.passed / r.total * 100, 1) if r.total > 0 else 0,
-        "created_at": r.created_at.strftime("%m-%d %H:%M") if r.created_at else "",
-    } for r in recent_runs]
+    recent_runs = sorted(
+        runs_by_id.values(),
+        key=sort_created_at,
+        reverse=True,
+    )[:_RECENT_RUN_LIMIT]
+    recent_runs.reverse()
 
-    return DataResponse(data={
-        "total_endpoints": total_endpoints,
-        "covered": covered,
-        "uncovered": total_endpoints - covered,
-        "coverage_rate": coverage_rate,
-        "by_method": by_method,
-        "by_group": by_group,
-        "recent_runs": recent_runs_data,
-    })
+    return DataResponse(
+        data={
+            "total_endpoints": total_endpoints,
+            "covered": covered,
+            "uncovered": total_endpoints - covered,
+            "coverage_rate": coverage_rate,
+            "by_method": by_method,
+            "by_group": by_group,
+            "recent_runs": [
+                _serialize_recent_run(run)
+                for run in recent_runs
+            ],
+        }
+    )

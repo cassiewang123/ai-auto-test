@@ -19,6 +19,7 @@ from app.models.ui_test_record import UiTestRecord
 from app.models.ui_test_suite import UiTestSuite, UiTestSuiteRun
 from app.services.execution import job_dispatcher as dispatcher_module
 from app.services.execution.job_dispatcher import JobDispatcher
+from app.services.execution.job_reporting import RESULT_METRICS_CONFIG_KEY
 from app.services.execution.job_service import JobService
 from app.tasks.job_task import run_execution_job
 
@@ -414,6 +415,9 @@ def test_ui_case_job_uses_real_service_and_returns_artifacts(
     assert record.status == "passed"
     assert record.triggered_by == f"job:{job.id}"
     assert db_session.query(JobArtifact).filter_by(job_id=job.id).count() == 2
+    persisted = db_session.get(ExecutionJob, job.id)
+    metrics = persisted.config[RESULT_METRICS_CONFIG_KEY]
+    assert (metrics["total"], metrics["passed"], metrics["failed"]) == (1, 1, 0)
 
 
 def test_ui_suite_job_reuses_suite_execution_and_maps_case_failure(
@@ -510,6 +514,9 @@ def test_ui_suite_job_reuses_suite_execution_and_maps_case_failure(
         for row in db_session.query(JobArtifact).filter_by(job_id=job.id)
     }
     assert artifact_types == {"screenshot", "report"}
+    metrics = completed.config[RESULT_METRICS_CONFIG_KEY]
+    assert (metrics["total"], metrics["passed"], metrics["failed"]) == (2, 1, 1)
+    assert len(metrics["results"]) == 2
 
 
 def test_performance_job_uses_perf_runner_and_persists_report(
@@ -585,6 +592,9 @@ def test_performance_job_uses_perf_runner_and_persists_report(
     artifact = db_session.query(JobArtifact).filter_by(job_id=job.id).one()
     assert artifact.artifact_type == "report"
     assert artifact.filename == f"performance_{job.id}.json"
+    metrics = completed.config[RESULT_METRICS_CONFIG_KEY]
+    assert (metrics["total"], metrics["passed"], metrics["failed"]) == (10, 10, 0)
+    assert metrics["p95"] == 26
 
 
 def test_timeout_is_normalized_in_job_task_result(db_session, monkeypatch):
