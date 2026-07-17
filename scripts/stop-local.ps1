@@ -17,6 +17,8 @@ try {
         -PidFile (Join-Path $runtimeDir "backend.pid") `
         -CommandMarker "backend\run_server.py" `
         -DisplayName "后端及本地任务子进程"
+    Remove-Item -LiteralPath (Join-Path $runtimeDir "frontend.mode") `
+        -Force -ErrorAction SilentlyContinue
 
     Write-Host "SQLite 数据库和 Artifact 已保留。"
 }

@@ -65,7 +65,7 @@ job.completed
 1. Windows PowerShell 5.1 或 PowerShell 7。
 2. Python 3.13，或满足项目依赖要求的兼容 Python。
 3. Node.js 和 npm。脚本会从 PATH、常见默认安装目录和本机便携目录中查找。
-4. 本机端口 `5173` 和 `8000` 未被其他程序占用。
+4. 本机端口 `5173` 和 `8001` 未被其他程序占用。
 5. 项目根目录存在 `.env`。
 
 默认轻量模式不要求安装 Docker Desktop，也不要求启用 WSL、Hyper-V 或
@@ -87,6 +87,7 @@ TASK_DISPATCH_MODE=local
 TASK_FALLBACK_MODE=disabled
 AUTO_CREATE_SCHEMA=false
 ARTIFACT_ROOT=.uploads
+VITE_AIRETEST_MODE=lite
 ```
 
 首次准备 Python 依赖时：
@@ -116,10 +117,19 @@ Set-Location ..
 .\scripts\start-local.ps1
 ```
 
+默认使用 `lite` 菜单，只展示个人单机常用功能。需要临时查看全部团队治理功能时：
+
+```powershell
+.\scripts\start-local.ps1 -BackendPort 8001 -FrontendMode full
+```
+
+再次执行 `-FrontendMode lite` 可切回轻量菜单。切换模式时只会重启本项目管理的
+Vite 进程，不会停止其他程序。
+
 脚本直接执行以下流程：
 
 1. 检查 `.env`、Python、Node/npm 和本地依赖。
-2. 检查 PID 文件以及 `5173`、`8000` 端口占用。
+2. 检查 PID 文件以及 `5173`、`8001` 端口占用。
 3. 使用默认 SQLite URL 执行 Alembic migration。
 4. 启动 `backend/run_server.py`。
 5. 启动本地 Vite。
@@ -129,8 +139,11 @@ Set-Location ..
 启动成功后访问：
 
 - 前端：`http://127.0.0.1:5173`
-- 后端：`http://127.0.0.1:8000`
-- API 文档：`http://127.0.0.1:8000/docs`
+- 后端：`http://127.0.0.1:8001`
+- API 文档：`http://127.0.0.1:8001/docs`
+
+本机 `8000` 端口由 C-Lodop 使用，不属于 AIRETEST，本项目的本地启动和停止脚本
+不会操作该端口。
 
 `backend/run_server.py` 已不再强制 `WindowsSelectorEventLoopPolicy`，Windows
 继续使用默认 Proactor event loop，UI 任务的 WinSock 失败根因已修复。

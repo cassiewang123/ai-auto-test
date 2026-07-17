@@ -5,6 +5,9 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$BackendPort = 8001,
 
+    [ValidateSet("lite", "full")]
+    [string]$FrontendMode = "lite",
+
     [ValidateRange(15, 300)]
     [int]$WaitSeconds = 90
 )
@@ -22,6 +25,7 @@ try {
     $logDir = Join-Path $runtimeDir "logs"
     $backendPidFile = Join-Path $runtimeDir "backend.pid"
     $frontendPidFile = Join-Path $runtimeDir "frontend.pid"
+    $frontendModeFile = Join-Path $runtimeDir "frontend.mode"
 
     if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
         throw "未找到 .env。请执行 Copy-Item .env.example .env，并生成本地密钥。"
@@ -81,9 +85,11 @@ print(s.ARTIFACT_ROOT)
     $previousDatabaseUrl = $env:DATABASE_URL
     $previousBackendPort = $env:AIRETEST_BACKEND_PORT
     $previousApiTarget = $env:AIRETEST_API_TARGET
+    $previousFrontendMode = $env:VITE_AIRETEST_MODE
     $env:DATABASE_URL = $migrationUrl
     $env:AIRETEST_BACKEND_PORT = [string]$BackendPort
     $env:AIRETEST_API_TARGET = "http://127.0.0.1:$BackendPort"
+    $env:VITE_AIRETEST_MODE = $FrontendMode
     try {
         Write-Host "正在升级 SQLite 数据库..."
         Push-Location $backendDir
@@ -155,10 +161,28 @@ print(s.ARTIFACT_ROOT)
 
             $frontend = Get-AiretestManagedProcess -PidFile $frontendPidFile `
                 -CommandMarker "vite.js"
-            if ($frontend.Exists -and $frontend.Managed) {
+            $runningFrontendMode = if (
+                Test-Path -LiteralPath $frontendModeFile -PathType Leaf
+            ) {
+                (Get-Content -LiteralPath $frontendModeFile -Raw).Trim()
+            }
+            else {
+                ""
+            }
+            if (
+                $frontend.Exists -and
+                $frontend.Managed -and
+                $runningFrontendMode -eq $FrontendMode
+            ) {
                 Write-Host "前端已运行，PID：$($frontend.ProcessId)"
             }
             else {
+                if ($frontend.Exists -and $frontend.Managed) {
+                    Stop-AiretestManagedProcess `
+                        -PidFile $frontendPidFile `
+                        -CommandMarker "vite.js" `
+                        -DisplayName "前端（切换 $FrontendMode 模式）"
+                }
                 if (Test-AiretestPortInUse -Port 5173) {
                     throw "端口 5173 已被非 AIRETEST 进程占用。"
                 }
@@ -181,6 +205,8 @@ print(s.ARTIFACT_ROOT)
                     -PassThru
                 Set-Content -LiteralPath $frontendPidFile `
                     -Value $frontendProcess.Id -Encoding ascii
+                Set-Content -LiteralPath $frontendModeFile `
+                    -Value $FrontendMode -Encoding ascii
                 Write-Host "前端启动中，PID：$($frontendProcess.Id)"
             }
 
@@ -194,12 +220,13 @@ print(s.ARTIFACT_ROOT)
         $env:DATABASE_URL = $previousDatabaseUrl
         $env:AIRETEST_BACKEND_PORT = $previousBackendPort
         $env:AIRETEST_API_TARGET = $previousApiTarget
+        $env:VITE_AIRETEST_MODE = $previousFrontendMode
     }
 
     Write-Host ""
     Write-Host "AIRETEST 轻量单机模式已启动："
     if (-not $SkipFrontend) {
-        Write-Host "  前端：http://localhost:5173"
+        Write-Host "  前端：http://localhost:5173（$FrontendMode 菜单）"
     }
     Write-Host "  后端：http://localhost:$BackendPort"
     Write-Host "  API 文档：http://localhost:$BackendPort/docs"
