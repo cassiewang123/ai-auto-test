@@ -3,19 +3,63 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
 
 settings = get_settings()
 
-# SQLite 需要 check_same_thread=False
-connect_args = (
-    {"check_same_thread": False}
-    if settings.DATABASE_URL.startswith("sqlite")
-    else {}
-)
+def configure_sqlite_engine(
+    target_engine: Engine,
+    database_url: str,
+    *,
+    busy_timeout_ms: int = 5000,
+    journal_mode: str = "wal",
+    synchronous: str = "normal",
+) -> None:
+    """Apply the local SQLite reliability settings to every connection."""
+    if not database_url.startswith("sqlite"):
+        return
+
+    parsed_url = make_url(database_url)
+    is_file_database = parsed_url.database not in {None, "", ":memory:"}
+    normalized_journal_mode = journal_mode.strip().upper()
+    normalized_synchronous = synchronous.strip().upper()
+    if busy_timeout_ms < 0:
+        raise ValueError("SQLite busy timeout must not be negative")
+    if normalized_journal_mode not in {"DELETE", "WAL"}:
+        raise ValueError("SQLite journal mode must be DELETE or WAL")
+    if normalized_synchronous not in {"OFF", "NORMAL", "FULL", "EXTRA"}:
+        raise ValueError(
+            "SQLite synchronous mode must be OFF, NORMAL, FULL or EXTRA"
+        )
+
+    @event.listens_for(target_engine, "connect")
+    def set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
+            if is_file_database:
+                cursor.execute(
+                    f"PRAGMA journal_mode={normalized_journal_mode}"
+                )
+                cursor.execute(
+                    f"PRAGMA synchronous={normalized_synchronous}"
+                )
+        finally:
+            cursor.close()
+
+
+is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+connect_args = {}
+if is_sqlite:
+    connect_args = {
+        "check_same_thread": False,
+        "timeout": settings.SQLITE_BUSY_TIMEOUT_MS / 1000,
+    }
 
 engine_kwargs = {
     "connect_args": connect_args,
@@ -30,6 +74,13 @@ if not settings.DATABASE_URL.startswith("sqlite"):
     )
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
+configure_sqlite_engine(
+    engine,
+    settings.DATABASE_URL,
+    busy_timeout_ms=settings.SQLITE_BUSY_TIMEOUT_MS,
+    journal_mode=settings.SQLITE_JOURNAL_MODE,
+    synchronous=settings.SQLITE_SYNCHRONOUS,
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
+    SQLITE_BUSY_TIMEOUT_MS: int = 5000
+    SQLITE_JOURNAL_MODE: Literal["delete", "wal"] = "wal"
+    SQLITE_SYNCHRONOUS: Literal["off", "normal", "full", "extra"] = "normal"
     # 仅本地临时环境允许 create_all；正式环境必须使用 Alembic。
     AUTO_CREATE_SCHEMA: bool = False
 
