@@ -1,4 +1,3 @@
-import axios from 'axios';
 import {
   createContext,
   useContext,
@@ -7,6 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
+import { authClient } from '../services/http';
 
 // ---------------------------------------------------------------------------
 // 类型定义（与后端 schemas/auth.py 对齐）
@@ -91,34 +91,6 @@ export interface RoleUpdatePayload {
   permissions?: string[];
   is_active?: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// 认证专用 axios 实例（自动附加 JWT 令牌）
-// 与 services/api.ts 配置保持一致，由独立实例承载认证相关请求。
-// ---------------------------------------------------------------------------
-const authClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-// 请求拦截器：附加 Bearer 令牌
-authClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// 响应拦截器：统一提取 data，与 services/api.ts 行为一致
-authClient.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const msg = error.response?.data?.message || error.message || '请求失败';
-    return Promise.reject(new Error(msg));
-  }
-);
 
 const TOKEN_KEY = 'access_token';
 

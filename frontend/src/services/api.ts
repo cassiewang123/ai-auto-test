@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { apiClient } from './http';
 import type {
   ApiResponse,
   PageResponse,
@@ -49,50 +49,7 @@ interface BatchMoveResult {
 }
 
 // 统一的 API Client（推荐使用的主实例）
-export const apiClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-// 请求拦截器：统一注入 JWT 和请求 ID
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    // 生成请求 ID
-    config.headers['X-Request-ID'] = crypto.randomUUID?.() || Math.random().toString(36);
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// 响应拦截器：统一提取 data 并处理错误
-apiClient.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    if (error.response) {
-      const { status, data } = error.response;
-      if (status === 401) {
-        // token 过期或无效，清除并跳转登录
-        localStorage.removeItem('access_token');
-        window.location.href = '/login';
-        return Promise.reject(new Error('登录已过期，请重新登录'));
-      }
-      if (status === 403) {
-        return Promise.reject(new Error(data?.message || '无权限访问'));
-      }
-      if (status === 429) {
-        return Promise.reject(new Error('请求过于频繁，请稍后重试'));
-      }
-      const msg = data?.message || error.message || `请求失败 (${status})`;
-      return Promise.reject(new Error(msg));
-    }
-    return Promise.reject(error);
-  }
-);
+export { apiClient } from './http';
 
 // 兼容别名：内部历史代码使用 `api` 命名
 const api = apiClient;

@@ -234,8 +234,25 @@ export default function StepLibraryPage() {
     setImportOpen(true);
     setImportLoading(true);
     try {
-      const res = await uiTestCaseApi.list({ page: 1, page_size: 200 });
-      setImportCases(res.data || []);
+      const pageSize = 100;
+      const firstPage = await uiTestCaseApi.list({
+        page: 1,
+        page_size: pageSize,
+      });
+      const cases = [...(firstPage.data || [])];
+      const total = firstPage.total || cases.length;
+
+      for (let currentPage = 2; cases.length < total; currentPage += 1) {
+        const nextPage = await uiTestCaseApi.list({
+          page: currentPage,
+          page_size: pageSize,
+        });
+        const items = nextPage.data || [];
+        if (items.length === 0) break;
+        cases.push(...items);
+      }
+
+      setImportCases(cases);
     } catch (e: any) {
       message.error(e.message);
     } finally {

@@ -21,27 +21,12 @@ import {
   ReloadOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
 import type { ApiResponse, PageResponse, Project } from '../types';
-import { projectApi } from '../services/api';
+import { apiClient, projectApi } from '../services/api';
 
 const { TextArea } = Input;
 
-// ---------------------------------------------------------------------------
-// 本地 axios 实例（通知 API 未集成到 services/api.ts，由集成阶段统一处理）
-// ---------------------------------------------------------------------------
-const notifApi = axios.create({
-  baseURL: '/api/v1/notifications',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-notifApi.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const msg = error.response?.data?.message || error.message || '请求失败';
-    return Promise.reject(new Error(msg));
-  }
-);
+const notifApi = apiClient;
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -143,7 +128,7 @@ function ChannelsTab() {
     setLoading(true);
     try {
       const res = await notifApi.get<unknown, PageResponse<NotificationChannel>>(
-        '/channels',
+        '/notifications/channels',
         { params: { page: p, page_size: ps } }
       );
       setData(res.data || []);
@@ -183,10 +168,10 @@ function ChannelsTab() {
     try {
       const values = await form.validateFields();
       if (editing) {
-        await notifApi.put(`/channels/${editing.id}`, values);
+        await notifApi.put(`/notifications/channels/${editing.id}`, values);
         message.success('更新成功');
       } else {
-        await notifApi.post('/channels', values);
+        await notifApi.post('/notifications/channels', values);
         message.success('创建成功');
       }
       setModalOpen(false);
@@ -199,7 +184,7 @@ function ChannelsTab() {
 
   async function handleDelete(id: string) {
     try {
-      await notifApi.delete(`/channels/${id}`);
+      await notifApi.delete(`/notifications/channels/${id}`);
       message.success('删除成功');
       loadData();
     } catch (e: any) {
@@ -209,7 +194,9 @@ function ChannelsTab() {
 
   async function handleToggle(record: NotificationChannel, checked: boolean) {
     try {
-      await notifApi.put(`/channels/${record.id}`, { is_active: checked });
+      await notifApi.put(`/notifications/channels/${record.id}`, {
+        is_active: checked,
+      });
       message.success(checked ? '已启用' : '已禁用');
       loadData();
     } catch (e: any) {
@@ -221,7 +208,7 @@ function ChannelsTab() {
     setTesting(id);
     try {
       const res = await notifApi.post<unknown, ApiResponse<{ success: boolean; message: string }>>(
-        `/channels/${id}/test`
+        `/notifications/channels/${id}/test`
       );
       if (res.data.success) {
         message.success('测试通知发送成功');
@@ -402,7 +389,7 @@ function RulesTab() {
     setLoading(true);
     try {
       const res = await notifApi.get<unknown, PageResponse<NotificationRule>>(
-        '/rules',
+        '/notifications/rules',
         { params: { page: p, page_size: ps } }
       );
       setData(res.data || []);
@@ -417,9 +404,10 @@ function RulesTab() {
   async function loadOptions() {
     try {
       const [chRes, projRes] = await Promise.all([
-        notifApi.get<unknown, PageResponse<NotificationChannel>>('/channels', {
-          params: { page: 1, page_size: 100 },
-        }),
+        notifApi.get<unknown, PageResponse<NotificationChannel>>(
+          '/notifications/channels',
+          { params: { page: 1, page_size: 100 } }
+        ),
         projectApi.listAll(),
       ]);
       setChannels(chRes.data || []);
@@ -465,10 +453,10 @@ function RulesTab() {
       }
       const payload = { ...values, filters, project_id: values.project_id || null };
       if (editing) {
-        await notifApi.put(`/rules/${editing.id}`, payload);
+        await notifApi.put(`/notifications/rules/${editing.id}`, payload);
         message.success('更新成功');
       } else {
-        await notifApi.post('/rules', payload);
+        await notifApi.post('/notifications/rules', payload);
         message.success('创建成功');
       }
       setModalOpen(false);
@@ -481,7 +469,7 @@ function RulesTab() {
 
   async function handleDelete(id: string) {
     try {
-      await notifApi.delete(`/rules/${id}`);
+      await notifApi.delete(`/notifications/rules/${id}`);
       message.success('删除成功');
       loadData();
     } catch (e: any) {
@@ -654,7 +642,7 @@ function LogsTab() {
       if (event) params.event_type = event;
       if (status) params.status = status;
       const res = await notifApi.get<unknown, PageResponse<NotificationLog>>(
-        '/logs',
+        '/notifications/logs',
         { params }
       );
       setData(res.data || []);
@@ -670,9 +658,10 @@ function LogsTab() {
     loadData(1);
     // 加载渠道列表用于筛选
     notifApi
-      .get<unknown, PageResponse<NotificationChannel>>('/channels', {
-        params: { page: 1, page_size: 100 },
-      })
+      .get<unknown, PageResponse<NotificationChannel>>(
+        '/notifications/channels',
+        { params: { page: 1, page_size: 100 } }
+      )
       .then((res) => setChannels(res.data || []))
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps

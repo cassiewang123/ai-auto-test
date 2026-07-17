@@ -1,20 +1,7 @@
-import axios from 'axios';
 import type { ApiResponse } from '../types';
+import { apiClient } from './http';
 
-// CI/CD 集成模块专用 API 客户端（api.ts 为共享文件不可修改，故独立维护实例）
-const ciApi = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-ciApi.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const msg = error.response?.data?.message || error.message || '请求失败';
-    return Promise.reject(new Error(msg));
-  }
-);
+const ciApi = apiClient;
 
 // ========== 类型 ==========
 export interface ApiToken {
