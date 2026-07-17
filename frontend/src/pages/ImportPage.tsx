@@ -361,7 +361,7 @@ export default function ImportPage() {
                     type="info"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message="输入 OpenAPI/Swagger 文档的 JSON URL，系统将自动解析所有接口"
+                    title="输入 OpenAPI/Swagger 文档的 JSON URL，系统将自动解析所有接口"
                     description={
                       <span>
                         当前项目的 API 文档地址通常是：
@@ -391,7 +391,7 @@ export default function ImportPage() {
                     type="info"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message="直接粘贴 OpenAPI/Swagger 的 JSON 内容"
+                    title="直接粘贴 OpenAPI/Swagger 的 JSON 内容"
                   />
                   <TextArea
                     rows={10}
@@ -411,11 +411,11 @@ export default function ImportPage() {
                     type="info"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message="输入页面地址，系统将扫描页面并提取其中的 API 接口"
+                    title="输入页面地址，系统将扫描页面并提取其中的 API 接口"
                     description="适用于抓取前端页面（如后台管理系统）中调用的所有接口。"
                   />
                   <Row gutter={16}>
-                    <Col span={12}>
+                    <Col xs={24} md={12}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         页面 URL
                       </label>
@@ -425,7 +425,7 @@ export default function ImportPage() {
                         placeholder="http://robin.ep.local:30080/swgd-imap-operation-ui/"
                       />
                     </Col>
-                    <Col span={12}>
+                    <Col xs={24} md={12}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         Base URL（接口地址前缀）
                       </label>
@@ -437,7 +437,7 @@ export default function ImportPage() {
                     </Col>
                   </Row>
                   <Row gutter={16} style={{ marginTop: 16 }}>
-                    <Col span={16}>
+                    <Col xs={24} md={16}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         导入到项目
                       </label>
@@ -456,7 +456,11 @@ export default function ImportPage() {
                         </Button>
                       </div>
                     </Col>
-                    <Col span={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <Col
+                      xs={24}
+                      md={8}
+                      style={{ display: 'flex', alignItems: 'flex-end' }}
+                    >
                       <Button
                         type="primary"
                         icon={<SearchOutlined />}
@@ -480,7 +484,7 @@ export default function ImportPage() {
                     type="info"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message="上传浏览器导出的 HAR 抓包文件，系统将解析其中的接口请求"
+                    title="上传浏览器导出的 HAR 抓包文件，系统将解析其中的接口请求"
                     description="在浏览器 DevTools 的 Network 面板中，右键选择「Save all as HAR with content」导出 .har 文件。"
                   />
                   <Upload.Dragger
@@ -518,7 +522,7 @@ export default function ImportPage() {
                     </div>
                   )}
                   <Row gutter={16} style={{ marginTop: 16 }}>
-                    <Col span={8}>
+                    <Col xs={24} sm={12} md={8}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         域名/URL 筛选（可选）
                       </label>
@@ -528,7 +532,7 @@ export default function ImportPage() {
                         placeholder="如 example.com（仅保留包含该串的接口）"
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={12} md={8}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         请求方法筛选（可选）
                       </label>
@@ -544,7 +548,11 @@ export default function ImportPage() {
                         }))}
                       />
                     </Col>
-                    <Col span={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <Col
+                      xs={24}
+                      md={8}
+                      style={{ display: 'flex', alignItems: 'flex-end' }}
+                    >
                       <Button
                         type="primary"
                         icon={<EyeOutlined />}
@@ -566,7 +574,7 @@ export default function ImportPage() {
         {/* 通用配置：仅 OpenAPI 导入使用 */}
         {(activeTab === 'url' || activeTab === 'json') && (
           <Row gutter={16} style={{ marginBottom: 16, marginTop: 16 }}>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                 Base URL（请求地址前缀）
               </label>
@@ -576,7 +584,7 @@ export default function ImportPage() {
                 placeholder="http://localhost:8000"
               />
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                 路径前缀筛选（可选）
               </label>
@@ -586,7 +594,11 @@ export default function ImportPage() {
                 placeholder="如 /api/v1（仅导入此前缀的接口）"
               />
             </Col>
-            <Col span={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <Col
+              xs={24}
+              md={8}
+              style={{ display: 'flex', alignItems: 'flex-end' }}
+            >
               <Space>
                 <Button
                   type="primary"
@@ -606,7 +618,7 @@ export default function ImportPage() {
       {/* OpenAPI 预览结果 */}
       {(activeTab === 'url' || activeTab === 'json') && loading && (
         <Card style={{ marginTop: 16, textAlign: 'center' }}>
-          <Spin size="large" tip="正在解析 OpenAPI 文档..." />
+          <Spin size="large" description="正在解析 OpenAPI 文档..." />
         </Card>
       )}
 
@@ -642,7 +654,7 @@ export default function ImportPage() {
               {/* 方法统计 */}
               <Row gutter={16} style={{ marginBottom: 16 }}>
                 {Object.entries(methodStats).map(([method, count]) => (
-                  <Col span={4} key={method}>
+                  <Col xs={12} sm={8} md={6} lg={4} key={method}>
                     <Card size="small">
                       <Statistic
                         title={
@@ -702,7 +714,7 @@ export default function ImportPage() {
       {/* 页面抓取结果 */}
       {activeTab === 'capture' && scanLoading && (
         <Card style={{ marginTop: 16, textAlign: 'center' }}>
-          <Spin size="large" tip="正在扫描页面..." />
+          <Spin size="large" description="正在扫描页面..." />
         </Card>
       )}
 
@@ -771,7 +783,7 @@ export default function ImportPage() {
       {/* HAR 抓包预览结果 */}
       {activeTab === 'har' && harLoading && (
         <Card style={{ marginTop: 16, textAlign: 'center' }}>
-          <Spin size="large" tip="正在解析 HAR 文件..." />
+          <Spin size="large" description="正在解析 HAR 文件..." />
         </Card>
       )}
 
@@ -846,7 +858,7 @@ export default function ImportPage() {
         onOk={handleCreateProject}
         confirmLoading={creatingProject}
         onCancel={() => setProjectModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={projectForm} layout="vertical">
           <Form.Item

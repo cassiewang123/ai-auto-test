@@ -293,7 +293,7 @@ export default function TestPlansPage() {
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

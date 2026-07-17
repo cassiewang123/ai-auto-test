@@ -316,14 +316,14 @@ export default function PerfDashboardPage() {
                 style={{ marginBottom: 16 }}
                 type="error"
                 showIcon
-                message="压测执行出错"
+                title="压测执行出错"
                 description={error}
               />
             )}
 
             {/* 实时数字卡片 */}
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic
                     title="当前用户数"
@@ -332,26 +332,26 @@ export default function PerfDashboardPage() {
                   />
                 </Card>
               </Col>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic title="瞬时 RPS" value={instRps} precision={2} />
                 </Card>
               </Col>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic title="总请求数" value={totalReq} />
                 </Card>
               </Col>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic
                     title="失败请求数"
                     value={failReq}
-                    valueStyle={{ color: failReq > 0 ? '#cf1322' : '#3f8600' }}
+                    styles={{ content: { color: failReq > 0 ? '#cf1322' : '#3f8600' } }}
                   />
                 </Card>
               </Col>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic
                     title="平均响应时间"
@@ -361,14 +361,14 @@ export default function PerfDashboardPage() {
                   />
                 </Card>
               </Col>
-              <Col span={4}>
+              <Col xs={24} sm={12} md={8} lg={4}>
                 <Card size="small">
                   <Statistic
                     title="错误率"
                     value={errRate}
                     precision={2}
                     suffix="%"
-                    valueStyle={{ color: errorRateColor(errRate) }}
+                    styles={{ content: { color: errorRateColor(errRate) } }}
                   />
                 </Card>
               </Col>
@@ -376,7 +376,7 @@ export default function PerfDashboardPage() {
 
             {/* 实时折线图区域 */}
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={12}>
+              <Col xs={24} lg={12}>
                 <Card size="small" title="RPS（每秒请求数）趋势" styles={{ body: { height: 260 } }}>
                   {snapshots.length === 0 ? (
                     <EmptyBox loading={polling} />
@@ -393,7 +393,7 @@ export default function PerfDashboardPage() {
                   )}
                 </Card>
               </Col>
-              <Col span={12}>
+              <Col xs={24} lg={12}>
                 <Card size="small" title="平均响应时间趋势" styles={{ body: { height: 260 } }}>
                   {snapshots.length === 0 ? (
                     <EmptyBox loading={polling} />
@@ -412,7 +412,7 @@ export default function PerfDashboardPage() {
               </Col>
             </Row>
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={12}>
+              <Col xs={24} lg={12}>
                 <Card size="small" title="错误率趋势" styles={{ body: { height: 260 } }}>
                   {snapshots.length === 0 ? (
                     <EmptyBox loading={polling} />
@@ -429,7 +429,7 @@ export default function PerfDashboardPage() {
                   )}
                 </Card>
               </Col>
-              <Col span={12}>
+              <Col xs={24} lg={12}>
                 <Card size="small" title="活跃用户数趋势" styles={{ body: { height: 260 } }}>
                   {snapshots.length === 0 ? (
                     <EmptyBox loading={polling} />
@@ -475,7 +475,7 @@ export default function PerfDashboardPage() {
               {lrTotal === 0 && !isRunning ? (
                 <Empty description="暂无历史结果" />
               ) : (
-                <Descriptions bordered size="small" column={4} labelStyle={{ width: 120 }}>
+                <Descriptions bordered size="small" column={4} styles={{ label: { width: 120 } }}>
                   <Descriptions.Item label="总请求数">{lrTotal}</Descriptions.Item>
                   <Descriptions.Item label="成功数">
                     <span style={{ color: '#3f8600' }}>{lrSuccess}</span>
@@ -515,7 +515,7 @@ function EmptyBox({ loading }: { loading: boolean }) {
         justifyContent: 'center',
       }}
     >
-      {loading ? <Spin tip="等待数据..." /> : <Empty description="暂无实时数据" />}
+      {loading ? <Spin description="等待数据..." /> : <Empty description="暂无实时数据" />}
     </div>
   );
 }

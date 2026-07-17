@@ -404,7 +404,7 @@ export default function UiTestSuitesPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={680}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -494,7 +494,7 @@ export default function UiTestSuitesPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         <Table
           dataSource={runs}
@@ -582,7 +582,7 @@ export default function UiTestSuitesPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {runDetail ? (
           <div>
@@ -616,32 +616,32 @@ export default function UiTestSuitesPage() {
                 )}
             </div>
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={6}>
+              <Col xs={24} sm={12} lg={6}>
                 <Card size="small">
                   <Statistic title="总用例数" value={runDetail.total} />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} lg={6}>
                 <Card size="small">
                   <Statistic
                     title="通过"
                     value={runDetail.passed}
-                    valueStyle={{ color: '#52c41a' }}
+                    styles={{ content: { color: '#52c41a' } }}
                     prefix={<CheckCircleOutlined />}
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} lg={6}>
                 <Card size="small">
                   <Statistic
                     title="失败"
                     value={runDetail.failed}
-                    valueStyle={{ color: runDetail.failed > 0 ? '#ff4d4f' : '#52c41a' }}
+                    styles={{ content: { color: runDetail.failed > 0 ? '#ff4d4f' : '#52c41a' } }}
                     prefix={<CloseCircleOutlined />}
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} lg={6}>
                 <Card size="small">
                   <Statistic
                     title="总耗时"
@@ -665,20 +665,20 @@ export default function UiTestSuitesPage() {
                 style={{ marginBottom: 16 }}
               >
                 <Row gutter={16}>
-                  <Col span={6}>
+                  <Col xs={24} sm={12} md={6}>
                     <Statistic
                       title="总重试次数"
                       value={runDetail.total_retries || 0}
-                      valueStyle={{ color: '#4f46e5' }}
+                      styles={{ content: { color: '#4f46e5' } }}
                     />
                   </Col>
-                  <Col span={6}>
+                  <Col xs={24} sm={12} md={6}>
                     <Statistic
                       title="重试用例数"
                       value={(runDetail.retried_cases || []).length}
                     />
                   </Col>
-                  <Col span={12}>
+                  <Col xs={24} md={12}>
                     <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
                       重试过的用例：
                     </div>

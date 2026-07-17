@@ -243,17 +243,17 @@ export default function UiTestRecordsPage() {
     return (
       <div>
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="执行状态"
                 value={cfg.text}
-                valueStyle={{ fontWeight: 700 }}
+                styles={{ content: { fontWeight: 700 } }}
                 prefix={cfg.icon}
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="通过 / 总步骤"
@@ -261,7 +261,7 @@ export default function UiTestRecordsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="执行耗时"
@@ -271,7 +271,7 @@ export default function UiTestRecordsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="浏览器"
@@ -388,23 +388,23 @@ export default function UiTestRecordsPage() {
       >
         {/* 统计卡片 */}
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic title="总执行数" value={stats.total} />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="通过率"
                 value={stats.passRate}
                 precision={1}
                 suffix="%"
-                valueStyle={{ color: '#52c41a' }}
+                styles={{ content: { color: '#52c41a' } }}
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="平均耗时"
@@ -414,7 +414,7 @@ export default function UiTestRecordsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic title="最近执行时间" value={stats.lastTime} />
             </Card>
@@ -506,7 +506,7 @@ export default function UiTestRecordsPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {detailLoading && !detailRecord ? (
           <div style={{ textAlign: 'center', padding: 60 }}>加载中...</div>

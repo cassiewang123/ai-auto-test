@@ -488,7 +488,7 @@ export default function PerformanceTestPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={760}
-        destroyOnClose
+        destroyOnHidden
         data-testid={editing ? 'edit-modal' : 'create-modal'}
       >
         <Form form={form} layout="vertical">
@@ -543,7 +543,7 @@ export default function PerformanceTestPage() {
 
             {/* steady / 通用基础参数 */}
             <Row gutter={16}>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name={['config', 'users']}
                   label="并发用户数（steady/peak 基准）"
@@ -552,7 +552,7 @@ export default function PerformanceTestPage() {
                   <InputNumber min={1} max={1000} style={{ width: '100%' }} placeholder="10" />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name={['config', 'spawn_rate']}
                   label="启动速率（每秒启动用户数）"
@@ -561,7 +561,7 @@ export default function PerformanceTestPage() {
                   <InputNumber min={1} style={{ width: '100%' }} placeholder="5" />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name={['config', 'duration']}
                   label="持续时间（秒）"
@@ -570,7 +570,7 @@ export default function PerformanceTestPage() {
                   <InputNumber min={1} style={{ width: '100%' }} placeholder="60" />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item name={['config', 'ramp_up']} label="预热时间（秒）">
                   <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
                 </Form.Item>
@@ -580,7 +580,7 @@ export default function PerformanceTestPage() {
             {/* ramp 阶梯加压参数 */}
             {watchMode === 'ramp' && (
               <Row gutter={16}>
-                <Col span={6}>
+                <Col xs={24} sm={12} lg={6}>
                   <Form.Item
                     name={['config', 'ramp_config', 'start_users']}
                     label="起始用户"
@@ -588,7 +588,7 @@ export default function PerformanceTestPage() {
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} lg={6}>
                   <Form.Item
                     name={['config', 'ramp_config', 'step']}
                     label="阶梯步长"
@@ -596,7 +596,7 @@ export default function PerformanceTestPage() {
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} lg={6}>
                   <Form.Item
                     name={['config', 'ramp_config', 'stage_duration']}
                     label="每阶段持续（秒）"
@@ -604,7 +604,7 @@ export default function PerformanceTestPage() {
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} lg={6}>
                   <Form.Item
                     name={['config', 'ramp_config', 'max_users']}
                     label="最大用户"
@@ -618,7 +618,7 @@ export default function PerformanceTestPage() {
             {/* peak 峰值测试参数 */}
             {watchMode === 'peak' && (
               <Row gutter={16}>
-                <Col span={12}>
+                <Col xs={24} sm={12}>
                   <Form.Item
                     name={['config', 'peak_config', 'peak_users']}
                     label="峰值用户数"
@@ -626,7 +626,7 @@ export default function PerformanceTestPage() {
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
+                <Col xs={24} sm={12}>
                   <Form.Item
                     name={['config', 'peak_config', 'hold_duration']}
                     label="峰值保持时间（秒）"
@@ -644,7 +644,7 @@ export default function PerformanceTestPage() {
                   <>
                     {fields.map((field) => (
                       <Row key={field.key} gutter={8} align="middle">
-                        <Col span={7}>
+                        <Col xs={24} sm={7}>
                           <Form.Item
                             {...field}
                             name={[field.name, 'duration']}
@@ -654,7 +654,7 @@ export default function PerformanceTestPage() {
                             <InputNumber min={1} style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
-                        <Col span={7}>
+                        <Col xs={24} sm={7}>
                           <Form.Item
                             {...field}
                             name={[field.name, 'users']}
@@ -664,7 +664,7 @@ export default function PerformanceTestPage() {
                             <InputNumber min={0} style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
-                        <Col span={7}>
+                        <Col xs={24} sm={7}>
                           <Form.Item
                             {...field}
                             name={[field.name, 'spawn_rate']}
@@ -674,7 +674,7 @@ export default function PerformanceTestPage() {
                             <InputNumber min={1} style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
-                        <Col span={3} style={{ textAlign: 'center' }}>
+                        <Col xs={24} sm={3} style={{ textAlign: 'center' }}>
                           <MinusCircleOutlined
                             onClick={() => remove(field.name)}
                             style={{ color: '#dc2626' }}
@@ -699,7 +699,7 @@ export default function PerformanceTestPage() {
           {/* SLA 阈值区（功能16） */}
           <Card size="small" title="SLA 阈值（压测结束后自动评估）" style={{ marginBottom: 8 }}>
             <Row gutter={16}>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Form.Item
                   name={['config', 'sla', 'response_time_p95']}
                   label="P95 响应时间上限（ms）"
@@ -707,7 +707,7 @@ export default function PerformanceTestPage() {
                   <InputNumber min={0} style={{ width: '100%' }} placeholder="2000" />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Form.Item
                   name={['config', 'sla', 'error_rate']}
                   label="错误率上限（0-1，如 0.05）"
@@ -715,7 +715,7 @@ export default function PerformanceTestPage() {
                   <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.05" />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Form.Item
                   name={['config', 'sla', 'rps_min']}
                   label="RPS 下限"
@@ -754,29 +754,29 @@ export default function PerformanceTestPage() {
           </Button>
         }
         width={780}
-        destroyOnClose
+        destroyOnHidden
       >
         {running ? (
           <div style={{ textAlign: 'center', padding: 24 }}>
-            <Spin tip="压测执行中..." />
+            <Spin description="压测执行中..." />
             {liveSnapshot && (
               <Row gutter={16} style={{ marginTop: 24, textAlign: 'center' }}>
-                <Col span={6}>
+                <Col xs={24} sm={12} md={6}>
                   <Statistic title="当前用户数" value={liveSnapshot.active_users ?? 0} />
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} md={6}>
                   <Statistic title="瞬时 RPS" value={liveSnapshot.rps ?? 0} />
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} md={6}>
                   <Statistic title="总请求数" value={liveSnapshot.total_requests ?? 0} />
                 </Col>
-                <Col span={6}>
+                <Col xs={24} sm={12} md={6}>
                   <Statistic
                     title="错误率"
                     value={liveSnapshot.error_rate ?? 0}
                     precision={2}
                     suffix="%"
-                    valueStyle={{ color: errorColor }}
+                    styles={{ content: { color: errorColor } }}
                   />
                 </Col>
               </Row>
@@ -793,43 +793,43 @@ export default function PerformanceTestPage() {
               </div>
             )}
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={6}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic title="总请求数" value={totalReq} />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title="成功数"
                     value={successReq}
-                    valueStyle={{ color: '#3f8600' }}
+                    styles={{ content: { color: '#3f8600' } }}
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title="失败数"
                     value={failReq}
-                    valueStyle={{ color: '#cf1322' }}
+                    styles={{ content: { color: '#cf1322' } }}
                   />
                 </Card>
               </Col>
-              <Col span={6}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title="错误率"
                     value={errorRate}
                     precision={2}
                     suffix="%"
-                    valueStyle={{ color: errorColor }}
+                    styles={{ content: { color: errorColor } }}
                   />
                 </Card>
               </Col>
             </Row>
 
-            <Descriptions bordered size="small" column={2} labelStyle={{ width: 130 }}>
+            <Descriptions bordered size="small" column={2} styles={{ label: { width: 130 } }}>
               <Descriptions.Item label="平均响应时间">{fmtMs(avgRt)}</Descriptions.Item>
               <Descriptions.Item label="P50">{fmtMs(p50)}</Descriptions.Item>
               <Descriptions.Item label="P90">{fmtMs(p90)}</Descriptions.Item>

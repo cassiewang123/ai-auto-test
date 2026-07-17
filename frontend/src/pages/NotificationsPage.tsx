@@ -330,7 +330,7 @@ function ChannelsTab() {
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -558,7 +558,7 @@ function RulesTab() {
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

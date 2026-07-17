@@ -498,7 +498,12 @@ export default function StepLibraryPage() {
           <div>
             {detail.steps && detail.steps.length ? (
               <Table
-                rowKey={(_r: any, i?: number) => String(i ?? 0)}
+                rowKey={(record: any) =>
+                  String(
+                    record.id ||
+                    `${record.action || ''}-${record.selector || ''}-${record.value || ''}-${record.description || ''}`
+                  )
+                }
                 dataSource={detail.steps}
                 pagination={false}
                 size="small"

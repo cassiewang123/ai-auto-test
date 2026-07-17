@@ -399,7 +399,7 @@ export default function PerformanceReportPage() {
     <div>
       {/* 顶部统计卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="总压测次数"
@@ -408,7 +408,7 @@ export default function PerformanceReportPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="总请求数"
@@ -417,19 +417,19 @@ export default function PerformanceReportPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="平均错误率"
               value={avgErrorRate}
               precision={2}
               suffix="%"
-              valueStyle={{ color: errorRateColor(avgErrorRate) }}
+              styles={{ content: { color: errorRateColor(avgErrorRate) } }}
               prefix={<CloseCircleOutlined />}
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="平均响应时间"
@@ -495,8 +495,8 @@ export default function PerformanceReportPage() {
                         return (
                           <Table
                             dataSource={rows}
-                            rowKey={(r: any, idx?: number) =>
-                              pick(r, ['id', 'case_id', 'name']) || String(idx)
+                            rowKey={(record: any) =>
+                              pick(record, ['id', 'case_id', 'name']) || JSON.stringify(record)
                             }
                             columns={detailColumns}
                             size="small"
@@ -605,11 +605,11 @@ export default function PerformanceReportPage() {
         }
         open={monitorOpen}
         onClose={() => setMonitorOpen(false)}
-        width={720}
+        size={720}
       >
         {monitorLoading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
-            <Spin tip="加载监控数据..." />
+            <Spin description="加载监控数据..." />
           </div>
         ) : monitorMetrics.length === 0 ? (
           <Empty description="暂无监控数据" />
@@ -646,7 +646,9 @@ export default function PerformanceReportPage() {
             <Card size="small" title="监控明细">
               <Table
                 dataSource={monitorMetrics}
-                rowKey={(_r: any, idx?: number) => String(idx)}
+                rowKey={(record: any) =>
+                  String(pick(record, ['id', 'timestamp', 'elapsed']) ?? JSON.stringify(record))
+                }
                 size="small"
                 pagination={{ pageSize: 8, size: 'small' }}
                 scroll={{ x: 600 }}

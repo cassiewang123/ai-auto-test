@@ -374,7 +374,7 @@ export default function MockServicePage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={680}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}

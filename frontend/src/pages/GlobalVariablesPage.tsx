@@ -298,7 +298,7 @@ export default function GlobalVariablesPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

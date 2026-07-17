@@ -496,7 +496,7 @@ function WebhookTab() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ events: [], is_active: true }}>
           <Form.Item
@@ -572,7 +572,7 @@ function WebhookTab() {
             <Alert
               type={testResult.sent ? 'success' : 'warning'}
               showIcon
-              message={testResult.sent ? '测试请求已发送' : '测试请求未成功发送'}
+              title={testResult.sent ? '测试请求已发送' : '测试请求未成功发送'}
               style={{ marginBottom: 12 }}
             />
             <Descriptions column={1} bordered size="small">
@@ -624,7 +624,7 @@ function ExamplesTab() {
       <Alert
         type="info"
         showIcon
-        message="CI/CD 集成说明"
+        title="CI/CD 集成说明"
         description="通过 API Token 可以在 CI/CD 流水线中触发测试执行并查询结果。Token 支持通过 Authorization: Bearer 或 X-API-Key 两种方式传递。"
         style={{ marginBottom: 16 }}
       />

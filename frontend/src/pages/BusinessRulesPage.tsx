@@ -351,7 +351,7 @@ export default function BusinessRulesPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={620}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -404,12 +404,12 @@ export default function BusinessRulesPage() {
         onCancel={() => setPromoteOpen(false)}
         okText="执行升级"
         width={480}
-        destroyOnClose
+        destroyOnHidden
       >
         <p style={{ color: '#6b7280', marginBottom: 12 }}>
           将出现次数超过阈值的缺陷模式自动升级为业务规则。
         </p>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <span>出现次数阈值（大于该值才会被升级）</span>
           <InputNumber
             min={1}

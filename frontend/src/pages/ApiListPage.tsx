@@ -857,9 +857,9 @@ export default function ApiListPage() {
               </Space>
             </Empty>
           ) : (
-            <Row gutter={16}>
+            <Row gutter={[16, 16]}>
               {/* 左侧：分组目录树 */}
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <div style={{ maxHeight: 600, overflow: 'auto', borderRight: '1px solid #f3f4f6', paddingRight: 8 }}>
                   <div style={{ marginBottom: 8, fontWeight: 600, color: '#6b7280', fontSize: 13 }}>
                     <Space>
@@ -936,7 +936,7 @@ export default function ApiListPage() {
                 </div>
               </Col>
               {/* 右侧：选中分组的接口列表 */}
-              <Col span={16}>
+              <Col xs={24} md={16}>
                 <div style={{ marginBottom: 8, fontWeight: 600, color: '#6b7280', fontSize: 13 }}>
                   {selectedGroupPath ? (
                     <span>当前分组：{selectedGroupPath}（{treeViewCases.length} 个接口）</span>
@@ -981,7 +981,7 @@ export default function ApiListPage() {
         onOk={handleCreateProject}
         confirmLoading={creatingProject}
         onCancel={() => setProjectModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={projectForm} layout="vertical">
           <Form.Item
@@ -1011,7 +1011,7 @@ export default function ApiListPage() {
         confirmLoading={creatingCase}
         onCancel={() => setCaseModalOpen(false)}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={caseForm} layout="vertical" initialValues={{ method: 'GET' }}>
           <Form.Item
@@ -1063,7 +1063,7 @@ export default function ApiListPage() {
         onOk={confirmMove}
         confirmLoading={moving}
         onCancel={() => setMoveModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: '#6b7280' }}>
           选择目标项目，选中的接口将移动到该项目下。
@@ -1164,11 +1164,11 @@ export default function ApiListPage() {
         onCancel={() => setChangeLogOpen(false)}
         footer={<Button type="primary" onClick={() => setChangeLogOpen(false)}>关闭</Button>}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         {changeLogLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin tip="加载中..." />
+            <Spin description="加载中..." />
           </div>
         ) : changeLogs.length === 0 ? (
           <Empty description="暂无变更历史" />
@@ -1247,7 +1247,7 @@ export default function ApiListPage() {
           setMoveGroupModalOpen(false);
           setMoveGroupTarget('');
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: '#6b7280' }}>
           该分组下的所有接口将被移动到新的分组路径。输入新的分组路径（如“用户管理/认证”），留空则移到未分组。

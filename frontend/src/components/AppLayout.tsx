@@ -1,7 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Layout, Menu, theme, ConfigProvider, Space, Avatar, Dropdown } from 'antd';
+import {
+  Avatar,
+  Button,
+  ConfigProvider,
+  Drawer,
+  Dropdown,
+  Grid,
+  Layout,
+  Menu,
+  Space,
+  theme,
+} from 'antd';
 import { useAuth } from '../contexts/AuthContext';
-import { LogoutOutlined, UserOutlined } from '@ant-design/icons';
+import { LogoutOutlined, MenuOutlined, UserOutlined } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
@@ -23,8 +34,11 @@ const menuItems = getNavigationItems(appMode);
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const screens = Grid.useBreakpoint();
+  const isMobile = screens.md === false;
   const { token: themeToken } = theme.useToken();
   const { user, logout, loading } = useAuth();
   const [openKeys, setOpenKeys] = useState<string[]>(() =>
@@ -42,6 +56,12 @@ export default function AppLayout() {
     });
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileMenuOpen(false);
+    }
+  }, [isMobile]);
+
   // 认证守卫：加载中显示空白，加载完成且未登录才跳转
   if (loading) return null;
   if (!user) {
@@ -53,6 +73,43 @@ export default function AppLayout() {
     location.pathname
   );
   const selectedKeys = selectedItem ? [selectedItem.key] : [];
+  const handleMenuClick = (key: string) => {
+    navigate(key);
+    setMobileMenuOpen(false);
+  };
+
+  const menu = (
+    <Menu
+      theme="dark"
+      mode="inline"
+      selectedKeys={selectedKeys}
+      openKeys={openKeys}
+      onOpenChange={(keys) => setOpenKeys(keys)}
+      items={menuItems}
+      onClick={({ key }) => handleMenuClick(key)}
+      data-testid="sidebar-menu"
+      style={{ borderInlineEnd: 0 }}
+    />
+  );
+
+  const brand = (
+    <div
+      style={{
+        height: 48,
+        margin: 16,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontSize: collapsed && !isMobile ? 16 : 15,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+      }}
+    >
+      {collapsed && !isMobile ? 'AI' : 'AI 测试平台'}
+    </div>
+  );
 
   return (
     <ConfigProvider
@@ -97,50 +154,47 @@ export default function AppLayout() {
       }}
     >
       <Layout style={{ minHeight: '100vh' }}>
-        <Sider
-          collapsible
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
-          style={{
-            overflow: 'auto',
-            height: '100vh',
-            position: 'fixed',
-            left: 0,
-            top: 0,
-            bottom: 0,
-          }}
-        >
-          <div
+        {!isMobile && (
+          <Sider
+            collapsible
+            collapsed={collapsed}
+            onCollapse={setCollapsed}
             style={{
-              height: 48,
-              margin: 16,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: collapsed ? 16 : 15,
-              fontWeight: 700,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
+              overflow: 'auto',
+              height: '100vh',
+              position: 'fixed',
+              left: 0,
+              top: 0,
+              bottom: 0,
             }}
           >
-            {collapsed ? 'AI' : 'AI 测试平台'}
-          </div>
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={selectedKeys}
-            openKeys={openKeys}
-            onOpenChange={(keys) => setOpenKeys(keys)}
-            items={menuItems}
-            onClick={({ key }) => navigate(key)}
-            data-testid="sidebar-menu"
-          />
-        </Sider>
-        <Layout style={{ marginLeft: collapsed ? 80 : 200, transition: 'all 0.2s' }}>
+            {brand}
+            {menu}
+          </Sider>
+        )}
+        <Drawer
+          placement="left"
+          open={isMobile && mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          closable={false}
+          size={260}
+          styles={{
+            body: { padding: 0, background: '#0f172a' },
+            header: { display: 'none' },
+          }}
+        >
+          {brand}
+          {menu}
+        </Drawer>
+        <Layout
+          style={{
+            marginLeft: isMobile ? 0 : collapsed ? 80 : 200,
+            transition: 'all 0.2s',
+          }}
+        >
           <Header
             style={{
-              padding: '0 24px',
+              padding: isMobile ? '0 12px' : '0 24px',
               background: themeToken.colorBgContainer,
               display: 'flex',
               alignItems: 'center',
@@ -151,13 +205,29 @@ export default function AppLayout() {
               zIndex: 10,
             }}
           >
-            <span style={{ fontSize: 16, fontWeight: 600 }}>
-              {selectedItem?.label ?? 'AI 测试平台'}
-            </span>
-            <Space size="large" align="center">
-              <span style={{ color: '#6b7280', fontSize: 13 }}>
-                {dayjs().format('YYYY-MM-DD dddd')}
+            <Space size="small" style={{ minWidth: 0, overflow: 'hidden' }}>
+              {isMobile && (
+                <Button
+                  type="text"
+                  icon={<MenuOutlined />}
+                  aria-label="打开导航菜单"
+                  onClick={() => setMobileMenuOpen(true)}
+                />
+              )}
+              <span className="app-header-title" style={{ fontSize: 16, fontWeight: 600 }}>
+                {selectedItem?.label ?? 'AI 测试平台'}
               </span>
+            </Space>
+            <Space
+              className="app-header-actions"
+              size={isMobile ? 'small' : 'large'}
+              align="center"
+            >
+              {!isMobile && (
+                <span style={{ color: '#6b7280', fontSize: 13 }}>
+                  {dayjs().format('YYYY-MM-DD dddd')}
+                </span>
+              )}
               <Dropdown
                 menu={{
                   items: [
@@ -183,9 +253,9 @@ export default function AppLayout() {
                     icon={<UserOutlined />}
                     style={{ backgroundColor: '#4f46e5' }}
                   />
-                  <span style={{ fontSize: 14 }}>
+                  <span className="app-user-name" style={{ fontSize: 14 }}>
                     {user.username}
-                    {user.is_superuser && (
+                    {user.is_superuser && !isMobile && (
                       <span style={{ color: '#4f46e5', marginLeft: 4, fontSize: 12 }}>
                         (管理员)
                       </span>
@@ -197,11 +267,12 @@ export default function AppLayout() {
           </Header>
           <Content
             style={{
-              margin: 24,
-              padding: 24,
+              margin: isMobile ? 8 : 24,
+              padding: isMobile ? 12 : 24,
               background: '#f9fafb',
-              borderRadius: 12,
+              borderRadius: isMobile ? 0 : 8,
               minHeight: 280,
+              minWidth: 0,
             }}
           >
             <Outlet />

@@ -351,7 +351,7 @@ export default function UiElementsPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={620}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ selector_type: 'css' }}>
           <Form.Item

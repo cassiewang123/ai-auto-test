@@ -355,7 +355,7 @@ export default function ScheduledTasksPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ mode: 'interval', is_enabled: true }}>
           <Form.Item

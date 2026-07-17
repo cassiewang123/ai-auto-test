@@ -461,15 +461,15 @@ export default function QuickTestPage() {
         }
       >
         {/* 请求行 */}
-        <Space style={{ width: '100%', marginBottom: 16 }} size="middle">
-          <Select value={method} onChange={setMethod} style={{ width: 120 }} data-testid="method-select"
+        <div className="quick-test-request-row">
+          <Select value={method} onChange={setMethod} data-testid="method-select"
             options={METHODS.map((m) => ({ label: m, value: m }))} />
           <Input placeholder="https://api.example.com/users" value={url} data-testid="url-input"
-            onChange={(e) => setUrl(e.target.value)} style={{ flex: 1, minWidth: 500 }}
+            onChange={(e) => setUrl(e.target.value)}
             onPressEnter={handleExecute} />
-          <span style={{ color: '#6b7280' }}>超时(s):</span>
-          <InputNumber value={timeout} onChange={(v) => setTimeoutVal(v || 30)} min={1} max={300} style={{ width: 80 }} />
-        </Space>
+          <span className="quick-test-timeout-label" style={{ color: '#6b7280' }}>超时(s):</span>
+          <InputNumber value={timeout} onChange={(v) => setTimeoutVal(v || 30)} min={1} max={300} />
+        </div>
 
         <Tabs
           items={[
@@ -904,7 +904,7 @@ export default function QuickTestPage() {
       {/* 主请求执行结果 */}
       {executing && (
         <Card style={{ marginTop: 16, textAlign: 'center' }}>
-          <Spin size="large" tip="正在发送请求..." />
+          <Spin size="large" description="正在发送请求..." />
         </Card>
       )}
 
@@ -962,7 +962,7 @@ export default function QuickTestPage() {
             <Card type="inner" title="断言结果" style={{ marginBottom: 16 }}>
               <Table
                 dataSource={result.assertion_results}
-                rowKey={(_, idx) => String(idx)}
+                rowKey={(record) => JSON.stringify(record)}
                 pagination={false} size="small"
                 columns={[
                   { title: '结果', dataIndex: 'passed', width: 60,
@@ -1081,7 +1081,7 @@ export default function QuickTestPage() {
         confirmLoading={saving}
         onCancel={() => setSaveModalOpen(false)}
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 16, padding: 12, background: '#f9fafb', borderRadius: 6, fontSize: 13 }}>
           <Space>

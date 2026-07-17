@@ -732,17 +732,17 @@ export default function JobsPage() {
             </Space>
           ),
           children: (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
               {activeEvidence === 'placeholder' && (
                 <Alert
                   type="warning"
                   showIcon
-                  message="该结果是占位执行"
+                  title="该结果是占位执行"
                   description="任务状态即使显示成功，也不代表浏览器、套件或性能测试已真实运行。"
                   data-testid="placeholder-warning"
                 />
               )}
-              {detailError && <Alert type="warning" showIcon message={detailError} />}
+              {detailError && <Alert type="warning" showIcon title={detailError} />}
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="任务 ID" span={2}>
                   <Text copyable={{ text: activeJob.id }}>{activeJob.id}</Text>
@@ -811,7 +811,7 @@ export default function JobsPage() {
                 <Alert
                   type="error"
                   showIcon
-                  message={activeJob.error_code || '任务执行失败'}
+                  title={activeJob.error_code || '任务执行失败'}
                   description={
                     <Text style={{ whiteSpace: 'pre-wrap' }}>
                       {activeJob.error_message || '未返回错误详情'}
@@ -824,7 +824,7 @@ export default function JobsPage() {
                 <Alert
                   type={activeEvidence === 'real' ? 'success' : 'info'}
                   showIcon
-                  message={activeEvidenceMeta.label}
+                  title={activeEvidenceMeta.label}
                   description={activeEvidenceMeta.description}
                 />
               )}
@@ -995,8 +995,8 @@ export default function JobsPage() {
             </Space>
           ),
           children: (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Alert type="info" showIcon message="当前接口仅提供产物元数据，未返回可下载地址" />
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+              <Alert type="info" showIcon title="当前接口仅提供产物元数据，未返回可下载地址" />
               <Table<JobArtifact>
                 rowKey="id"
                 size="small"
@@ -1090,10 +1090,10 @@ export default function JobsPage() {
           </Space>
         }
         placement="right"
-        width="min(780px, 100vw)"
+        size="min(780px, 100vw)"
         open={drawerOpen}
         onClose={closeDrawer}
-        destroyOnClose
+        destroyOnHidden
       >
         {detailLoading ? (
           <div
@@ -1104,7 +1104,7 @@ export default function JobsPage() {
               justifyContent: 'center',
             }}
           >
-            <Spin tip="加载任务详情" />
+            <Spin description="加载任务详情" />
           </div>
         ) : activeJob ? (
           <Tabs defaultActiveKey="overview" items={detailTabs} />

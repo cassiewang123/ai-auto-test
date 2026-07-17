@@ -301,7 +301,7 @@ export default function EnvironmentsPage() {
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -381,7 +381,9 @@ export default function EnvironmentsPage() {
           </div>
           <Table
             dataSource={cookies || []}
-            rowKey={(_, idx) => String(idx)}
+            rowKey={(record) =>
+              `${record.name}-${record.domain || ''}-${record.path || ''}`
+            }
             pagination={false}
             size="small"
             locale={{ emptyText: '暂无 Cookie' }}
@@ -442,7 +444,7 @@ export default function EnvironmentsPage() {
         onOk={handleCookieSubmit}
         onCancel={() => setCookieModalOpen(false)}
         width={480}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={cookieForm} layout="vertical">
           <Form.Item

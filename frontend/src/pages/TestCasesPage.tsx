@@ -489,7 +489,7 @@ export default function TestCasesPage() {
       title: '排序',
       width: 70,
       render: (_: any, record: TestCase, index: number) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Button
             size="small"
             type="text"
@@ -649,7 +649,7 @@ export default function TestCasesPage() {
         confirmLoading={saving}
         onCancel={() => setCaseModalOpen(false)}
         width={760}
-        destroyOnClose
+        destroyOnHidden
         data-testid={editingCase ? 'edit-modal' : 'create-modal'}
       >
         <Tabs
@@ -810,7 +810,7 @@ export default function TestCasesPage() {
         confirmLoading={assertionSaving}
         onCancel={() => setAssertionModalOpen(false)}
         width={680}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={assertionForm} layout="vertical">
           <Form.Item name="name" label="断言名称" rules={[{ required: true, message: '请输入断言名称' }]}>
@@ -876,7 +876,7 @@ export default function TestCasesPage() {
                   <Alert
                     type={testResult.passed ? 'success' : 'error'}
                     showIcon
-                    message={testResult.passed ? '断言通过' : '断言未通过'}
+                    title={testResult.passed ? '断言通过' : '断言未通过'}
                     description={
                       <div style={{ fontSize: 13 }}>
                         <div><span style={{ color: '#6b7280' }}>SQL：</span><code>{testResult.sql}</code></div>
@@ -905,7 +905,7 @@ export default function TestCasesPage() {
         onOk={confirmMove}
         confirmLoading={moving}
         onCancel={() => setMoveModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 12, color: '#6b7280' }}>选择目标项目，选中的用例将移动到该项目下。</div>
         <Select
@@ -987,11 +987,11 @@ export default function TestCasesPage() {
         onCancel={() => setChangeLogOpen(false)}
         footer={<Button type="primary" onClick={() => setChangeLogOpen(false)}>关闭</Button>}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         {changeLogLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin tip="加载中..." />
+            <Spin description="加载中..." />
           </div>
         ) : changeLogs.length === 0 ? (
           <Empty description="暂无变更历史" />

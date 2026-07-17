@@ -483,7 +483,7 @@ export default function TestDataPage() {
         onCancel={() => setEditModalOpen(false)}
         width={800}
         confirmLoading={saving}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -541,11 +541,11 @@ export default function TestDataPage() {
                 type="info"
                 showIcon
                 style={{ marginBottom: 8 }}
-                message={`解析到 ${preview.variables.length} 个变量：${preview.variables.join(', ')}`}
+                title={`解析到 ${preview.variables.length} 个变量：${preview.variables.join(', ')}`}
               />
               <Table
                 dataSource={preview.rows.slice(0, 5)}
-                rowKey={(_, idx) => String(idx)}
+                rowKey={(record) => JSON.stringify(record)}
                 size="small"
                 pagination={false}
                 scroll={{ x: 'max-content' }}
@@ -580,14 +580,14 @@ export default function TestDataPage() {
           </Space>
         }
         width={1000}
-        destroyOnClose
+        destroyOnHidden
       >
         {!execResult ? (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <Alert
               type="info"
               showIcon
-              message={`将对用例下 ${dataSets.filter((d) => d.is_active).length} 个启用的数据集执行数据驱动测试`}
+              title={`将对用例下 ${dataSets.filter((d) => d.is_active).length} 个启用的数据集执行数据驱动测试`}
             />
             <div>
               <span style={{ marginRight: 8 }}>选择数据集：</span>
@@ -619,7 +619,7 @@ export default function TestDataPage() {
             </div>
           </Space>
         ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <Space size="large">
               <Tag color="blue">总计 {execResult.total}</Tag>
               <Tag color="green">通过 {execResult.passed}</Tag>

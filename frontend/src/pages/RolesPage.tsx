@@ -254,7 +254,7 @@ export default function RolesPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

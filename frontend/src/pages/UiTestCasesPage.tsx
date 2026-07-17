@@ -503,19 +503,19 @@ export default function UiTestCasesPage() {
       <div>
         {/* 统计概览 */}
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="执行状态"
                 value={statusText}
-                valueStyle={{ color: statusColor, fontWeight: 700 }}
+                styles={{ content: { color: statusColor, fontWeight: 700 } }}
                 prefix={
                   status === 'passed' ? <CheckCircleOutlined /> : <CloseCircleOutlined />
                 }
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="通过 / 总步骤"
@@ -523,7 +523,7 @@ export default function UiTestCasesPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="执行耗时"
@@ -533,7 +533,7 @@ export default function UiTestCasesPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card size="small">
               <Statistic
                 title="浏览器"
@@ -708,28 +708,28 @@ export default function UiTestCasesPage() {
             style={{ marginTop: 16 }}
           >
             <Row gutter={16} style={{ marginBottom: 12 }}>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Statistic
                   title="差异分数"
                   value={runResult.visual_diff.diff_score}
                   precision={4}
-                  valueStyle={{
+                  styles={{ content: {
                     color: runResult.visual_diff.passed ? '#52c41a' : '#ff4d4f',
-                  }}
+                  } }}
                 />
               </Col>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Statistic
                   title="阈值"
                   value={runResult.visual_diff.threshold}
                   precision={2}
                 />
               </Col>
-              <Col span={8}>
+              <Col xs={24} md={8}>
                 <Statistic
                   title="基线名称"
                   value={runResult.visual_diff.baseline_name || '-'}
-                  valueStyle={{ fontSize: 14 }}
+                  styles={{ content: { fontSize: 14 } }}
                 />
               </Col>
             </Row>
@@ -1194,7 +1194,13 @@ export default function UiTestCasesPage() {
           ) : (
             <Table
               dataSource={recordEvents}
-              rowKey={(_, idx) => String(idx)}
+              rowKey={(record) =>
+                String(
+                  record.id ||
+                  record.timestamp ||
+                  `${record.action}-${record.selector || ''}-${record.value || ''}`
+                )
+              }
               pagination={false}
               size="small"
               columns={[
@@ -1383,7 +1389,7 @@ export default function UiTestCasesPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={860}
-        destroyOnClose
+        destroyOnHidden
         data-testid={editing ? 'edit-modal' : 'create-modal'}
       >
         <Form
@@ -1759,7 +1765,12 @@ export default function UiTestCasesPage() {
           <div style={{ textAlign: 'center', padding: 24 }}>加载中...</div>
         ) : stepGroupPreview && stepGroupPreview.steps && stepGroupPreview.steps.length ? (
           <Table
-            rowKey={(_r: any, i?: number) => String(i ?? 0)}
+            rowKey={(record: any) =>
+              String(
+                record.id ||
+                `${record.action || ''}-${record.selector || ''}-${record.value || ''}-${record.description || ''}`
+              )
+            }
             dataSource={stepGroupPreview.steps}
             pagination={false}
             size="small"
@@ -1805,11 +1816,11 @@ export default function UiTestCasesPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {running && !runResult ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
-            <Spin tip="正在执行 UI 自动化测试..." size="large" />
+            <Spin description="正在执行 UI 自动化测试..." size="large" />
           </div>
         ) : (
           renderResultContent()
@@ -1828,7 +1839,7 @@ export default function UiTestCasesPage() {
         onCancel={closeRecording}
         width={700}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         {renderRecordingContent()}
       </Modal>
@@ -1849,7 +1860,7 @@ export default function UiTestCasesPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {/* 已有基线列表 */}
         <Card
@@ -1915,7 +1926,7 @@ export default function UiTestCasesPage() {
 
         {/* 新建基线 */}
         <Card size="small" title="新建基线">
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <div>
               <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>
                 基线名称

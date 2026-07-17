@@ -137,7 +137,7 @@ export default function ApiDocsPage() {
         key={c.id}
         size="small"
         style={{ marginBottom: 12 }}
-        bodyStyle={{ padding: 16 }}
+        styles={{ body: { padding: 16 } }}
       >
         {/* 标题行：方法 + URL + 试一下按钮 */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
@@ -266,7 +266,7 @@ export default function ApiDocsPage() {
       >
         {loading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
-            <Spin tip="加载接口文档..." />
+            <Spin description="加载接口文档..." />
           </div>
         ) : groupedCases.length === 0 ? (
           <Empty description="暂无接口，请先在接口定义中创建或导入" style={{ padding: 40 }} />

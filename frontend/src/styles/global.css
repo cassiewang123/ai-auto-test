@@ -1,0 +1,100 @@
+html,
+body,
+#root {
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.ant-layout,
+.ant-layout-content,
+.ant-card,
+.ant-card-body,
+.ant-form-item,
+.ant-form-item-control,
+.ant-form-item-control-input,
+.ant-form-item-control-input-content {
+  min-width: 0;
+}
+
+.ant-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-group-wrapper,
+.ant-input-number,
+.ant-picker,
+.ant-select,
+.ant-upload-wrapper {
+  max-width: 100%;
+}
+
+.app-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header-actions {
+  flex: none;
+}
+
+.quick-test-request-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto 80px;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.quick-test-request-row .ant-input-number {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .app-user-name {
+    display: none;
+  }
+
+  .quick-test-request-row {
+    grid-template-columns: 100px minmax(0, 1fr);
+    gap: 12px 8px;
+  }
+
+  .quick-test-timeout-label {
+    justify-self: end;
+  }
+
+  .ant-card .ant-card-head {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+
+  .ant-card .ant-card-body {
+    padding: 12px;
+  }
+
+  .ant-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+    margin: 8px auto;
+    top: 8px;
+  }
+
+  .ant-drawer-content-wrapper {
+    max-width: calc(100vw - 32px);
+  }
+
+  .ant-space {
+    max-width: 100%;
+  }
+}

@@ -271,7 +271,7 @@ export default function ProjectsPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={560}
-        destroyOnClose
+        destroyOnHidden
         data-testid={editing ? 'edit-modal' : 'create-modal'}
       >
         <Form form={form} layout="vertical">

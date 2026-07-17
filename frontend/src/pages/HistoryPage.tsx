@@ -117,33 +117,33 @@ export default function HistoryPage() {
     <div>
       {/* 统计卡片 */}
       {stats && (
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
               <Statistic title="总调用" value={stats.total} />
             </Card>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
-              <Statistic title="通过" value={stats.passed} valueStyle={{ color: '#059669' }} />
+              <Statistic title="通过" value={stats.passed} styles={{ content: { color: '#059669' } }} />
             </Card>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
-              <Statistic title="失败" value={stats.failed} valueStyle={{ color: '#dc2626' }} />
+              <Statistic title="失败" value={stats.failed} styles={{ content: { color: '#dc2626' } }} />
             </Card>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
-              <Statistic title="错误" value={stats.error} valueStyle={{ color: '#d97706' }} />
+              <Statistic title="错误" value={stats.error} styles={{ content: { color: '#d97706' } }} />
             </Card>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
               <Statistic title="通过率" value={stats.pass_rate} suffix="%" />
             </Card>
           </Col>
-          <Col span={4}>
+          <Col xs={12} sm={8} lg={4}>
             <Card size="small">
               <Statistic title="平均耗时" value={stats.avg_duration} suffix="s" />
             </Card>
@@ -170,7 +170,14 @@ export default function HistoryPage() {
         }
       >
         {/* 筛选栏 */}
-        <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
+        <div
+          style={{
+            marginBottom: 16,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
           <Select
             placeholder="按状态筛选"
             allowClear
@@ -195,7 +202,7 @@ export default function HistoryPage() {
           <Input.Search
             placeholder="搜索 URL"
             allowClear
-            style={{ width: 300 }}
+            style={{ flex: '1 1 220px', minWidth: 0, maxWidth: 300 }}
             value={filterUrl}
             onChange={(e) => setFilterUrl(e.target.value)}
             onSearch={() => {
@@ -375,7 +382,7 @@ export default function HistoryPage() {
                   children: (
                     <Table
                       dataSource={detail.assertion_results || []}
-                      rowKey={(_, idx) => String(idx)}
+                      rowKey={(record) => JSON.stringify(record)}
                       pagination={false}
                       size="small"
                       columns={[

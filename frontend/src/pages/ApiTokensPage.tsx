@@ -211,7 +211,7 @@ export default function ApiTokensPage() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" initialValues={{ scopes: [] }}>
           <Form.Item
@@ -256,14 +256,14 @@ export default function ApiTokensPage() {
           </Button>
         }
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         {createdToken && (
           <div>
             <Alert
               type="warning"
               showIcon
-              message="请立即保存此 Token"
+              title="请立即保存此 Token"
               description="完整 Token 仅在此次创建时显示一次，关闭后将无法再次查看。请妥善保管。"
               style={{ marginBottom: 16 }}
             />

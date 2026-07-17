@@ -284,7 +284,7 @@ export default function UsersPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -336,7 +336,7 @@ export default function UsersPage() {
         confirmLoading={roleSubmitting}
         onCancel={() => setRoleModalOpen(false)}
         width={480}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form layout="vertical">
           <Form.Item label="选择角色">

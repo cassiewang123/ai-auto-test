@@ -330,7 +330,7 @@ export default function InterfaceKnowledgePage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

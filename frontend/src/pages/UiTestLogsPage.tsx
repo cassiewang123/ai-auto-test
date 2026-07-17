@@ -308,7 +308,7 @@ export default function UiTestLogsPage() {
 
         <Table
           dataSource={data}
-          rowKey={(r, idx) => r.id || String(idx)}
+          rowKey={(record) => record.id || JSON.stringify(record)}
           loading={loading}
           pagination={{
             current: page,

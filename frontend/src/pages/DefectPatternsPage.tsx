@@ -359,7 +359,7 @@ export default function DefectPatternsPage() {
         confirmLoading={submitting}
         onCancel={() => setModalOpen(false)}
         width={620}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -415,7 +415,7 @@ export default function DefectPatternsPage() {
         }}
         okText="提取"
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <p style={{ color: '#6b7280', marginBottom: 12 }}>
           输入测试结果（TestResult）ID，系统将从其 AI 归因分析结果中提取缺陷模式。

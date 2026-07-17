@@ -158,7 +158,7 @@ export default function AiOpsPage() {
     <div data-testid="ai-ops-page">
       <div data-testid="ai-stats-cards" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card loading={statsLoading}>
               <Statistic
                 title="调用次数"
@@ -167,7 +167,7 @@ export default function AiOpsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card loading={statsLoading}>
               <Statistic
                 title="总成本 (USD)"
@@ -177,7 +177,7 @@ export default function AiOpsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card loading={statsLoading}>
               <Statistic
                 title="Token 用量"
@@ -186,14 +186,14 @@ export default function AiOpsPage() {
               />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} lg={6}>
             <Card loading={statsLoading}>
               <Statistic
                 title="采纳率 (%)"
                 value={stats?.acceptance_rate ?? 0}
                 precision={1}
                 prefix={<CheckCircleOutlined />}
-                valueStyle={{ color: '#059669' }}
+                styles={{ content: { color: '#059669' } }}
               />
             </Card>
           </Col>

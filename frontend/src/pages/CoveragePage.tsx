@@ -152,7 +152,7 @@ export default function CoveragePage() {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 80 }}>
-          <Spin tip="加载覆盖率数据..." />
+          <Spin description="加载覆盖率数据..." />
         </div>
       ) : !data ? (
         <Card>
@@ -161,8 +161,8 @@ export default function CoveragePage() {
       ) : (
         <>
           {/* 顶部统计卡片 */}
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={6}>
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={24} sm={12} lg={6}>
               <Card>
                 <Statistic
                   title="接口总数"
@@ -171,43 +171,43 @@ export default function CoveragePage() {
                 />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col xs={24} sm={12} lg={6}>
               <Card>
                 <Statistic
                   title="已覆盖"
                   value={data.covered}
-                  valueStyle={{ color: '#52c41a' }}
+                  styles={{ content: { color: '#52c41a' } }}
                   prefix={<CheckCircleOutlined />}
                 />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col xs={24} sm={12} lg={6}>
               <Card>
                 <Statistic
                   title="未覆盖"
                   value={data.uncovered}
-                  valueStyle={{ color: '#ff4d4f' }}
+                  styles={{ content: { color: '#ff4d4f' } }}
                   prefix={<CloseCircleOutlined />}
                 />
               </Card>
             </Col>
-            <Col span={6}>
+            <Col xs={24} sm={12} lg={6}>
               <Card>
                 <Statistic
                   title="覆盖率"
                   value={data.coverage_rate}
                   precision={1}
                   suffix="%"
-                  valueStyle={{ color: rateColor }}
+                  styles={{ content: { color: rateColor } }}
                   prefix={<PieChartOutlined />}
                 />
               </Card>
             </Col>
           </Row>
 
-          <Row gutter={16}>
+          <Row gutter={[16, 16]}>
             {/* 左侧：总覆盖率环形图 */}
-            <Col span={10}>
+            <Col xs={24} lg={10}>
               <Card title="总覆盖率" style={{ marginBottom: 16 }}>
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
                   <Progress
@@ -232,7 +232,7 @@ export default function CoveragePage() {
             </Col>
 
             {/* 右侧：按方法分布柱状图 */}
-            <Col span={14}>
+            <Col xs={24} lg={14}>
               <Card title="按请求方法分布" style={{ marginBottom: 16 }}>
                 {data.by_method && data.by_method.length > 0 ? (
                   data.by_method.map((m: any) => {

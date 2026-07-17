@@ -338,7 +338,7 @@ export default function AIPage() {
             children: (
               <div>
                 <Card title="步骤 1：选择数据源" style={{ marginBottom: 16 }}>
-                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  <Space orientation="vertical" style={{ width: '100%' }} size="middle">
                     <Radio.Group
                       value={sourceType}
                       onChange={(e) => setSourceType(e.target.value)}
@@ -447,7 +447,9 @@ export default function AIPage() {
                     }
                   >
                     <Table
-                      rowKey={(_, idx) => String(idx)}
+                      rowKey={(record) =>
+                        `${record.title}-${record.method}-${record.url}`
+                      }
                       columns={structuredColumns}
                       dataSource={structuredCases}
                       size="small"
@@ -459,7 +461,7 @@ export default function AIPage() {
                       expandable={{
                         expandedRowRender: (record: StructuredCase) => (
                           <div style={{ padding: '8px 0' }}>
-                            <Space direction="vertical" style={{ width: '100%' }}>
+                            <Space orientation="vertical" style={{ width: '100%' }}>
                               {record.description && (
                                 <Text type="secondary">描述: {record.description}</Text>
                               )}
@@ -623,7 +625,7 @@ export default function AIPage() {
                     title="分析结果"
                     style={{ marginTop: 16 }}
                   >
-                    <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space orientation="vertical" style={{ width: '100%' }}>
                       <div>
                         <Tag color="red">根因</Tag>
                         {analysis.root_cause || '-'}

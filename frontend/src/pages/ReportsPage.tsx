@@ -582,8 +582,8 @@ export default function ReportsPage() {
   return (
     <div>
       {/* 顶部统计卡片 */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="总执行次数"
@@ -592,21 +592,21 @@ export default function ReportsPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="总通过率"
               value={overallPassRate}
               precision={1}
               suffix="%"
-              valueStyle={{
+              styles={{ content: {
                 color: overallPassRate >= 80 ? '#3f8600' : '#cf1322',
-              }}
+              } }}
               prefix={<CheckCircleOutlined />}
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="总用例数"
@@ -615,7 +615,7 @@ export default function ReportsPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="平均耗时"
@@ -683,56 +683,56 @@ export default function ReportsPage() {
             关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {detailLoading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
-            <Spin tip="加载中..." />
+            <Spin description="加载中..." />
           </div>
         ) : detail ? (
           <div>
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={10}>
+            <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+              <Col xs={24} lg={10}>
                 <Card size="small" title="结果占比">
                   <div style={{ height: 220, width: '100%' }}>
                     <canvas ref={pieCanvasRef} />
                   </div>
                 </Card>
               </Col>
-              <Col span={14}>
+              <Col xs={24} lg={14}>
                 <Card size="small" title="执行概览">
                   <Row gutter={[16, 12]}>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="总数"
                         value={Number(pick(detail, ['total'])) || 0}
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="通过"
                         value={Number(pick(detail, ['passed'])) || 0}
-                        valueStyle={{ color: '#52c41a' }}
+                        styles={{ content: { color: '#52c41a' } }}
                         prefix={<CheckCircleOutlined />}
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="失败"
                         value={Number(pick(detail, ['failed'])) || 0}
-                        valueStyle={{ color: '#ff4d4f' }}
+                        styles={{ content: { color: '#ff4d4f' } }}
                         prefix={<CloseCircleOutlined />}
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="错误"
                         value={Number(pick(detail, ['error'])) || 0}
-                        valueStyle={{ color: '#faad14' }}
+                        styles={{ content: { color: '#faad14' } }}
                         prefix={<ExclamationCircleOutlined />}
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="总耗时"
                         value={Number(pick(detail, ['duration', 'duration_sum'])) || 0}
@@ -740,7 +740,7 @@ export default function ReportsPage() {
                         suffix="s"
                       />
                     </Col>
-                    <Col span={8}>
+                    <Col xs={12} md={8}>
                       <Statistic
                         title="通过率"
                         value={
@@ -761,8 +761,8 @@ export default function ReportsPage() {
             <Card size="small" title="详细结果列表">
               <Table
                 dataSource={detailResults}
-                rowKey={(record: any, idx?: number) =>
-                  pick(record, ['id', 'test_case_id', 'case_id']) || String(idx)
+                rowKey={(record: any) =>
+                  pick(record, ['id', 'test_case_id', 'case_id']) || JSON.stringify(record)
                 }
                 size="small"
                 pagination={{ pageSize: 8 }}
@@ -775,8 +775,8 @@ export default function ReportsPage() {
               <Card size="small" title="数据库断言结果" style={{ marginTop: 16 }}>
                 <Table
                   dataSource={dbAssertionResults}
-                  rowKey={(record: any, idx?: number) =>
-                    pick(record, ['id', 'assertion_id', 'name']) || String(idx)
+                  rowKey={(record: any) =>
+                    pick(record, ['id', 'assertion_id', 'name']) || JSON.stringify(record)
                   }
                   size="small"
                   pagination={{ pageSize: 8 }}
