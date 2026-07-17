@@ -19,6 +19,7 @@ import {
   Spin,
   Segmented,
   Dropdown,
+  Tooltip,
   Row,
   Col,
 } from 'antd';
@@ -31,11 +32,11 @@ import {
   PlusOutlined,
   CopyOutlined,
   DeleteOutlined,
-  ProjectOutlined,
   DragOutlined,
   ThunderboltOutlined,
   HistoryOutlined,
   DownloadOutlined,
+  FilterOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -59,14 +60,6 @@ const statusLabel: Record<string, string> = {
 };
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-
-interface TreeNode {
-  title: ReactNode;
-  key: string;
-  children?: TreeNode[];
-  isLeaf?: boolean;
-  caseData?: TestCase;
-}
 
 export default function ApiListPage() {
   const navigate = useNavigate();
@@ -104,8 +97,10 @@ export default function ApiListPage() {
   const [moveTargetId, setMoveTargetId] = useState<string>('');
   const [moving, setMoving] = useState(false);
 
-  // 视图模式：列表 / 树形目录
-  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
+  // 视图模式：表格 / 树形目录
+  const [viewMode, setViewMode] = useState<'table' | 'tree'>('table');
+  const [methodFilter, setMethodFilter] = useState<string>('');
+  const [groupFilter, setGroupFilter] = useState<string>('');
   // 树形视图选中的分组路径
   const [selectedGroupPath, setSelectedGroupPath] = useState<string>('');
   // 移动到分组（右键菜单）
@@ -141,7 +136,7 @@ export default function ApiListPage() {
     try {
       const params: { page: number; page_size: number; project_id?: string } = {
         page: 1,
-        page_size: 100,
+        page_size: 500,
       };
       if (selectedProjectId) params.project_id = selectedProjectId;
       const res = await testCaseApi.list(params);
@@ -176,7 +171,13 @@ export default function ApiListPage() {
   const projectNameMap = new Map<string, Project>();
   projects.forEach((p) => projectNameMap.set(p.id, p));
 
+  const groupOptions = Array.from(
+    new Set(cases.map((item) => item.group_path || '').filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+
   const filtered = cases.filter((c) => {
+    if (methodFilter && c.method !== methodFilter) return false;
+    if (groupFilter && (c.group_path || '') !== groupFilter) return false;
     if (!search) return true;
     const s = search.toLowerCase();
     return (
@@ -186,7 +187,7 @@ export default function ApiListPage() {
     );
   });
 
-  function caseNode(c: TestCase): TreeNode {
+  function caseNode(c: TestCase): GroupTreeNode {
     return {
       title: (
         <Space>
@@ -202,65 +203,6 @@ export default function ApiListPage() {
       caseData: c,
     };
   }
-
-  function buildTree(list: TestCase[]): TreeNode[] {
-    const byProject: Record<string, TestCase[]> = {};
-    const unclassified: TestCase[] = [];
-
-    list.forEach((c) => {
-      if (c.project_id) {
-        if (!byProject[c.project_id]) byProject[c.project_id] = [];
-        byProject[c.project_id].push(c);
-      } else {
-        unclassified.push(c);
-      }
-    });
-
-    const nodes: TreeNode[] = [];
-    const orderedIds: string[] = projects.map((p) => p.id);
-    Object.keys(byProject).forEach((id) => {
-      if (!orderedIds.includes(id)) orderedIds.push(id);
-    });
-
-    orderedIds.forEach((pid) => {
-      const items = byProject[pid];
-      if (!items || items.length === 0) return;
-      const proj = projectNameMap.get(pid);
-      const projPassed = items.filter((c) => lastResults[c.id] === 'passed').length;
-      const projFailed = items.filter((c) => lastResults[c.id] && lastResults[c.id] !== 'passed').length;
-      nodes.push({
-        title: (
-          <Space>
-            <ProjectOutlined style={{ color: '#2563eb' }} />
-            <span style={{ fontWeight: 600 }}>{proj?.name || pid}</span>
-            <Badge count={items.length} style={{ backgroundColor: '#e5e7eb', color: '#6b7280' }} />
-            {projPassed > 0 && <Badge count={projPassed} style={{ backgroundColor: '#52c41a' }} />}
-            {projFailed > 0 && <Badge count={projFailed} style={{ backgroundColor: '#ff4d4f' }} />}
-          </Space>
-        ),
-        key: `project-${pid}`,
-        children: items.map((c) => caseNode(c)),
-      });
-    });
-
-    if (unclassified.length > 0) {
-      nodes.push({
-        title: (
-          <Space>
-            <FolderOutlined style={{ color: '#d97706' }} />
-            <span style={{ fontWeight: 600 }}>未分类</span>
-            <Badge count={unclassified.length} style={{ backgroundColor: '#e5e7eb', color: '#6b7280' }} />
-          </Space>
-        ),
-        key: 'project-uncategorized',
-        children: unclassified.map((c) => caseNode(c)),
-      });
-    }
-
-    return nodes;
-  }
-
-  const treeData = buildTree(filtered);
 
   // ---- 树形目录视图：从 group_path 解析多级分组树 ----
   interface GroupTreeNode {
@@ -573,67 +515,74 @@ export default function ApiListPage() {
   }
 
   // ---- 下载接口文档 ----
-  function handleDownloadDoc(caseId: string) {
-    window.open(`/api/v1/test-cases/${caseId}/doc`, '_blank');
+  async function handleDownloadDoc(caseId: string) {
+    try {
+      await testCaseApi.downloadDoc(caseId);
+    } catch (e: any) {
+      message.error(e.message);
+    }
   }
 
   const renderActions = (c: TestCase) => (
-    <Space wrap>
-      <Button
-        size="small"
-        type="primary"
-        ghost
-        icon={<PlayCircleOutlined />}
-        loading={executingId === c.id}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleQuickExecute(c.id);
-        }}
-      >
-        执行
-      </Button>
-      <Button
-        size="small"
-        icon={<CopyOutlined />}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleCopy(c.id);
-        }}
-      >
-        复制
-      </Button>
-      <Button
-        size="small"
-        icon={<HistoryOutlined />}
-        onClick={(e) => {
-          e.stopPropagation();
-          openChangeLog(c.id);
-        }}
-      >
-        修改历史
-      </Button>
-      <Button
-        size="small"
-        icon={<DownloadOutlined />}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleDownloadDoc(c.id);
-        }}
-      >
-        下载文档
-      </Button>
+    <Space size={2}>
+      <Tooltip title="执行">
+        <Button
+          size="small"
+          type="text"
+          icon={<PlayCircleOutlined />}
+          loading={executingId === c.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleQuickExecute(c.id);
+          }}
+        />
+      </Tooltip>
+      <Tooltip title="复制">
+        <Button
+          size="small"
+          type="text"
+          icon={<CopyOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopy(c.id);
+          }}
+        />
+      </Tooltip>
+      <Tooltip title="修改历史">
+        <Button
+          size="small"
+          type="text"
+          icon={<HistoryOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            openChangeLog(c.id);
+          }}
+        />
+      </Tooltip>
+      <Tooltip title="下载文档">
+        <Button
+          size="small"
+          type="text"
+          icon={<DownloadOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleDownloadDoc(c.id);
+          }}
+        />
+      </Tooltip>
       <Popconfirm
         title="确认删除该接口？"
         onConfirm={() => handleDelete(c.id)}
       >
-        <Button
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={(e) => e.stopPropagation()}
-        >
-          删除
-        </Button>
+        <Tooltip title="删除">
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Tooltip>
       </Popconfirm>
     </Space>
   );
@@ -645,8 +594,9 @@ export default function ApiListPage() {
         display: 'flex',
         alignItems: 'center',
         gap: 12,
-        padding: '8px 16px',
-        background: '#eff6ff',
+        padding: '8px 12px',
+        background: '#f8fafc',
+        border: '1px solid #dbeafe',
         borderRadius: 6,
         marginBottom: 12,
       }}
@@ -685,30 +635,43 @@ export default function ApiListPage() {
         title={
           <Space>
             <ApiOutlined />
-            <span>接口列表</span>
+            <span>API 接口</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
               共 {cases.length} 个接口
             </span>
           </Space>
         }
+        extra={
+          <Space>
+            <Button icon={<PlusOutlined />} onClick={() => setProjectModalOpen(true)}>
+              新建项目
+            </Button>
+            <Button onClick={() => navigate('/import')}>导入</Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCaseModalOpen(true)}
+            >
+              新建用例
+            </Button>
+          </Space>
+        }
       >
-        {/* 工具栏 */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             marginBottom: 16,
             flexWrap: 'wrap',
-            gap: 8,
+            gap: 12,
           }}
         >
           <Space wrap>
-            <span style={{ fontWeight: 600 }}>项目：</span>
             <Select
               value={selectedProjectId}
               onChange={handleProjectChange}
-              style={{ width: 240 }}
-              placeholder="选择项目"
+              style={{ width: 210 }}
+              placeholder="全部项目"
               showSearch
               optionFilterProp="label"
               options={[
@@ -716,48 +679,75 @@ export default function ApiListPage() {
                 ...projects.map((p) => ({ value: p.id, label: p.name })),
               ]}
             />
-            <Button icon={<PlusOutlined />} onClick={() => setProjectModalOpen(true)}>
-              新建项目
-            </Button>
-            <Button
-              type="primary"
-              ghost
-              icon={<PlusOutlined />}
-              onClick={() => setCaseModalOpen(true)}
-            >
-              新建用例
-            </Button>
-            <span style={{ color: '#6b7280', fontSize: 13 }}>
-              当前 {filtered.length} 个接口
-            </span>
+            <Select
+              value={methodFilter}
+              onChange={setMethodFilter}
+              style={{ width: 130 }}
+              suffixIcon={<FilterOutlined />}
+              options={[
+                { value: '', label: '全部方法' },
+                ...METHODS.map((method) => ({ value: method, label: method })),
+              ]}
+            />
+            <Select
+              value={groupFilter}
+              onChange={setGroupFilter}
+              style={{ width: 180 }}
+              suffixIcon={<FilterOutlined />}
+              options={[
+                { value: '', label: '全部分组' },
+                ...groupOptions.map((group) => ({ value: group, label: group })),
+              ]}
+            />
+            <Input
+              placeholder="搜索名称、URL、分组"
+              allowClear
+              style={{ width: 260 }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              prefix={<SearchOutlined />}
+            />
           </Space>
           <Space wrap>
             <Segmented
               value={viewMode}
-              onChange={(v) => setViewMode(v as 'list' | 'tree')}
+              onChange={(v) => setViewMode(v as 'table' | 'tree')}
               options={[
-                { label: '项目视图', value: 'list' },
-                { label: '目录树', value: 'tree' },
+                { label: '列表', value: 'table' },
+                { label: '目录', value: 'tree' },
               ]}
-            />
-            <Input.Search
-              placeholder="搜索接口名称、URL、分组"
-              allowClear
-              style={{ width: 280 }}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              prefix={<SearchOutlined />}
             />
             <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
           </Space>
         </div>
 
-        {/* 批量操作栏 */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            marginBottom: 12,
+            minHeight: 24,
+          }}
+        >
+          <span style={{ color: '#6b7280', fontSize: 13 }}>
+            当前显示 {filtered.length} 个
+          </span>
+          {METHODS.map((method) => {
+            const count = filtered.filter((item) => item.method === method).length;
+            return count > 0 ? (
+              <Tag key={method} color={methodColor[method]}>
+                {method} {count}
+              </Tag>
+            ) : null;
+          })}
+        </div>
+
         {batchToolbar}
 
-        {/* 项目视图（默认）：按项目分组的树 */}
-        {viewMode === 'list' && (
-          treeData.length === 0 ? (
+        {viewMode === 'table' && (
+          filtered.length === 0 ? (
             <Empty description="暂无接口，请新建或导入接口" style={{ padding: 40 }}>
               <Space>
                 <Button type="primary" onClick={() => setCaseModalOpen(true)}>
@@ -767,51 +757,95 @@ export default function ApiListPage() {
               </Space>
             </Empty>
           ) : (
-            <Tree
-              treeData={treeData}
-              defaultExpandAll
-              showLine
-              titleRender={(node) => {
-                if (node.caseData) {
-                  const c = node.caseData;
-                  const lastStatus = lastResults[c.id];
-                  return (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '4px 0',
-                        borderBottom: '1px solid #f3f4f6',
-                      }}
-                    >
-                      <Space>
-                        <Tag color={methodColor[c.method] || 'default'} style={{ minWidth: 52, textAlign: 'center' }}>
-                          {c.method}
-                        </Tag>
-                        <span style={{ fontWeight: 500 }}>{c.title}</span>
-                        <span style={{ color: '#9ca3af', fontSize: 12 }}>{c.url}</span>
-                        {c.group_path && (
-                          <Tag style={{ fontSize: 11 }}>{c.group_path}</Tag>
-                        )}
-                        {c.markers?.map((m) => (
-                          <Tag key={m} color="blue" style={{ fontSize: 11 }}>{m}</Tag>
-                        ))}
-                        {lastStatus && (
-                          <Badge color={statusBadge[lastStatus] || '#d9d9d9'} text={statusLabel[lastStatus] || lastStatus} />
-                        )}
-                      </Space>
-                      {renderActions(c)}
-                    </div>
-                  );
-                }
-                return node.title;
+            <Table
+              dataSource={filtered}
+              rowKey="id"
+              loading={loading}
+              size="middle"
+              rowSelection={{
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys as string[]),
               }}
+              pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
+              columns={[
+                {
+                  title: '方法',
+                  dataIndex: 'method',
+                  width: 78,
+                  render: (method: string) => (
+                    <Tag color={methodColor[method] || 'default'}>{method}</Tag>
+                  ),
+                },
+                {
+                  title: '接口',
+                  dataIndex: 'title',
+                  ellipsis: true,
+                  render: (title: string, record) => (
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{title}</div>
+                      <div
+                        style={{
+                          color: '#6b7280',
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {record.url}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  title: '分组',
+                  dataIndex: 'group_path',
+                  width: 150,
+                  ellipsis: true,
+                  render: (value: string) => value || <span style={{ color: '#9ca3af' }}>未分组</span>,
+                },
+                {
+                  title: '项目',
+                  dataIndex: 'project_id',
+                  width: 150,
+                  ellipsis: true,
+                  render: (projectId: string) =>
+                    projectId ? projectNameMap.get(projectId)?.name || projectId : '未分类',
+                },
+                {
+                  title: '标记',
+                  dataIndex: 'markers',
+                  width: 150,
+                  render: (markers: string[]) =>
+                    (markers || []).slice(0, 2).map((marker) => (
+                      <Tag key={marker}>{marker}</Tag>
+                    )),
+                },
+                {
+                  title: '最近执行',
+                  width: 100,
+                  render: (_, record) => {
+                    const status = lastResults[record.id];
+                    return status ? (
+                      <Badge
+                        color={statusBadge[status] || '#d9d9d9'}
+                        text={statusLabel[status] || status}
+                      />
+                    ) : <span style={{ color: '#9ca3af' }}>未执行</span>;
+                  },
+                },
+                {
+                  title: '操作',
+                  width: 170,
+                  align: 'right',
+                  render: (_, record) => renderActions(record),
+                },
+              ]}
             />
           )
         )}
 
-        {/* 目录树视图：左侧 group_path 分层树 + 右侧接口表格 */}
         {viewMode === 'tree' && (
           groupTreeData.length === 0 ? (
             <Empty description="暂无接口，请新建或导入接口" style={{ padding: 40 }}>
@@ -928,7 +962,8 @@ export default function ApiListPage() {
                     { title: '分组', dataIndex: 'group_path', width: 140, ellipsis: true, render: (v: string) => v || '-' },
                     {
                       title: '操作',
-                      width: 280,
+                      width: 170,
+                      align: 'right',
                       render: (_, record) => renderActions(record),
                     },
                   ]}
@@ -938,61 +973,6 @@ export default function ApiListPage() {
           )
         )}
       </Card>
-
-      {/* 表格视图（仅项目视图模式下显示） */}
-      {viewMode === 'list' && (
-        <Card title="接口详情列表" style={{ marginTop: 16 }}>
-          <Table
-            dataSource={filtered}
-            rowKey="id"
-            loading={loading}
-            rowSelection={{
-              selectedRowKeys,
-              onChange: (keys) => setSelectedRowKeys(keys as string[]),
-            }}
-            pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
-            columns={[
-              {
-                title: '方法',
-                dataIndex: 'method',
-                width: 80,
-                render: (m: string) => <Tag color={methodColor[m] || 'default'}>{m}</Tag>,
-              },
-              { title: '标题', dataIndex: 'title', ellipsis: true },
-              { title: 'URL', dataIndex: 'url', ellipsis: true },
-              { title: '分组', dataIndex: 'group_path', width: 120, render: (v: string) => v || '-' },
-              {
-                title: '所属项目',
-                dataIndex: 'project_id',
-                width: 140,
-                render: (pid: string) => (pid ? projectNameMap.get(pid)?.name || pid : <Tag>未分类</Tag>),
-              },
-              {
-                title: '标记',
-                dataIndex: 'markers',
-                width: 150,
-                render: (markers: string[]) =>
-                  (markers || []).map((m) => <Tag key={m} color="blue">{m}</Tag>),
-              },
-              {
-                title: '最近执行',
-                width: 100,
-                render: (_, record) => {
-                  const s = lastResults[record.id];
-                  return s ? (
-                    <Badge color={statusBadge[s] || '#d9d9d9'} text={statusLabel[s] || s} />
-                  ) : '-';
-                },
-              },
-              {
-                title: '操作',
-                width: 420,
-                render: (_, record) => renderActions(record),
-              },
-            ]}
-          />
-        </Card>
-      )}
 
       {/* 新建项目 Modal */}
       <Modal

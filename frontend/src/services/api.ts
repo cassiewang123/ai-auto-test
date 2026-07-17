@@ -96,6 +96,19 @@ export const testCaseApi = {
     api.post<unknown, ApiResponse<BatchMoveResult>>('/test-cases/batch-move', { case_ids: caseIds, project_id: projectId }),
   reorder: (caseIds: string[]) =>
     api.post<unknown, ApiResponse<{ total: number; updated: number }>>('/test-cases/reorder', { case_ids: caseIds }),
+  downloadDoc: async (id: string) => {
+    const blob = await api.get<unknown, Blob>(`/test-cases/${id}/doc`, {
+      responseType: 'blob',
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = `接口文档_${id.slice(0, 8)}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  },
 };
 
 // ========== 测试计划 ==========
