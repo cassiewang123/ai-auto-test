@@ -8,15 +8,21 @@ import {
   Grid,
   Layout,
   Menu,
+  Select,
   Space,
   theme,
 } from 'antd';
 import { useAuth } from '../contexts/AuthContext';
-import { LogoutOutlined, MenuOutlined, UserOutlined } from '@ant-design/icons';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import {
+  EnvironmentOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  ProjectOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import zhCN from 'antd/locale/zh_CN';
-import dayjs from 'dayjs';
-import 'dayjs/locale/zh-cn';
 import {
   allNavigationItems,
   findNavigationItemByPath,
@@ -24,8 +30,6 @@ import {
   getOpenKeys,
   resolveAppMode,
 } from './navigation';
-
-dayjs.locale('zh-cn');
 
 const { Header, Sider, Content } = Layout;
 
@@ -41,6 +45,15 @@ export default function AppLayout() {
   const isMobile = screens.md === false;
   const { token: themeToken } = theme.useToken();
   const { user, logout, loading } = useAuth();
+  const {
+    projects,
+    environments,
+    selectedProjectId,
+    selectedEnvironmentId,
+    setSelectedProjectId,
+    setSelectedEnvironmentId,
+    loading: workspaceLoading,
+  } = useWorkspace();
   const [openKeys, setOpenKeys] = useState<string[]>(() =>
     getOpenKeys(menuItems, location.pathname)
   );
@@ -193,19 +206,12 @@ export default function AppLayout() {
           }}
         >
           <Header
+            className="app-header"
             style={{
-              padding: isMobile ? '0 12px' : '0 24px',
               background: themeToken.colorBgContainer,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
             }}
           >
-            <Space size="small" style={{ minWidth: 0, overflow: 'hidden' }}>
+            <div className="app-header-primary">
               {isMobile && (
                 <Button
                   type="text"
@@ -217,17 +223,65 @@ export default function AppLayout() {
               <span className="app-header-title" style={{ fontSize: 16, fontWeight: 600 }}>
                 {selectedItem?.label ?? 'AI 测试平台'}
               </span>
-            </Space>
+            </div>
+            <div className="app-workspace-controls" aria-label="当前工作区">
+              <div className="app-workspace-field">
+                <span className="app-workspace-label" aria-hidden="true">
+                  <ProjectOutlined />
+                  <span>项目</span>
+                </span>
+                <Select
+                  className="app-workspace-select"
+                  aria-label="当前项目"
+                  data-testid="workspace-project-select"
+                  value={selectedProjectId ?? undefined}
+                  placeholder="选择项目"
+                  loading={workspaceLoading}
+                  disabled={workspaceLoading || projects.length === 0}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={projects.map((project) => ({
+                    value: project.id,
+                    label: project.name,
+                  }))}
+                  onChange={(value) => setSelectedProjectId(value ?? null)}
+                  notFoundContent={workspaceLoading ? '加载中' : '暂无项目'}
+                />
+              </div>
+              <div className="app-workspace-field">
+                <span className="app-workspace-label" aria-hidden="true">
+                  <EnvironmentOutlined />
+                  <span>环境</span>
+                </span>
+                <Select
+                  className="app-workspace-select"
+                  aria-label="当前环境"
+                  data-testid="workspace-environment-select"
+                  value={selectedEnvironmentId ?? undefined}
+                  placeholder="选择环境"
+                  loading={workspaceLoading}
+                  disabled={workspaceLoading || environments.length === 0}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={environments.map((environment) => ({
+                    value: environment.id,
+                    label: environment.is_active
+                      ? environment.name
+                      : `${environment.name}（停用）`,
+                    disabled: !environment.is_active,
+                  }))}
+                  onChange={(value) => setSelectedEnvironmentId(value ?? null)}
+                  notFoundContent={workspaceLoading ? '加载中' : '暂无环境'}
+                />
+              </div>
+            </div>
             <Space
               className="app-header-actions"
-              size={isMobile ? 'small' : 'large'}
+              size="small"
               align="center"
             >
-              {!isMobile && (
-                <span style={{ color: '#6b7280', fontSize: 13 }}>
-                  {dayjs().format('YYYY-MM-DD dddd')}
-                </span>
-              )}
               <Dropdown
                 menu={{
                   items: [
