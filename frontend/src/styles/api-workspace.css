@@ -1,0 +1,304 @@
+.api-list-page {
+  min-width: 0;
+}
+
+.api-workspace {
+  display: grid;
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  min-height: 560px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.api-workspace-sidebar {
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.api-workspace-sidebar-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.api-workspace-sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-weight: 600;
+}
+
+.api-workspace-sidebar-caption {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.api-asset-tree {
+  padding: 10px 8px 16px;
+  background: transparent;
+}
+
+.api-asset-tree .ant-tree-node-content-wrapper {
+  min-width: 0;
+}
+
+.api-tree-folder {
+  font-weight: 600;
+}
+
+.api-tree-case {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.api-tree-method {
+  flex: none;
+  min-width: 44px;
+  margin-inline-end: 0;
+  padding-inline: 5px;
+  text-align: center;
+  font-size: 10px;
+}
+
+.api-tree-case-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-tree-status {
+  flex: none;
+  margin-left: auto;
+}
+
+.api-workspace-detail {
+  min-width: 0;
+  padding: 20px;
+  overflow: auto;
+}
+
+.api-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.api-detail-heading {
+  min-width: 0;
+}
+
+.api-detail-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.api-detail-heading h2 {
+  margin: 6px 0 8px;
+  color: #111827;
+  font-size: 22px;
+  line-height: 30px;
+}
+
+.api-detail-endpoint {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-detail-method {
+  flex: none;
+  margin-inline-end: 0;
+}
+
+.api-detail-endpoint code {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-detail-actions {
+  flex: none;
+  justify-content: flex-end;
+}
+
+.api-execution-strip,
+.api-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #e5e7eb;
+}
+
+.api-execution-strip > div,
+.api-detail-meta > div {
+  min-width: 0;
+  padding: 12px;
+  background: #fff;
+}
+
+.api-execution-strip strong,
+.api-detail-meta strong {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #111827;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-execution-label,
+.api-detail-meta span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.api-detail-section {
+  min-width: 0;
+}
+
+.api-detail-section-title {
+  margin-bottom: 8px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.api-detail-description {
+  color: #475569;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.api-payload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.api-payload-grid .api-detail-section {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.api-json-preview {
+  max-height: 260px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.api-detail-empty {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.api-workspace-empty {
+  display: flex;
+  min-height: 460px;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 991px) {
+  .api-workspace {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  }
+
+  .api-detail-header {
+    flex-direction: column;
+  }
+
+  .api-detail-actions {
+    justify-content: flex-start;
+  }
+
+  .api-execution-strip,
+  .api-detail-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .api-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .api-workspace-sidebar {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .api-workspace-detail {
+    padding: 14px 12px;
+  }
+
+  .api-detail-heading h2 {
+    font-size: 19px;
+    line-height: 26px;
+  }
+
+  .api-detail-endpoint {
+    align-items: flex-start;
+  }
+
+  .api-detail-endpoint code {
+    white-space: normal;
+    word-break: break-all;
+  }
+
+  .api-detail-actions {
+    width: 100%;
+  }
+
+  .api-detail-actions .ant-btn {
+    flex: 1 1 auto;
+  }
+
+  .api-execution-strip,
+  .api-detail-meta,
+  .api-payload-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .api-workspace-empty {
+    min-height: 220px;
+  }
+}

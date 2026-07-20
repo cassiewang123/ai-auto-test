@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Card,
   Table,
@@ -22,6 +22,7 @@ import {
   Tooltip,
   Row,
   Col,
+  Divider,
 } from 'antd';
 import {
   ApiOutlined,
@@ -37,11 +38,22 @@ import {
   HistoryOutlined,
   DownloadOutlined,
   FilterOutlined,
+  EditOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { testCaseApi, executionApi, projectApi, changeLogApi } from '../services/api';
+import {
+  testCaseApi,
+  executionApi,
+  projectApi,
+  changeLogApi,
+  historyApi,
+} from '../services/api';
+import type { CallHistoryRecord } from '../services/api';
 import type { TestCase, Project, ProjectCreate, TestCaseCreate } from '../types';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import '../styles/api-workspace.css';
 
 const methodColor: Record<string, string> = {
   GET: 'green', POST: 'orange', PUT: 'blue', PATCH: 'purple', DELETE: 'red',
@@ -57,20 +69,57 @@ const statusLabel: Record<string, string> = {
   passed: '通过',
   failed: '失败',
   error: '错误',
+  skipped: '跳过',
+  queued: '排队中',
+  running: '执行中',
+  cancelled: '已取消',
 };
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
+interface TestCaseFormValues {
+  title: string;
+  method: string;
+  url: string;
+  group_path?: string;
+  project_id?: string;
+  headers?: string;
+  params?: string;
+  body?: string;
+}
+
+function hasContent(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+}
+
+function formatJson(value: unknown): string {
+  if (!hasContent(value)) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function ApiListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    projects: workspaceProjects,
+    selectedProjectId: workspaceProjectId,
+    setSelectedProjectId: setWorkspaceProjectId,
+  } = useWorkspace();
   const [cases, setCases] = useState<TestCase[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [lastResults, setLastResults] = useState<Record<string, string>>({});
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [recentResults, setRecentResults] = useState<Record<string, CallHistoryRecord>>({});
+  const [queryProjectInitialized, setQueryProjectInitialized] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectForm] = Form.useForm<ProjectCreate>();
@@ -90,7 +139,8 @@ export default function ApiListPage() {
   // 新建用例
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [creatingCase, setCreatingCase] = useState(false);
-  const [caseForm] = Form.useForm<TestCaseCreate>();
+  const [editingCase, setEditingCase] = useState<TestCase | null>(null);
+  const [caseForm] = Form.useForm<TestCaseFormValues>();
 
   // 移动到项目
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -98,11 +148,17 @@ export default function ApiListPage() {
   const [moving, setMoving] = useState(false);
 
   // 视图模式：表格 / 树形目录
-  const [viewMode, setViewMode] = useState<'table' | 'tree'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'tree'>('tree');
   const [methodFilter, setMethodFilter] = useState<string>('');
   const [groupFilter, setGroupFilter] = useState<string>('');
   // 树形视图选中的分组路径
   const [selectedGroupPath, setSelectedGroupPath] = useState<string>('');
+  const [selectedCaseId, setSelectedCaseId] = useState<string>(
+    () => searchParams.get('case_id') || ''
+  );
+  const [selectedTreeKey, setSelectedTreeKey] = useState<string>(
+    () => searchParams.get('case_id') || ''
+  );
   // 移动到分组（右键菜单）
   const [moveGroupModalOpen, setMoveGroupModalOpen] = useState(false);
   const [moveGroupSource, setMoveGroupSource] = useState<string>('');
@@ -114,13 +170,51 @@ export default function ApiListPage() {
   const [changeLogLoading, setChangeLogLoading] = useState(false);
   const [changeLogs, setChangeLogs] = useState<any[]>([]);
 
-  // 从 URL 查询参数读取 project_id
+  const selectedProjectId = workspaceProjectId || '';
+
+  // 首次进入时允许 URL 中的 project_id 覆盖已保存的工作区项目。
   useEffect(() => {
+    if (queryProjectInitialized) return;
     const pid = searchParams.get('project_id');
-    if (pid) {
-      setSelectedProjectId(pid);
+    if (pid && pid !== workspaceProjectId) {
+      setWorkspaceProjectId(pid);
     }
-  }, [searchParams]);
+    setQueryProjectInitialized(true);
+  }, [
+    queryProjectInitialized,
+    searchParams,
+    setWorkspaceProjectId,
+    workspaceProjectId,
+  ]);
+
+  // 顶部工作区切换项目时同步当前页面 URL，保留接口定位参数。
+  useEffect(() => {
+    if (!queryProjectInitialized) return;
+    const currentProjectId = searchParams.get('project_id') || '';
+    if (currentProjectId === selectedProjectId) return;
+
+    const nextParams = new URLSearchParams(searchParams);
+    if (selectedProjectId) {
+      nextParams.set('project_id', selectedProjectId);
+    } else {
+      nextParams.delete('project_id');
+    }
+    nextParams.delete('case_id');
+    setSearchParams(nextParams, { replace: true });
+    setSelectedCaseId('');
+    setSelectedTreeKey('');
+  }, [
+    queryProjectInitialized,
+    searchParams,
+    selectedProjectId,
+    setSearchParams,
+  ]);
+
+  useEffect(() => {
+    if (workspaceProjects.length > 0) {
+      setProjects(workspaceProjects);
+    }
+  }, [workspaceProjects]);
 
   async function loadProjects() {
     try {
@@ -148,44 +242,110 @@ export default function ApiListPage() {
     }
   }
 
+  async function loadRecentResults() {
+    try {
+      const res = await historyApi.list({
+        page: 1,
+        page_size: 100,
+        project_id: selectedProjectId || undefined,
+      });
+      const latestByCase: Record<string, CallHistoryRecord> = {};
+      (res.data || []).forEach((record) => {
+        if (record.test_case_id && !latestByCase[record.test_case_id]) {
+          latestByCase[record.test_case_id] = record;
+        }
+      });
+      setRecentResults(latestByCase);
+    } catch {
+      setRecentResults({});
+    }
+  }
+
   useEffect(() => {
     loadProjects();
   }, []);
 
   useEffect(() => {
     loadData();
+    loadRecentResults();
     setSelectedRowKeys([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId]);
 
   // 切换项目时更新 URL
   function handleProjectChange(value: string) {
-    setSelectedProjectId(value);
-    if (value) {
-      setSearchParams({ project_id: value });
-    } else {
-      setSearchParams({});
-    }
+    setWorkspaceProjectId(value || null);
   }
 
-  const projectNameMap = new Map<string, Project>();
-  projects.forEach((p) => projectNameMap.set(p.id, p));
+  const projectNameMap = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects]
+  );
 
   const groupOptions = Array.from(
     new Set(cases.map((item) => item.group_path || '').filter(Boolean))
   ).sort((left, right) => left.localeCompare(right));
 
-  const filtered = cases.filter((c) => {
-    if (methodFilter && c.method !== methodFilter) return false;
-    if (groupFilter && (c.group_path || '') !== groupFilter) return false;
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      c.title.toLowerCase().includes(s) ||
-      c.url.toLowerCase().includes(s) ||
-      (c.group_path || '').toLowerCase().includes(s)
-    );
-  });
+  const filtered = useMemo(
+    () =>
+      cases.filter((c) => {
+        if (methodFilter && c.method !== methodFilter) return false;
+        if (groupFilter && (c.group_path || '') !== groupFilter) return false;
+        if (!search) return true;
+        const s = search.toLowerCase();
+        return (
+          c.title.toLowerCase().includes(s) ||
+          c.url.toLowerCase().includes(s) ||
+          (c.group_path || '').toLowerCase().includes(s)
+        );
+      }),
+    [cases, groupFilter, methodFilter, search]
+  );
+
+  const selectedCase = useMemo(
+    () => filtered.find((item) => item.id === selectedCaseId) || filtered[0] || null,
+    [filtered, selectedCaseId]
+  );
+
+  useEffect(() => {
+    if (!selectedCase) {
+      setSelectedTreeKey('');
+      return;
+    }
+    if (!filtered.some((item) => item.id === selectedCaseId)) {
+      setSelectedCaseId(selectedCase.id);
+      setSelectedTreeKey(selectedCase.id);
+    }
+  }, [filtered, selectedCase, selectedCaseId]);
+
+  function selectCase(record: TestCase) {
+    setSelectedCaseId(record.id);
+    setSelectedTreeKey(record.id);
+    setSelectedGroupPath(record.group_path || '');
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('case_id', record.id);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function selectGroup(groupPath: string) {
+    setSelectedGroupPath(groupPath);
+    setSelectedTreeKey(`group::${groupPath}`);
+    const groupCase = filtered.find((record) => {
+      const recordPath = record.group_path || '';
+      return groupPath
+        ? recordPath === groupPath || recordPath.startsWith(`${groupPath}/`)
+        : recordPath === '';
+    });
+    setSelectedCaseId(groupCase?.id || '');
+
+    const nextParams = new URLSearchParams(searchParams);
+    if (groupCase) {
+      nextParams.set('case_id', groupCase.id);
+    } else {
+      nextParams.delete('case_id');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }
 
   function caseNode(c: TestCase): GroupTreeNode {
     return {
@@ -293,11 +453,6 @@ export default function ApiListPage() {
 
   const groupTreeData = buildGroupTree(filtered);
 
-  // 树形视图右侧表格：根据选中的分组路径筛选
-  const treeViewCases = selectedGroupPath
-    ? filtered.filter((c) => (c.group_path || '') === selectedGroupPath)
-    : filtered;
-
   // 右键菜单：移动到分组
   async function handleMoveGroup(sourcePath: string, targetPath: string) {
     // 找出该分组下的所有用例
@@ -332,6 +487,7 @@ export default function ApiListPage() {
       const res = await executionApi.runSavedCase(caseId);
       const status = res.data.status;
       setLastResults((prev) => ({ ...prev, [caseId]: status }));
+      await loadRecentResults();
       if (status === 'passed') message.success('执行通过');
       else if (status === 'failed') message.warning('断言未通过');
       else message.error('执行出错');
@@ -367,6 +523,7 @@ export default function ApiListPage() {
         error: d.error,
         results: d.results,
       });
+      await loadRecentResults();
       message.success(`批量执行完成: ${d.passed} 通过, ${d.failed} 失败, ${d.error} 错误`);
     } catch (e: any) {
       message.error(e.message);
@@ -424,9 +581,12 @@ export default function ApiListPage() {
   // ---- 单个复制 ----
   async function handleCopy(caseId: string) {
     try {
-      await testCaseApi.copy(caseId);
+      const res = await testCaseApi.copy(caseId);
       message.success('复制成功');
-      loadData();
+      await loadData();
+      if (res.data) {
+        selectCase(res.data);
+      }
     } catch (e: any) {
       message.error(e.message);
     }
@@ -437,7 +597,11 @@ export default function ApiListPage() {
     try {
       await testCaseApi.delete(caseId);
       message.success('删除成功');
-      loadData();
+      if (selectedCaseId === caseId) {
+        setSelectedCaseId('');
+        setSelectedTreeKey('');
+      }
+      await loadData();
     } catch (e: any) {
       message.error(e.message);
     }
@@ -448,11 +612,12 @@ export default function ApiListPage() {
     try {
       const values = await projectForm.validateFields();
       setCreatingProject(true);
-      await projectApi.create(values);
+      const res = await projectApi.create(values);
       message.success('项目创建成功');
       setProjectModalOpen(false);
       projectForm.resetFields();
-      loadProjects();
+      await loadProjects();
+      setWorkspaceProjectId(res.data.id);
     } catch (e: any) {
       if (e.errorFields) return;
       message.error(e.message);
@@ -461,10 +626,35 @@ export default function ApiListPage() {
     }
   }
 
-  // ---- 新建用例 ----
-  async function handleCreateCase() {
+  function openCreateCase() {
+    setEditingCase(null);
+    caseForm.resetFields();
+    caseForm.setFieldsValue({
+      method: 'GET',
+      project_id: selectedProjectId || undefined,
+    });
+    setCaseModalOpen(true);
+  }
+
+  function openEditCase(record: TestCase) {
+    setEditingCase(record);
+    caseForm.setFieldsValue({
+      title: record.title,
+      method: record.method,
+      url: record.url,
+      group_path: record.group_path || '',
+      project_id: record.project_id,
+      headers: formatJson(record.headers),
+      params: formatJson(record.params),
+      body: formatJson(record.body),
+    });
+    setCaseModalOpen(true);
+  }
+
+  // ---- 新建/编辑用例 ----
+  async function handleSaveCase() {
     try {
-      const values: any = await caseForm.validateFields();
+      const values = await caseForm.validateFields();
       setCreatingCase(true);
       const payload: TestCaseCreate = {
         title: values.title,
@@ -474,7 +664,7 @@ export default function ApiListPage() {
         params: values.params ? JSON.parse(values.params as string) : {},
         body: values.body ? JSON.parse(values.body as string) : undefined,
         group_path: values.group_path || '',
-        project_id: selectedProjectId || values.project_id || undefined,
+        project_id: values.project_id || selectedProjectId || undefined,
         markers: [],
         assertions: [
           {
@@ -486,11 +676,17 @@ export default function ApiListPage() {
           },
         ],
       };
-      await testCaseApi.create(payload);
-      message.success('用例创建成功');
+      const res = editingCase
+        ? await testCaseApi.update(editingCase.id, payload)
+        : await testCaseApi.create(payload);
+      message.success(editingCase ? '接口更新成功' : '用例创建成功');
       setCaseModalOpen(false);
+      setEditingCase(null);
       caseForm.resetFields();
-      loadData();
+      await loadData();
+      if (res.data) {
+        selectCase(res.data);
+      }
     } catch (e: any) {
       if (e.errorFields) return;
       message.error(e.message);
@@ -523,8 +719,33 @@ export default function ApiListPage() {
     }
   }
 
+  function openDebugger(record: TestCase) {
+    const params = new URLSearchParams({
+      method: record.method,
+      url: record.url,
+      headers: JSON.stringify(record.headers || {}),
+      params: JSON.stringify(record.params || {}),
+    });
+    if (record.body !== undefined && record.body !== null) {
+      params.set('body', JSON.stringify(record.body));
+    }
+    if (record.title) params.set('title', record.title);
+    navigate(`/quick-test?${params.toString()}`);
+  }
+
   const renderActions = (c: TestCase) => (
     <Space size={2}>
+      <Tooltip title="打开调试">
+        <Button
+          size="small"
+          type="text"
+          icon={<ThunderboltOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            openDebugger(c);
+          }}
+        />
+      </Tooltip>
       <Tooltip title="执行">
         <Button
           size="small"
@@ -534,6 +755,17 @@ export default function ApiListPage() {
           onClick={(e) => {
             e.stopPropagation();
             handleQuickExecute(c.id);
+          }}
+        />
+      </Tooltip>
+      <Tooltip title="编辑">
+        <Button
+          size="small"
+          type="text"
+          icon={<EditOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            openEditCase(c);
           }}
         />
       </Tooltip>
@@ -559,31 +791,44 @@ export default function ApiListPage() {
           }}
         />
       </Tooltip>
-      <Tooltip title="下载文档">
-        <Button
-          size="small"
-          type="text"
-          icon={<DownloadOutlined />}
-          onClick={(e) => {
-            e.stopPropagation();
-            void handleDownloadDoc(c.id);
-          }}
-        />
-      </Tooltip>
-      <Popconfirm
-        title="确认删除该接口？"
-        onConfirm={() => handleDelete(c.id)}
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            {
+              key: 'download',
+              icon: <DownloadOutlined />,
+              label: '下载文档',
+              onClick: () => void handleDownloadDoc(c.id),
+            },
+            {
+              key: 'delete',
+              icon: <DeleteOutlined />,
+              label: '删除',
+              danger: true,
+              onClick: () => {
+                Modal.confirm({
+                  title: '确认删除该接口？',
+                  content: c.title,
+                  okText: '删除',
+                  okButtonProps: { danger: true },
+                  cancelText: '取消',
+                  onOk: () => handleDelete(c.id),
+                });
+              },
+            },
+          ],
+        }}
       >
-        <Tooltip title="删除">
+        <Tooltip title="更多">
           <Button
             size="small"
             type="text"
-            danger
-            icon={<DeleteOutlined />}
+            icon={<MoreOutlined />}
             onClick={(e) => e.stopPropagation()}
           />
         </Tooltip>
-      </Popconfirm>
+      </Dropdown>
     </Space>
   );
 
@@ -629,8 +874,28 @@ export default function ApiListPage() {
     </div>
   );
 
+  const selectedRecentResult = selectedCase
+    ? recentResults[selectedCase.id]
+    : undefined;
+  const selectedExecutionStatus = selectedCase
+    ? lastResults[selectedCase.id] || selectedRecentResult?.status
+    : undefined;
+
+  function renderDataSection(title: string, value: unknown, emptyText: string) {
+    return (
+      <section className="api-detail-section">
+        <div className="api-detail-section-title">{title}</div>
+        {hasContent(value) ? (
+          <pre className="api-json-preview">{formatJson(value)}</pre>
+        ) : (
+          <div className="api-detail-empty">{emptyText}</div>
+        )}
+      </section>
+    );
+  }
+
   return (
-    <div>
+    <div className="api-list-page">
       <Card
         title={
           <Space>
@@ -650,7 +915,7 @@ export default function ApiListPage() {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => setCaseModalOpen(true)}
+              onClick={openCreateCase}
             >
               新建用例
             </Button>
@@ -714,7 +979,7 @@ export default function ApiListPage() {
               onChange={(v) => setViewMode(v as 'table' | 'tree')}
               options={[
                 { label: '列表', value: 'table' },
-                { label: '目录', value: 'tree' },
+                { label: '工作台', value: 'tree' },
               ]}
             />
             <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
@@ -750,7 +1015,7 @@ export default function ApiListPage() {
           filtered.length === 0 ? (
             <Empty description="暂无接口，请新建或导入接口" style={{ padding: 40 }}>
               <Space>
-                <Button type="primary" onClick={() => setCaseModalOpen(true)}>
+                <Button type="primary" onClick={openCreateCase}>
                   新建用例
                 </Button>
                 <Button onClick={() => navigate('/import')}>导入接口</Button>
@@ -766,6 +1031,9 @@ export default function ApiListPage() {
                 selectedRowKeys,
                 onChange: (keys) => setSelectedRowKeys(keys as string[]),
               }}
+              onRow={(record) => ({
+                onClick: () => selectCase(record),
+              })}
               pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
               columns={[
                 {
@@ -826,7 +1094,8 @@ export default function ApiListPage() {
                   title: '最近执行',
                   width: 100,
                   render: (_, record) => {
-                    const status = lastResults[record.id];
+                    const status =
+                      lastResults[record.id] || recentResults[record.id]?.status;
                     return status ? (
                       <Badge
                         color={statusBadge[status] || '#d9d9d9'}
@@ -837,7 +1106,7 @@ export default function ApiListPage() {
                 },
                 {
                   title: '操作',
-                  width: 170,
+                  width: 210,
                   align: 'right',
                   render: (_, record) => renderActions(record),
                 },
@@ -850,126 +1119,309 @@ export default function ApiListPage() {
           groupTreeData.length === 0 ? (
             <Empty description="暂无接口，请新建或导入接口" style={{ padding: 40 }}>
               <Space>
-                <Button type="primary" onClick={() => setCaseModalOpen(true)}>
+                <Button type="primary" onClick={openCreateCase}>
                   新建用例
                 </Button>
                 <Button onClick={() => navigate('/import')}>导入接口</Button>
               </Space>
             </Empty>
           ) : (
-            <Row gutter={[16, 16]}>
-              {/* 左侧：分组目录树 */}
-              <Col xs={24} md={8}>
-                <div style={{ maxHeight: 600, overflow: 'auto', borderRight: '1px solid #f3f4f6', paddingRight: 8 }}>
-                  <div style={{ marginBottom: 8, fontWeight: 600, color: '#6b7280', fontSize: 13 }}>
-                    <Space>
+            <div className="api-workspace">
+              <aside className="api-workspace-sidebar">
+                <div className="api-workspace-sidebar-header">
+                  <div>
+                    <div className="api-workspace-sidebar-title">
                       <FolderOutlined />
-                      <span>分组目录</span>
-                      <span style={{ color: '#9ca3af', fontWeight: 400 }}>
-                        （右键分组可移动）
-                      </span>
-                    </Space>
+                      <span>接口资产</span>
+                    </div>
+                    <div className="api-workspace-sidebar-caption">
+                      {selectedGroupPath || '全部分组'} · {filtered.length} 个接口
+                    </div>
                   </div>
-                  <Tree
-                    treeData={groupTreeData}
-                    defaultExpandAll
-                    showLine
-                    selectedKeys={selectedGroupPath ? [`group::${selectedGroupPath}`] : []}
-                    onSelect={(keys) => {
-                      const key = keys[0] as string;
-                      if (key && key.startsWith('group::')) {
-                        setSelectedGroupPath(key.replace('group::', ''));
-                      } else {
-                        setSelectedGroupPath('');
-                      }
-                    }}
-                    titleRender={(node) => {
-                      // 分组节点支持右键菜单
-                      if (node.key && typeof node.key === 'string' && node.key.startsWith('group::') && !node.caseData) {
-                        const groupPath = node.key.replace('group::', '');
-                        return (
-                          <Dropdown
-                            trigger={['contextMenu']}
-                            menu={{
-                              items: [
-                                {
-                                  key: 'move',
-                                  label: '移动到分组...',
-                                  onClick: () => {
-                                    setMoveGroupSource(groupPath);
-                                    setMoveGroupTarget('');
-                                    setMoveGroupModalOpen(true);
-                                  },
+                  <Tooltip title="右键分组可批量移动">
+                    <Button type="text" size="small" icon={<MoreOutlined />} />
+                  </Tooltip>
+                </div>
+                <Tree
+                  className="api-asset-tree"
+                  treeData={groupTreeData}
+                  defaultExpandAll
+                  showLine
+                  blockNode
+                  selectedKeys={[
+                    selectedTreeKey || selectedCase?.id || '',
+                  ].filter(Boolean)}
+                  onSelect={(keys) => {
+                    const key = String(keys[0] || '');
+                    if (!key) return;
+                    if (key.startsWith('group::')) {
+                      selectGroup(key.replace('group::', ''));
+                      return;
+                    }
+                    const record = filtered.find((item) => item.id === key);
+                    if (record) selectCase(record);
+                  }}
+                  titleRender={(node) => {
+                    if (
+                      typeof node.key === 'string' &&
+                      node.key.startsWith('group::') &&
+                      !node.caseData
+                    ) {
+                      const groupPath = node.key.replace('group::', '');
+                      return (
+                        <Dropdown
+                          trigger={['contextMenu']}
+                          menu={{
+                            items: [
+                              {
+                                key: 'move',
+                                label: '移动到分组...',
+                                onClick: () => {
+                                  setMoveGroupSource(groupPath);
+                                  setMoveGroupTarget('');
+                                  setMoveGroupModalOpen(true);
                                 },
-                                {
-                                  key: 'select',
-                                  label: '查看此分组接口',
-                                  onClick: () => setSelectedGroupPath(groupPath),
-                                },
-                              ],
-                            }}
+                              },
+                              {
+                                key: 'select',
+                                label: '查看此分组',
+                                onClick: () => selectGroup(groupPath),
+                              },
+                            ],
+                          }}
+                        >
+                          <span className="api-tree-folder">{node.title}</span>
+                        </Dropdown>
+                      );
+                    }
+                    if (node.caseData) {
+                      const record = node.caseData;
+                      const status =
+                        lastResults[record.id] ||
+                        recentResults[record.id]?.status;
+                      return (
+                        <div className="api-tree-case" title={`${record.title}\n${record.url}`}>
+                          <Tag
+                            color={methodColor[record.method] || 'default'}
+                            className="api-tree-method"
                           >
-                            <span>{node.title}</span>
-                          </Dropdown>
-                        );
-                      }
-                      if (node.caseData) {
-                        const c = node.caseData;
-                        const lastStatus = lastResults[c.id];
-                        return (
-                          <div style={{ padding: '2px 0' }}>
-                            <Space>
-                              <Tag color={methodColor[c.method] || 'default'} style={{ minWidth: 48, textAlign: 'center', fontSize: 11 }}>
-                                {c.method}
-                              </Tag>
-                              <span style={{ fontSize: 13 }}>{c.title}</span>
-                              {lastStatus && (
-                                <Badge color={statusBadge[lastStatus] || '#d9d9d9'} text={statusLabel[lastStatus] || lastStatus} />
-                              )}
-                            </Space>
-                          </div>
-                        );
-                      }
-                      return node.title;
-                    }}
-                  />
-                </div>
-              </Col>
-              {/* 右侧：选中分组的接口列表 */}
-              <Col xs={24} md={16}>
-                <div style={{ marginBottom: 8, fontWeight: 600, color: '#6b7280', fontSize: 13 }}>
-                  {selectedGroupPath ? (
-                    <span>当前分组：{selectedGroupPath}（{treeViewCases.length} 个接口）</span>
-                  ) : (
-                    <span>全部接口（{treeViewCases.length} 个）— 点击左侧分组查看具体接口</span>
-                  )}
-                </div>
-                <Table
-                  dataSource={treeViewCases}
-                  rowKey="id"
-                  loading={loading}
-                  size="small"
-                  pagination={{ pageSize: 15, showTotal: (t) => `共 ${t} 条` }}
-                  columns={[
-                    {
-                      title: '方法',
-                      dataIndex: 'method',
-                      width: 70,
-                      render: (m: string) => <Tag color={methodColor[m] || 'default'}>{m}</Tag>,
-                    },
-                    { title: '标题', dataIndex: 'title', ellipsis: true },
-                    { title: 'URL', dataIndex: 'url', ellipsis: true, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span> },
-                    { title: '分组', dataIndex: 'group_path', width: 140, ellipsis: true, render: (v: string) => v || '-' },
-                    {
-                      title: '操作',
-                      width: 170,
-                      align: 'right',
-                      render: (_, record) => renderActions(record),
-                    },
-                  ]}
+                            {record.method}
+                          </Tag>
+                          <span className="api-tree-case-name">{record.title}</span>
+                          {status && (
+                            <Badge
+                              color={statusBadge[status] || '#d9d9d9'}
+                              className="api-tree-status"
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+                    return node.title;
+                  }}
                 />
-              </Col>
-            </Row>
+              </aside>
+
+              <main className="api-workspace-detail">
+                {selectedCase ? (
+                  <>
+                    <div className="api-detail-header">
+                      <div className="api-detail-heading">
+                        <div className="api-detail-context">
+                          {projectNameMap.get(selectedCase.project_id || '')?.name ||
+                            '未分类项目'}
+                          <span>/</span>
+                          {selectedCase.group_path || '未分组'}
+                        </div>
+                        <h2>{selectedCase.title}</h2>
+                        <div className="api-detail-endpoint">
+                          <Tag
+                            color={methodColor[selectedCase.method] || 'default'}
+                            className="api-detail-method"
+                          >
+                            {selectedCase.method}
+                          </Tag>
+                          <code>{selectedCase.url}</code>
+                        </div>
+                      </div>
+                      <Space wrap className="api-detail-actions">
+                        <Button
+                          type="primary"
+                          icon={<ThunderboltOutlined />}
+                          onClick={() => openDebugger(selectedCase)}
+                        >
+                          调试
+                        </Button>
+                        <Button
+                          icon={<PlayCircleOutlined />}
+                          loading={executingId === selectedCase.id}
+                          onClick={() => handleQuickExecute(selectedCase.id)}
+                        >
+                          执行
+                        </Button>
+                        <Button
+                          icon={<EditOutlined />}
+                          onClick={() => openEditCase(selectedCase)}
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          icon={<CopyOutlined />}
+                          onClick={() => handleCopy(selectedCase.id)}
+                        >
+                          复制
+                        </Button>
+                        <Button
+                          icon={<HistoryOutlined />}
+                          onClick={() => openChangeLog(selectedCase.id)}
+                        >
+                          历史
+                        </Button>
+                        <Dropdown
+                          menu={{
+                            items: [
+                              {
+                                key: 'download',
+                                icon: <DownloadOutlined />,
+                                label: '下载接口文档',
+                                onClick: () =>
+                                  void handleDownloadDoc(selectedCase.id),
+                              },
+                              {
+                                key: 'delete',
+                                icon: <DeleteOutlined />,
+                                label: '删除接口',
+                                danger: true,
+                                onClick: () => {
+                                  Modal.confirm({
+                                    title: '确认删除该接口？',
+                                    content: selectedCase.title,
+                                    okText: '删除',
+                                    okButtonProps: { danger: true },
+                                    cancelText: '取消',
+                                    onOk: () => handleDelete(selectedCase.id),
+                                  });
+                                },
+                              },
+                            ],
+                          }}
+                        >
+                          <Button icon={<MoreOutlined />} aria-label="更多操作" />
+                        </Dropdown>
+                      </Space>
+                    </div>
+
+                    <div className="api-execution-strip">
+                      <div>
+                        <span className="api-execution-label">最近执行</span>
+                        {selectedExecutionStatus ? (
+                          <Badge
+                            color={
+                              statusBadge[selectedExecutionStatus] || '#d9d9d9'
+                            }
+                            text={
+                              statusLabel[selectedExecutionStatus] ||
+                              selectedExecutionStatus
+                            }
+                          />
+                        ) : (
+                          <span className="api-detail-empty">尚未执行</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="api-execution-label">HTTP 状态</span>
+                        <strong>
+                          {selectedRecentResult?.status_code ?? '--'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="api-execution-label">耗时</span>
+                        <strong>
+                          {selectedRecentResult
+                            ? `${Math.round(selectedRecentResult.duration * 1000)} ms`
+                            : '--'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="api-execution-label">执行时间</span>
+                        <strong>
+                          {selectedRecentResult?.executed_at
+                            ? new Date(
+                                selectedRecentResult.executed_at
+                              ).toLocaleString('zh-CN')
+                            : '--'}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="api-detail-meta">
+                      <div>
+                        <span>状态</span>
+                        <Tag color={selectedCase.is_active ? 'green' : 'default'}>
+                          {selectedCase.is_active ? '启用' : '停用'}
+                        </Tag>
+                      </div>
+                      <div>
+                        <span>断言</span>
+                        <strong>{selectedCase.assertions?.length || 0} 条</strong>
+                      </div>
+                      <div>
+                        <span>重试</span>
+                        <strong>{selectedCase.retry_count || 0} 次</strong>
+                      </div>
+                      <div>
+                        <span>更新时间</span>
+                        <strong>
+                          {selectedCase.updated_at
+                            ? new Date(selectedCase.updated_at).toLocaleString(
+                                'zh-CN'
+                              )
+                            : '--'}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {selectedCase.description && (
+                      <section className="api-detail-section">
+                        <div className="api-detail-section-title">说明</div>
+                        <div className="api-detail-description">
+                          {selectedCase.description}
+                        </div>
+                      </section>
+                    )}
+
+                    <Divider />
+                    <div className="api-payload-grid">
+                      {renderDataSection(
+                        '请求头',
+                        selectedCase.headers,
+                        '未配置请求头'
+                      )}
+                      {renderDataSection(
+                        '查询参数',
+                        selectedCase.params,
+                        '未配置查询参数'
+                      )}
+                      {renderDataSection(
+                        '请求体',
+                        selectedCase.body,
+                        '当前请求没有请求体'
+                      )}
+                      {renderDataSection(
+                        '提取规则',
+                        selectedCase.extract_rules,
+                        '未配置变量提取'
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <Empty
+                    description="从左侧选择一个接口查看详情"
+                    className="api-workspace-empty"
+                  />
+                )}
+              </main>
+            </div>
           )
         )}
       </Card>
@@ -1003,13 +1455,16 @@ export default function ApiListPage() {
         </Form>
       </Modal>
 
-      {/* 新建用例 Modal */}
+      {/* 新建/编辑用例 Modal */}
       <Modal
-        title="新建测试用例"
+        title={editingCase ? '编辑接口' : '新建测试用例'}
         open={caseModalOpen}
-        onOk={handleCreateCase}
+        onOk={handleSaveCase}
         confirmLoading={creatingCase}
-        onCancel={() => setCaseModalOpen(false)}
+        onCancel={() => {
+          setCaseModalOpen(false);
+          setEditingCase(null);
+        }}
         width={640}
         destroyOnHidden
       >
@@ -1021,19 +1476,22 @@ export default function ApiListPage() {
           >
             <Input placeholder="如：获取用户列表" />
           </Form.Item>
-          <Space style={{ width: '100%' }} size="middle">
-            <Form.Item name="method" label="请求方法" rules={[{ required: true }]}>
-              <Select style={{ width: 120 }} options={METHODS.map((m) => ({ label: m, value: m }))} />
-            </Form.Item>
-            <Form.Item
-              name="url"
-              label="请求 URL"
-              rules={[{ required: true, message: '请输入请求 URL' }]}
-              style={{ flex: 1, minWidth: 400 }}
-            >
-              <Input placeholder="http://api.example.com/users" />
-            </Form.Item>
-          </Space>
+          <Row gutter={12}>
+            <Col xs={24} sm={6}>
+              <Form.Item name="method" label="请求方法" rules={[{ required: true }]}>
+                <Select options={METHODS.map((m) => ({ label: m, value: m }))} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={18}>
+              <Form.Item
+                name="url"
+                label="请求 URL"
+                rules={[{ required: true, message: '请输入请求 URL' }]}
+              >
+                <Input placeholder="http://api.example.com/users" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="group_path" label="分组路径">
             <Input placeholder="如：用户管理（可选）" />
           </Form.Item>
