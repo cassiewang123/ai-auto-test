@@ -142,8 +142,10 @@ export const reportApi = {
       params: { start, end },
     }),
   // 最近 N 次执行批次列表
-  listRuns: (limit?: number) =>
-    api.get<unknown, ApiResponse<any[]>>('/reports/runs', { params: { limit } }),
+  listRuns: (limit?: number, projectId?: string) =>
+    api.get<unknown, ApiResponse<any[]>>('/reports/runs', {
+      params: { limit, project_id: projectId },
+    }),
   // 单次执行详情
   getRunDetail: (runId: string) =>
     api.get<unknown, ApiResponse<any>>(`/reports/runs/${runId}`),

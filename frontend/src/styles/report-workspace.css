@@ -1,0 +1,71 @@
+.report-workspace {
+  min-width: 0;
+}
+
+.workspace-filter-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workspace-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workspace-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+
+.workspace-filter-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-filter-item .ant-select,
+.workspace-filter-item .ant-picker {
+  width: 100%;
+}
+
+.workspace-filter-feedback {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-workspace .ant-table-wrapper {
+  max-width: 100%;
+}
+
+.report-workspace .report-row-focused > td {
+  background: #e6f4ff !important;
+}
+
+@media (max-width: 767px) {
+  .workspace-filter-heading,
+  .workspace-filter-feedback {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-filter-grid > .ant-btn {
+    width: 100%;
+  }
+
+  .report-workspace .ant-statistic-content {
+    font-size: 22px;
+  }
+}

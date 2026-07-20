@@ -13,6 +13,10 @@ import {
   Modal,
   Spin,
   Tooltip,
+  DatePicker,
+  Dropdown,
+  Select,
+  Typography,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -22,11 +26,17 @@ import {
   ExclamationCircleOutlined,
   DownloadOutlined,
   FileTextOutlined,
+  FilterOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import { Chart, registerables } from 'chart.js';
+import dayjs, { type Dayjs } from 'dayjs';
 import { reportApi, reportExportApi } from '../services/api';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import '../styles/report-workspace.css';
 
 Chart.register(...registerables);
+const { RangePicker } = DatePicker;
 
 // 防御性取值：兼容后端可能返回的不同字段名
 function pick(obj: any, keys: string[]): any {
@@ -51,10 +61,32 @@ const statusLabel: Record<string, string> = {
   skipped: '跳过',
 };
 
+function runIdOf(run: any): string {
+  return String(pick(run, ['run_id', 'id']) || '');
+}
+
+function runSourceOf(run: any): string {
+  return String(pick(run, ['source', 'trigger_source', 'trigger', 'job_type']) || '');
+}
+
+function runStatusOf(run: any): string {
+  return String(pick(run, ['status', 'result', 'job_status']) || '').toLowerCase();
+}
+
+function runTimeOf(run: any): number {
+  const value = pick(run, ['created_at', 'executed_at', 'run_at', 'time', 'start_time']);
+  const timestamp = value ? dayjs(value).valueOf() : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 export default function ReportsPage() {
+  const { projects, selectedProjectId, setSelectedProjectId } = useWorkspace();
   const [runs, setRuns] = useState<any[]>([]);
-  const [trend, setTrend] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<string>();
+  const [statusFilter, setStatusFilter] = useState<string>();
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [trendFocusRunId, setTrendFocusRunId] = useState<string | null>(null);
 
   // 详情
   const [detailOpen, setDetailOpen] = useState(false);
@@ -67,49 +99,71 @@ export default function ReportsPage() {
   const pieCanvasRef = useRef<HTMLCanvasElement>(null);
   const pieChartRef = useRef<Chart | null>(null);
 
-  async function loadData() {
+  async function loadData(projectId: string | null = selectedProjectId) {
     setLoading(true);
     try {
-      const [runsRes, trendRes] = await Promise.all([
-        reportApi.listRuns(10),
-        reportApi.getTrend(10),
-      ]);
+      const runsRes = await reportApi.listRuns(100, projectId || undefined);
       setRuns(runsRes.data || []);
-      // 后端 trend 返回 {labels, pass_rates, totals, passed, failed} 对象，转换为前端期望的数组
-      const trendData = trendRes.data;
-      if (Array.isArray(trendData)) {
-        setTrend(trendData);
-      } else if (trendData && Array.isArray(trendData.labels)) {
-        const labels: string[] = trendData.labels || [];
-        const passRates: number[] = trendData.pass_rates || [];
-        const totals: number[] = trendData.totals || [];
-        const passed: number[] = trendData.passed || [];
-        const failed: number[] = trendData.failed || [];
-        setTrend(
-          labels.map((label: string, i: number) => ({
-            time: label,
-            pass_rate: passRates[i] ?? 0,
-            total: totals[i] ?? 0,
-            passed: passed[i] ?? 0,
-            failed: failed[i] ?? 0,
-          }))
-        );
-      } else {
-        setTrend([]);
-      }
     } catch (e: any) {
       message.error(e.message);
       setRuns([]);
-      setTrend([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadData();
+    void loadData(selectedProjectId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    setSourceFilter(undefined);
+    setStatusFilter(undefined);
+    setDateRange(null);
+    setTrendFocusRunId(null);
+  }, [selectedProjectId]);
+
+  const projectScopedRuns = selectedProjectId
+    ? runs.filter((run) => String(pick(run, ['project_id'])) === selectedProjectId)
+    : runs;
+  const sourceOptions = Array.from(
+    new Set(projectScopedRuns.map(runSourceOf).filter(Boolean))
+  ).sort();
+  const statusOptions = Array.from(
+    new Set(projectScopedRuns.map(runStatusOf).filter(Boolean))
+  ).sort();
+  const filteredRuns = projectScopedRuns.filter((run) => {
+    if (sourceFilter && runSourceOf(run) !== sourceFilter) return false;
+    if (statusFilter && runStatusOf(run) !== statusFilter) return false;
+    if (dateRange) {
+      const timestamp = runTimeOf(run);
+      if (!timestamp) return false;
+      const start = dateRange[0].startOf('day').valueOf();
+      const end = dateRange[1].endOf('day').valueOf();
+      if (timestamp < start || timestamp > end) return false;
+    }
+    return true;
+  });
+  const trend = [...filteredRuns].sort((left, right) => runTimeOf(left) - runTimeOf(right)).slice(-10);
+  const visibleRuns = trendFocusRunId
+    ? filteredRuns.filter((run) => runIdOf(run) === trendFocusRunId)
+    : filteredRuns;
+  const focusedRun = trendFocusRunId
+    ? filteredRuns.find((run) => runIdOf(run) === trendFocusRunId)
+    : null;
+
+  function clearFilters() {
+    setSourceFilter(undefined);
+    setStatusFilter(undefined);
+    setDateRange(null);
+    setTrendFocusRunId(null);
+    if (selectedProjectId) {
+      setSelectedProjectId(null);
+    } else {
+      void loadData(null);
+    }
+  }
 
   // 趋势图：混合图表（柱状图：通过/失败数量；折线图：通过率）
   useEffect(() => {
@@ -205,6 +259,13 @@ export default function ReportsPage() {
             },
           },
         },
+        onClick: (_event, elements) => {
+          const element = elements[0];
+          const run = element ? trend[element.index] : undefined;
+          if (run) {
+            setTrendFocusRunId(runIdOf(run));
+          }
+        },
         scales: {
           x: { title: { display: true, text: '执行时间' } },
           y: {
@@ -290,10 +351,10 @@ export default function ReportsPage() {
   }, [detailOpen, detail]);
 
   // 顶部统计
-  const totalRuns = runs.length;
-  const sumTotal = runs.reduce((s, r) => s + (Number(pick(r, ['total'])) || 0), 0);
-  const sumPassed = runs.reduce((s, r) => s + (Number(pick(r, ['passed'])) || 0), 0);
-  const sumDuration = runs.reduce(
+  const totalRuns = filteredRuns.length;
+  const sumTotal = filteredRuns.reduce((s, r) => s + (Number(pick(r, ['total'])) || 0), 0);
+  const sumPassed = filteredRuns.reduce((s, r) => s + (Number(pick(r, ['passed'])) || 0), 0);
+  const sumDuration = filteredRuns.reduce(
     (s, r) => s + (Number(pick(r, ['duration', 'duration_sum', 'total_duration'])) || 0),
     0
   );
@@ -430,9 +491,9 @@ export default function ReportsPage() {
     },
     {
       title: '操作',
-      width: 280,
+      width: 150,
       render: (_: any, record: any) => {
-        const runId = pick(record, ['run_id', 'id']);
+        const runId = runIdOf(record);
         return (
           <Space size="small">
             <Button
@@ -443,24 +504,35 @@ export default function ReportsPage() {
             >
               详情
             </Button>
-            <Button
-              size="small"
-              type="link"
-              icon={<FileTextOutlined />}
-              onClick={() => exportReport(runId, 'html')}
-              data-testid="export-html-btn"
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  {
+                    key: 'html',
+                    label: '导出 HTML',
+                    icon: <FileTextOutlined />,
+                  },
+                  {
+                    key: 'pdf',
+                    label: '导出 PDF',
+                    icon: <DownloadOutlined />,
+                  },
+                ],
+                onClick: ({ key }) => {
+                  void exportReport(runId, key as 'html' | 'pdf');
+                },
+              }}
             >
-              导出HTML
-            </Button>
-            <Button
-              size="small"
-              type="link"
-              icon={<DownloadOutlined />}
-              onClick={() => exportReport(runId, 'pdf')}
-              data-testid="export-pdf-btn"
-            >
-              导出PDF
-            </Button>
+              <Button
+                size="small"
+                type="link"
+                icon={<MoreOutlined />}
+                data-testid="report-export-menu"
+              >
+                导出
+              </Button>
+            </Dropdown>
           </Space>
         );
       },
@@ -580,7 +652,96 @@ export default function ReportsPage() {
   ];
 
   return (
-    <div>
+    <div className="report-workspace">
+      <Card className="workspace-filter-card" style={{ marginBottom: 16 }}>
+        <div className="workspace-filter-heading">
+          <Space>
+            <FilterOutlined />
+            <Typography.Text strong>报告筛选</Typography.Text>
+            <Tag color="green">项目服务端筛选</Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            项目条件由后端查询；来源、状态和时间在当前结果中即时筛选。
+          </Typography.Text>
+        </div>
+        <div className="workspace-filter-grid">
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">项目</Typography.Text>
+            <Select
+              allowClear
+              placeholder="全部项目"
+              value={selectedProjectId ?? undefined}
+              onChange={(value) => setSelectedProjectId(value ?? null)}
+              options={projects.map((project) => ({
+                value: project.id,
+                label: project.name,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+          </div>
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">来源 / 类型</Typography.Text>
+            <Select
+              allowClear
+              placeholder="全部来源"
+              value={sourceFilter}
+              onChange={(value) => {
+                setSourceFilter(value);
+                setTrendFocusRunId(null);
+              }}
+              options={sourceOptions.map((source) => ({ value: source, label: source }))}
+            />
+          </div>
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">状态</Typography.Text>
+            <Select
+              allowClear
+              placeholder="全部状态"
+              value={statusFilter}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setTrendFocusRunId(null);
+              }}
+              options={statusOptions.map((status) => ({
+                value: status,
+                label: statusLabel[status] || status,
+              }))}
+            />
+          </div>
+          <div className="workspace-filter-item workspace-filter-date">
+            <Typography.Text type="secondary">执行时间</Typography.Text>
+            <RangePicker
+              value={dateRange}
+              onChange={(value) => {
+                setDateRange(value as [Dayjs, Dayjs] | null);
+                setTrendFocusRunId(null);
+              }}
+              allowEmpty={[true, true]}
+            />
+          </div>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={clearFilters}
+            loading={loading}
+          >
+            清除并刷新
+          </Button>
+        </div>
+        <div className="workspace-filter-feedback">
+          <Typography.Text type="secondary">
+            当前显示 {filteredRuns.length} 条记录
+            {selectedProjectId ? '，项目范围由后端按全局工作区查询' : '，项目范围为全部项目'}
+            {focusedRun ? '，列表已定位到趋势选中的批次' : ''}。
+          </Typography.Text>
+          {focusedRun && (
+            <Button type="link" size="small" onClick={() => setTrendFocusRunId(null)}>
+              查看全部筛选结果
+            </Button>
+          )}
+        </div>
+      </Card>
+
       {/* 顶部统计卡片 */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} lg={6}>
@@ -632,8 +793,13 @@ export default function ReportsPage() {
       <Card
         title={
           <Space>
-            <span>通过率趋势（近 10 次执行）</span>
-            <Button size="small" icon={<ReloadOutlined />} onClick={loadData} loading={loading}>
+            <span>通过率趋势（当前筛选最近 {trend.length} 次）</span>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => void loadData()}
+              loading={loading}
+            >
               刷新
             </Button>
           </Space>
@@ -647,18 +813,32 @@ export default function ReportsPage() {
             <canvas ref={trendCanvasRef} />
           </div>
         )}
+        <Typography.Text type="secondary">
+          点击趋势中的执行点，可联动定位下方对应批次。
+        </Typography.Text>
       </Card>
 
       {/* 执行批次列表 */}
-      <Card title="最近执行批次">
+      <Card
+        title={
+          <Space>
+            <span>执行批次</span>
+            <Tag>{visibleRuns.length} 条</Tag>
+          </Space>
+        }
+      >
         <Table
-          dataSource={runs}
-          rowKey={(record: any) => pick(record, ['run_id', 'id']) || JSON.stringify(record)}
+          dataSource={visibleRuns}
+          rowKey={(record: any) => runIdOf(record) || JSON.stringify(record)}
           data-testid="reports-table"
           loading={loading}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
           columns={columns}
           size="middle"
+          scroll={{ x: 980 }}
+          rowClassName={(record: any) =>
+            runIdOf(record) === trendFocusRunId ? 'report-row-focused' : ''
+          }
           locale={{ emptyText: <Empty description="暂无执行记录" /> }}
         />
       </Card>

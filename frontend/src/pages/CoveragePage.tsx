@@ -14,6 +14,7 @@ import {
   Spin,
   message,
   Tooltip,
+  Typography,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -22,8 +23,10 @@ import {
   CloseCircleOutlined,
   PieChartOutlined,
 } from '@ant-design/icons';
-import { coverageApi, projectApi } from '../services/api';
-import type { Project } from '../types';
+import { useNavigate } from 'react-router-dom';
+import { coverageApi } from '../services/api';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import '../styles/report-workspace.css';
 
 // 方法对应的标签颜色
 const methodColor: Record<string, string> = {
@@ -35,24 +38,19 @@ const methodColor: Record<string, string> = {
 };
 
 export default function CoveragePage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const navigate = useNavigate();
+  const { projects, selectedProjectId, setSelectedProjectId } = useWorkspace();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-
-  async function loadProjects() {
-    try {
-      const res = await projectApi.listAll();
-      setProjects(res.data || []);
-    } catch (e: any) {
-      message.error(e.message);
-    }
-  }
+  const [coverageView, setCoverageView] = useState<'group' | 'method'>('group');
+  const [coverageStatus, setCoverageStatus] = useState<'all' | 'uncovered' | 'covered'>(
+    'uncovered'
+  );
 
   async function loadCoverage() {
     setLoading(true);
     try {
-      const res = await coverageApi.get(selectedProjectId || undefined);
+      const res = await coverageApi.get(selectedProjectId ?? undefined);
       setData(res.data);
     } catch (e: any) {
       message.error(e.message);
@@ -61,10 +59,6 @@ export default function CoveragePage() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    loadProjects();
-  }, []);
 
   useEffect(() => {
     loadCoverage();
@@ -79,6 +73,92 @@ export default function CoveragePage() {
   const methodMax = data?.by_method
     ? Math.max(...data.by_method.map((m: any) => m.total), 1)
     : 1;
+
+  const coverageEntries = (
+    coverageView === 'method'
+      ? (data?.by_method || []).map((item: any) => ({
+          ...item,
+          key: `method-${item.method}`,
+          label: item.method || 'UNKNOWN',
+        }))
+      : (data?.by_group || []).map((item: any) => ({
+          ...item,
+          key: `group-${item.group_path || '未分组'}`,
+          label: item.group_path || '未分组',
+        }))
+  ).filter((item: any) => {
+    if (coverageStatus === 'uncovered') return Number(item.uncovered) > 0;
+    if (coverageStatus === 'covered') return Number(item.uncovered) === 0;
+    return true;
+  });
+
+  function openApiList() {
+    const query = selectedProjectId
+      ? `?project_id=${encodeURIComponent(selectedProjectId)}`
+      : '';
+    navigate(`/api-list${query}`);
+  }
+
+  const coverageEntryColumns = [
+    {
+      title: coverageView === 'method' ? '请求方法' : '分组',
+      dataIndex: 'label',
+      ellipsis: true,
+      render: (value: string) =>
+        coverageView === 'method' ? (
+          <Tag color={methodColor[value] || 'default'}>{value}</Tag>
+        ) : (
+          value
+        ),
+    },
+    {
+      title: '接口总数',
+      dataIndex: 'total',
+      width: 100,
+      align: 'center' as const,
+    },
+    {
+      title: '已覆盖',
+      dataIndex: 'covered',
+      width: 100,
+      align: 'center' as const,
+      render: (value: number) => (
+        <span style={{ color: '#52c41a', fontWeight: 600 }}>{value}</span>
+      ),
+    },
+    {
+      title: '未覆盖',
+      dataIndex: 'uncovered',
+      width: 100,
+      align: 'center' as const,
+      render: (value: number) => (
+        <span style={{ color: '#ff4d4f', fontWeight: 600 }}>{value}</span>
+      ),
+    },
+    {
+      title: '覆盖率',
+      dataIndex: 'coverage_rate',
+      width: 180,
+      render: (value: number) => (
+        <Progress
+          percent={value}
+          size="small"
+          strokeColor={
+            value >= 80 ? '#52c41a' : value >= 50 ? '#faad14' : '#ff4d4f'
+          }
+        />
+      ),
+    },
+    {
+      title: '操作',
+      width: 130,
+      render: () => (
+        <Button type="link" icon={<ApiOutlined />} onClick={openApiList}>
+          打开接口列表
+        </Button>
+      ),
+    },
+  ];
 
   const groupColumns = [
     {
@@ -126,28 +206,68 @@ export default function CoveragePage() {
   ];
 
   return (
-    <div>
+    <div className="report-workspace">
       {/* 工具栏 */}
-      <Card style={{ marginBottom: 16 }}>
-        <Space wrap>
-          <span style={{ fontWeight: 600 }}>项目：</span>
-          <Select
-            value={selectedProjectId}
-            onChange={setSelectedProjectId}
-            style={{ width: 240 }}
-            placeholder="选择项目"
-            showSearch
-            optionFilterProp="label"
-            allowClear
-            options={[
-              { value: '', label: '全部项目' },
-              ...projects.map((p) => ({ value: p.id, label: p.name })),
-            ]}
-          />
+      <Card className="workspace-filter-card" style={{ marginBottom: 16 }}>
+        <div className="workspace-filter-heading">
+          <Space>
+            <PieChartOutlined />
+            <Typography.Text strong>覆盖率筛选</Typography.Text>
+            <Tag color="green">项目服务端筛选</Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            项目通过 coverageApi.get(projectId) 查询；覆盖率按全部历史执行结果累计。
+          </Typography.Text>
+        </div>
+        <div className="workspace-filter-grid">
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">项目</Typography.Text>
+            <Select
+              value={selectedProjectId ?? undefined}
+              onChange={(value) => setSelectedProjectId(value ?? null)}
+              placeholder="全部项目"
+              showSearch
+              optionFilterProp="label"
+              allowClear
+              options={projects.map((project) => ({
+                value: project.id,
+                label: project.name,
+              }))}
+            />
+          </div>
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">缺口类型</Typography.Text>
+            <Select
+              value={coverageView}
+              onChange={setCoverageView}
+              options={[
+                { value: 'group', label: '按分组' },
+                { value: 'method', label: '按请求方法' },
+              ]}
+            />
+          </div>
+          <div className="workspace-filter-item">
+            <Typography.Text type="secondary">覆盖状态</Typography.Text>
+            <Select
+              value={coverageStatus}
+              onChange={setCoverageStatus}
+              options={[
+                { value: 'uncovered', label: '存在未覆盖' },
+                { value: 'covered', label: '已全部覆盖' },
+                { value: 'all', label: '全部' },
+              ]}
+            />
+          </div>
           <Button icon={<ReloadOutlined />} onClick={loadCoverage} loading={loading}>
             刷新
           </Button>
-        </Space>
+        </div>
+        <div className="workspace-filter-feedback">
+          <Typography.Text type="secondary">
+            缺口列表显示 {coverageEntries.length} 个
+            {coverageView === 'group' ? '分组' : '请求方法'}聚合项；接口暂未返回单个未覆盖接口明细。
+          </Typography.Text>
+        </div>
       </Card>
 
       {loading ? (
@@ -204,6 +324,36 @@ export default function CoveragePage() {
               </Card>
             </Col>
           </Row>
+
+          <Card
+            title="未覆盖接口入口"
+            extra={
+              <Button icon={<ApiOutlined />} onClick={openApiList}>
+                打开项目接口列表
+              </Button>
+            }
+            style={{ marginBottom: 16 }}
+          >
+            <Table
+              dataSource={coverageEntries}
+              rowKey="key"
+              columns={coverageEntryColumns}
+              size="middle"
+              scroll={{ x: 760 }}
+              pagination={{ pageSize: 8, showTotal: (total) => `共 ${total} 项` }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    description={
+                      coverageStatus === 'uncovered'
+                        ? '当前聚合维度下没有未覆盖项'
+                        : '暂无覆盖率聚合数据'
+                    }
+                  />
+                ),
+              }}
+            />
+          </Card>
 
           <Row gutter={[16, 16]}>
             {/* 左侧：总覆盖率环形图 */}
@@ -277,6 +427,7 @@ export default function CoveragePage() {
               size="middle"
               pagination={{ pageSize: 15, showTotal: (t) => `共 ${t} 个分组` }}
               columns={groupColumns}
+              scroll={{ x: 700 }}
               locale={{ emptyText: <Empty description="暂无分组数据" /> }}
             />
           </Card>
