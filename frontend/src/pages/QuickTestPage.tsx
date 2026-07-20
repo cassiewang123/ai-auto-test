@@ -18,6 +18,7 @@ import {
   Modal,
   Form,
   Segmented,
+  Divider,
 } from 'antd';
 import {
   ThunderboltOutlined,
@@ -69,7 +70,8 @@ function createKeyValueRow(key = '', value = ''): KeyValueRow {
 
 function parseDisplayValue(value: unknown) {
   if (typeof value === 'string') return value;
-  return JSON.stringify(value);
+  if (value === null || value === undefined) return '';
+  return JSON.stringify(value) ?? String(value);
 }
 
 function parseInputValue(value: string) {
@@ -97,13 +99,38 @@ function jsonToRows(value: string): { rows: KeyValueRow[]; valid: boolean } {
   }
 }
 
-function rowsToJson(rows: KeyValueRow[]) {
+function rowsToJson(rows: KeyValueRow[], valueMode: 'json' | 'string') {
   const value = rows.reduce<Record<string, unknown>>((result, row) => {
     const key = row.key.trim();
-    if (key) result[key] = parseInputValue(row.value);
+    if (key) {
+      result[key] =
+        valueMode === 'string' ? row.value : parseInputValue(row.value);
+    }
     return result;
   }, {});
   return JSON.stringify(value, null, 2);
+}
+
+function parseJsonObject(value: string, label: string): Record<string, unknown> {
+  const parsed = value.trim() ? JSON.parse(value) : {};
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseHeadersJson(value: string): Record<string, string> {
+  const parsed = parseJsonObject(value, 'Headers');
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, item]) => [
+      key,
+      item === null || item === undefined
+        ? ''
+        : typeof item === 'string'
+          ? item
+          : JSON.stringify(item),
+    ])
+  );
 }
 
 interface JsonKeyValueEditorProps {
@@ -112,6 +139,7 @@ interface JsonKeyValueEditorProps {
   keyPlaceholder: string;
   valuePlaceholder: string;
   rawPlaceholder: string;
+  valueMode?: 'json' | 'string';
 }
 
 function JsonKeyValueEditor({
@@ -120,6 +148,7 @@ function JsonKeyValueEditor({
   keyPlaceholder,
   valuePlaceholder,
   rawPlaceholder,
+  valueMode = 'json',
 }: JsonKeyValueEditorProps) {
   const initial = jsonToRows(value);
   const [mode, setMode] = useState<'table' | 'raw'>('table');
@@ -136,7 +165,7 @@ function JsonKeyValueEditor({
   }, [value]);
 
   function updateRows(nextRows: KeyValueRow[]) {
-    const nextValue = rowsToJson(nextRows);
+    const nextValue = rowsToJson(nextRows, valueMode);
     setRows(nextRows);
     setValidJson(true);
     lastEmittedValue.current = nextValue;
@@ -249,6 +278,7 @@ export default function QuickTestPage() {
   const [searchParams] = useSearchParams();
   const {
     environments,
+    selectedProjectId,
     selectedEnvironmentId,
     setSelectedEnvironmentId,
     setSelectedProjectId,
@@ -271,6 +301,7 @@ export default function QuickTestPage() {
   const [retryCount, setRetryCount] = useState(0);
   const [retryInterval, setRetryInterval] = useState(0);
   const [assertions, setAssertions] = useState<any[]>([]);
+  const [extractRules, setExtractRules] = useState<any[]>([]);
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<ExecutionResultData | null>(null);
 
@@ -336,6 +367,7 @@ export default function QuickTestPage() {
               expected: assertion.expected ?? '',
             }))
           );
+          setExtractRules(testCase.extract_rules || []);
           setRetryCount(testCase.retry_count || 0);
           setRetryInterval(testCase.retry_interval || 0);
           setPreScript(testCase.pre_script || '');
@@ -437,7 +469,7 @@ export default function QuickTestPage() {
     setPreRequests(preRequests.filter((_, i) => i !== idx));
   }
 
-  function addExtractRule(preIdx: number) {
+  function addPreExtractRule(preIdx: number) {
     const next = [...preRequests];
     next[preIdx].extract_rules.push({
       name: '',
@@ -447,7 +479,7 @@ export default function QuickTestPage() {
     setPreRequests(next);
   }
 
-  function updateExtractRule(preIdx: number, ruleIdx: number, field: string, value: any) {
+  function updatePreExtractRule(preIdx: number, ruleIdx: number, field: string, value: any) {
     const next = [...preRequests];
     next[preIdx].extract_rules[ruleIdx] = {
       ...next[preIdx].extract_rules[ruleIdx],
@@ -456,7 +488,7 @@ export default function QuickTestPage() {
     setPreRequests(next);
   }
 
-  function removeExtractRule(preIdx: number, ruleIdx: number) {
+  function removePreExtractRule(preIdx: number, ruleIdx: number) {
     const next = [...preRequests];
     next[preIdx].extract_rules = next[preIdx].extract_rules.filter((_, i) => i !== ruleIdx);
     setPreRequests(next);
@@ -477,21 +509,58 @@ export default function QuickTestPage() {
     setAssertions(assertions.filter((_, i) => i !== index));
   }
 
+  function addExtractRule() {
+    setExtractRules([
+      ...extractRules,
+      { name: '', source: 'json_path', expression: '' },
+    ]);
+  }
+
+  function updateExtractRule(index: number, field: string, value: string) {
+    setExtractRules(
+      extractRules.map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, [field]: value } : rule
+      )
+    );
+  }
+
+  function removeExtractRule(index: number) {
+    setExtractRules(extractRules.filter((_, ruleIndex) => ruleIndex !== index));
+  }
+
   // ---- 执行 ----
   async function handleExecute() {
     if (!url.trim()) {
       message.warning('请输入请求 URL');
       return;
     }
-    let parsedHeaders = {}, parsedParams = {}, parsedBody, parsedVars = {};
-    try { parsedHeaders = headers ? JSON.parse(headers) : {}; } catch { message.error('Headers JSON 格式不正确'); return; }
-    try { parsedParams = params ? JSON.parse(params) : {}; } catch { message.error('Params JSON 格式不正确'); return; }
-    try { if (body.trim()) parsedBody = JSON.parse(body); } catch { message.error('Body JSON 格式不正确'); return; }
+    let parsedHeaders: Record<string, string> = {};
+    let parsedParams: Record<string, unknown> = {};
+    let parsedBody: Record<string, unknown> | undefined;
+    let parsedVars: Record<string, unknown> = {};
     try {
-      const localVariables = envVariables ? JSON.parse(envVariables) : {};
+      parsedHeaders = parseHeadersJson(headers);
+    } catch (error: any) {
+      message.error(error.message || 'Headers JSON 格式不正确');
+      return;
+    }
+    try {
+      parsedParams = parseJsonObject(params, 'Params');
+    } catch (error: any) {
+      message.error(error.message || 'Params JSON 格式不正确');
+      return;
+    }
+    try {
+      if (body.trim()) parsedBody = parseJsonObject(body, 'Body');
+    } catch (error: any) {
+      message.error(error.message || 'Body JSON 格式不正确');
+      return;
+    }
+    try {
+      const localVariables = parseJsonObject(envVariables, '环境变量');
       parsedVars = { ...workspaceVariables, ...localVariables };
-    } catch {
-      message.error('环境变量 JSON 格式不正确');
+    } catch (error: any) {
+      message.error(error.message || '环境变量 JSON 格式不正确');
       return;
     }
 
@@ -537,11 +606,16 @@ export default function QuickTestPage() {
         res = await executionApi.runMultipart({
           method, url,
           headers: parsedHeaders, params: parsedParams, body: parsedBody,
-          assertions, variables: parsedVars, timeout,
+          assertions, extract_rules: extractRules,
+          variables: parsedVars, timeout,
           pre_requests: preRequests,
           cookies: sessionCookies,
           pre_script: preScript || undefined,
           post_script: postScript || undefined,
+          retry_count: retryCount,
+          retry_interval: retryInterval,
+          project_id: selectedProjectId || undefined,
+          environment_id: selectedEnvironmentId || undefined,
           fileList: fileItems.map((f) => f.file),
           fileFields: fileItems.map((f) => f.field),
         });
@@ -549,11 +623,16 @@ export default function QuickTestPage() {
         res = await executionApi.run({
           method, url,
           headers: parsedHeaders, params: parsedParams, body: parsedBody,
-          assertions, variables: parsedVars, timeout,
+          assertions, extract_rules: extractRules,
+          variables: parsedVars, timeout,
           pre_requests: preRequests,
           cookies: sessionCookies,
           pre_script: preScript || undefined,
           post_script: postScript || undefined,
+          retry_count: retryCount,
+          retry_interval: retryInterval,
+          project_id: selectedProjectId || undefined,
+          environment_id: selectedEnvironmentId || undefined,
         });
       }
       setResult(res.data);
@@ -630,7 +709,7 @@ export default function QuickTestPage() {
     saveForm.setFieldsValue({
       title: defaultTitle,
       group_path: '',
-      project_id: undefined,
+      project_id: selectedProjectId || undefined,
     });
     setSaveModalOpen(true);
   }
@@ -639,28 +718,29 @@ export default function QuickTestPage() {
     try {
       const values: any = await saveForm.validateFields();
       // 解析当前请求配置
-      let parsedHeaders = {}, parsedParams = {}, parsedBody;
-      try { parsedHeaders = headers ? JSON.parse(headers) : {}; } catch { message.error('Headers JSON 格式不正确'); return; }
-      try { parsedParams = params ? JSON.parse(params) : {}; } catch { message.error('Params JSON 格式不正确'); return; }
-      try { if (body.trim()) parsedBody = JSON.parse(body); } catch { message.error('Body JSON 格式不正确'); return; }
-
-      setSaving(true);
-      await testCaseApi.create({
-        title: values.title,
-        method,
-        url,
-        headers: parsedHeaders,
-        params: parsedParams,
-        body: parsedBody,
-        group_path: values.group_path || undefined,
-        project_id: values.project_id || undefined,
-        markers: ['quick_test'],
-        retry_count: retryCount,
-        retry_interval: retryInterval,
-        pre_script: preScript || undefined,
-        post_script: postScript || undefined,
-        auth_type: authType,
-        auth_config: authType !== 'none' ? JSON.stringify({
+      let parsedHeaders: Record<string, string> = {};
+      let parsedParams: Record<string, unknown> = {};
+      let parsedBody: Record<string, unknown> | undefined;
+      try {
+        parsedHeaders = parseHeadersJson(headers);
+      } catch (error: any) {
+        message.error(error.message || 'Headers JSON 格式不正确');
+        return;
+      }
+      try {
+        parsedParams = parseJsonObject(params, 'Params');
+      } catch (error: any) {
+        message.error(error.message || 'Params JSON 格式不正确');
+        return;
+      }
+      try {
+        if (body.trim()) parsedBody = parseJsonObject(body, 'Body');
+      } catch (error: any) {
+        message.error(error.message || 'Body JSON 格式不正确');
+        return;
+      }
+      const appliedAuth = applyAuth(
+        {
           type: authType,
           token: authToken || undefined,
           apiKeyName: apiKeyName || undefined,
@@ -668,8 +748,28 @@ export default function QuickTestPage() {
           apiKeyIn,
           username: basicUser || undefined,
           password: basicPass || undefined,
-        }) : undefined,
-        session_cookies: sessionCookies.length > 0 ? sessionCookies : undefined,
+        },
+        parsedHeaders,
+        parsedParams
+      );
+
+      setSaving(true);
+      await testCaseApi.create({
+        title: values.title,
+        method,
+        url,
+        headers: appliedAuth.headers,
+        params: appliedAuth.params,
+        body: parsedBody,
+        group_path: values.group_path || undefined,
+        project_id: values.project_id || selectedProjectId || undefined,
+        environment_id: selectedEnvironmentId || undefined,
+        markers: ['quick_test'],
+        extract_rules: extractRules,
+        retry_count: retryCount,
+        retry_interval: retryInterval,
+        pre_script: preScript || undefined,
+        post_script: postScript || undefined,
         assertions: assertions.length > 0 ? assertions.map((a, i) => ({
           assertion_type: a.assertion_type,
           expression: a.expression || null,
@@ -900,22 +1000,22 @@ export default function QuickTestPage() {
                                   <KeyOutlined /> 变量提取规则
                                 </label>
                                 <Button size="small" type="dashed" icon={<PlusOutlined />}
-                                  onClick={() => addExtractRule(preIdx)}>添加提取</Button>
+                                  onClick={() => addPreExtractRule(preIdx)}>添加提取</Button>
                               </div>
                               {pre.extract_rules.map((rule, ruleIdx) => (
                                 <Space key={ruleIdx} size="small" style={{ display: 'flex', marginBottom: 4 }}>
                                   <Input size="small" value={rule.name}
-                                    onChange={(e) => updateExtractRule(preIdx, ruleIdx, 'name', e.target.value)}
+                                    onChange={(e) => updatePreExtractRule(preIdx, ruleIdx, 'name', e.target.value)}
                                     placeholder="变量名 (如 token)" style={{ width: 120 }} />
                                   <Select size="small" value={rule.source}
-                                    onChange={(v) => updateExtractRule(preIdx, ruleIdx, 'source', v)}
+                                    onChange={(v) => updatePreExtractRule(preIdx, ruleIdx, 'source', v)}
                                     style={{ width: 110 }}
                                     options={EXTRACT_SOURCES.map((s) => ({ label: s, value: s }))} />
                                   <Input size="small" value={rule.expression}
-                                    onChange={(e) => updateExtractRule(preIdx, ruleIdx, 'expression', e.target.value)}
+                                    onChange={(e) => updatePreExtractRule(preIdx, ruleIdx, 'expression', e.target.value)}
                                     placeholder="表达式 (如 $.data.token)" style={{ width: 200 }} />
                                   <Button type="link" danger size="small" icon={<DeleteOutlined />}
-                                    onClick={() => removeExtractRule(preIdx, ruleIdx)} />
+                                    onClick={() => removePreExtractRule(preIdx, ruleIdx)} />
                                 </Space>
                               ))}
                             </div>
@@ -957,6 +1057,72 @@ export default function QuickTestPage() {
                     </Space>
                   ))}
                   <Button type="dashed" onClick={addAssertion} block>+ 添加断言</Button>
+
+                  <Divider />
+                  <div style={{ marginBottom: 8, fontWeight: 600 }}>失败重试</div>
+                  <Space wrap>
+                    <span>重试次数</span>
+                    <InputNumber
+                      min={0}
+                      max={10}
+                      value={retryCount}
+                      onChange={(value) => setRetryCount(value || 0)}
+                    />
+                    <span>间隔（秒）</span>
+                    <InputNumber
+                      min={0}
+                      max={300}
+                      step={0.5}
+                      value={retryInterval}
+                      onChange={(value) => setRetryInterval(value || 0)}
+                    />
+                  </Space>
+
+                  <Divider />
+                  <div style={{ marginBottom: 8, fontWeight: 600 }}>
+                    响应变量提取
+                  </div>
+                  {extractRules.map((rule, index) => (
+                    <Space key={index} align="baseline" wrap style={{ marginBottom: 8 }}>
+                      <Input
+                        value={rule.name}
+                        onChange={(event) =>
+                          updateExtractRule(index, 'name', event.target.value)
+                        }
+                        placeholder="变量名"
+                        style={{ width: 150 }}
+                      />
+                      <Select
+                        value={rule.source}
+                        onChange={(value) =>
+                          updateExtractRule(index, 'source', value)
+                        }
+                        style={{ width: 130 }}
+                        options={EXTRACT_SOURCES.map((source) => ({
+                          label: source,
+                          value: source,
+                        }))}
+                      />
+                      <Input
+                        value={rule.expression}
+                        onChange={(event) =>
+                          updateExtractRule(index, 'expression', event.target.value)
+                        }
+                        placeholder="JSONPath / Header / 正则表达式"
+                        style={{ width: 260 }}
+                      />
+                      <Button
+                        type="link"
+                        danger
+                        onClick={() => removeExtractRule(index)}
+                      >
+                        删除
+                      </Button>
+                    </Space>
+                  ))}
+                  <Button type="dashed" onClick={addExtractRule} block>
+                    + 添加提取规则
+                  </Button>
                 </div>
               ),
             },
@@ -1167,6 +1333,7 @@ export default function QuickTestPage() {
                         keyPlaceholder="Header 名"
                         valuePlaceholder="Header 值"
                         rawPlaceholder='{"Content-Type": "application/json"}'
+                        valueMode="string"
                       />
                     ),
                   },
@@ -1510,7 +1677,8 @@ export default function QuickTestPage() {
           </Form.Item>
         </Form>
         <div style={{ color: '#9ca3af', fontSize: 12 }}>
-          当前的 Headers、Params、Body、断言规则将一并保存。如果未设置断言，将自动添加 status_code=200 断言。
+          当前的 Headers、Params、Body、认证、提取规则和断言将一并保存。会话 Cookie
+          不会写入用例；长期 Cookie 请配置到当前环境。
         </div>
       </Modal>
     </div>

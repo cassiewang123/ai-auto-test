@@ -31,6 +31,7 @@ from app.schemas.execution import (
     RequestDefinition,
 )
 from app.services.auth_service import get_current_user
+from app.services.project_access import ensure_project_role
 from app.services.security.data_redaction import redact_sensitive_data
 from app.services.security.url_policy import URLPolicy
 
@@ -74,6 +75,7 @@ def _build_request_def(req: ExecuteRequest) -> RequestDefinition:
         body=req.body,
         graphql_query=req.graphql_query,
         files=req.files if req.files else None,
+        extract_rules=req.extract_rules,
         timeout=req.timeout,
     )
 
@@ -338,6 +340,70 @@ def _cast_variable(value: str | None, var_type: str) -> Any:
     return value
 
 
+def _resolve_environment_url(url: str, base_url: str | None) -> str:
+    """Resolve relative direct-execution URLs against the selected environment."""
+    if not base_url or url.lower().startswith(("http://", "https://")):
+        return url
+    return f"{base_url.rstrip('/')}/{url.lstrip('/')}"
+
+
+def _load_direct_execution_context(
+    db: Session,
+    current_user: User,
+    *,
+    project_id: str | None,
+    environment_id: str | None,
+    request_variables: dict[str, Any],
+    request_cookies: list[dict],
+) -> tuple[dict[str, Any], list[dict], str | None]:
+    """Load project variables and the selected environment for a quick test."""
+    if project_id:
+        ensure_project_role(db, current_user, project_id, "tester")
+
+    variables = _load_global_variables(db, project_id)
+    cookies: list[dict] = []
+    base_url: str | None = None
+
+    if environment_id:
+        from app.models.environment import Environment
+        from app.services.security.secret_crypto import (
+            SecretCryptoError,
+            decrypt_cookies,
+        )
+
+        environment = db.get(Environment, environment_id)
+        if environment is None:
+            raise NotFoundError("Environment", environment_id)
+        variables.update(environment.variables or {})
+        base_url = environment.base_url
+        try:
+            cookies = decrypt_cookies(environment.cookies)
+        except (SecretCryptoError, TypeError) as exc:
+            raise AppException(
+                status_code=422,
+                message="环境 Cookie 解密失败",
+                detail=str(exc),
+            ) from exc
+
+    variables.update(request_variables)
+    cookies = _merge_cookies(cookies, request_cookies)
+    return variables, cookies, base_url
+
+
+def _resolve_pre_request_urls(
+    pre_requests: list[PreRequest],
+    base_url: str | None,
+) -> list[PreRequest]:
+    if not base_url:
+        return pre_requests
+    return [
+        request.model_copy(
+            update={"url": _resolve_environment_url(request.url, base_url)}
+        )
+        for request in pre_requests
+    ]
+
+
 # ---------- API 端点 ----------
 
 
@@ -360,21 +426,47 @@ def run_test(
 
     from app.api.v1.history import save_history
 
+    context_variables, request_cookies, base_url = (
+        _load_direct_execution_context(
+            db,
+            current_user,
+            project_id=req.project_id,
+            environment_id=req.environment_id,
+            request_variables=req.variables,
+            request_cookies=req.cookies,
+        )
+    )
+    resolved_url = _resolve_environment_url(req.url, base_url)
+    resolved_pre_requests = _resolve_pre_request_urls(req.pre_requests, base_url)
+
     # 1. 前置条件
-    merged_vars, pre_results = _run_pre_requests(req.pre_requests, req.variables)
+    merged_vars, pre_results = _run_pre_requests(
+        resolved_pre_requests,
+        context_variables,
+    )
 
     # 2. 前置脚本
     pre_script_result = None
     if req.pre_script:
-        ctx = {"variables": merged_vars, "request": req.model_dump()}
+        ctx = {
+            "variables": merged_vars,
+            "request": req.model_copy(
+                update={"url": resolved_url}
+            ).model_dump(),
+        }
         pre_script_result = _run_script(req.pre_script, ctx)
         # 脚本可能修改了 variables
         if pre_script_result.get("success") and pre_script_result.get("variables"):
             merged_vars = pre_script_result["variables"]
 
     # 3. 合并 Cookie 并执行主请求（含重试）
-    request_def = _build_request_def(req)
-    request_def.headers = _build_cookie_header(req.cookies, request_def.headers)
+    request_def = _build_request_def(
+        req.model_copy(update={"url": resolved_url})
+    )
+    request_def.headers = _build_cookie_header(
+        request_cookies,
+        request_def.headers,
+    )
     result, attempts = _execute_with_retry(
         executor=_executor,
         request_def=request_def,
@@ -409,7 +501,7 @@ def run_test(
     session_cookies = []
     if result.response and result.response.headers:
         new_cookies = _extract_cookies(result.response.headers)
-        session_cookies = _merge_cookies(req.cookies, new_cookies)
+        session_cookies = _merge_cookies(request_cookies, new_cookies)
     serialized["session_cookies"] = redact_sensitive_data(
         session_cookies,
         parent_key="session_cookies",
@@ -420,10 +512,10 @@ def run_test(
     save_history(
         db,
         method=req.method,
-        url=req.url,
+        url=resolved_url,
         status=result.status,
         duration=result.duration,
-        headers=req.headers,
+        headers=request_def.headers,
         params=req.params,
         body=req.body,
         status_code=result.response.status_code if result.response else None,
@@ -435,6 +527,7 @@ def run_test(
         pre_request_results=pre_results,
         has_files=bool(req.files),
         source="quick_test",
+        project_id=req.project_id,
         created_by=current_user.id,
     )
 
@@ -448,6 +541,7 @@ async def run_test_multipart(
     headers: str = Form("{}"),
     params: str = Form("{}"),
     body: str = Form(""),
+    extract_rules: str = Form("[]"),
     assertions: str = Form("[]"),
     variables: str = Form("{}"),
     timeout: float = Form(30.0),
@@ -457,6 +551,8 @@ async def run_test_multipart(
     post_script: str = Form(""),
     retry_count: int = Form(0),
     retry_interval: float = Form(1.0),
+    project_id: str | None = Form(None),
+    environment_id: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -473,10 +569,24 @@ async def run_test_multipart(
     parsed_headers = json.loads(headers) if headers else {}
     parsed_params = json.loads(params) if params else {}
     parsed_body = json.loads(body) if body else None
+    parsed_extract_rules = json.loads(extract_rules) if extract_rules else []
     parsed_assertions = json.loads(assertions) if assertions else []
     parsed_variables = json.loads(variables) if variables else {}
     parsed_pre = [PreRequest(**p) for p in json.loads(pre_requests)] if pre_requests else []
     parsed_cookies = json.loads(cookies) if cookies else []
+
+    context_variables, request_cookies, base_url = (
+        _load_direct_execution_context(
+            db,
+            current_user,
+            project_id=project_id,
+            environment_id=environment_id,
+            request_variables=parsed_variables,
+            request_cookies=parsed_cookies,
+        )
+    )
+    resolved_url = _resolve_environment_url(url, base_url)
+    parsed_pre = _resolve_pre_request_urls(parsed_pre, base_url)
 
     # 转换上传文件为 RequestBuilder 格式
     file_list = []
@@ -492,7 +602,7 @@ async def run_test_multipart(
         )
 
     # 前置条件
-    merged_vars, pre_results = _run_pre_requests(parsed_pre, parsed_variables)
+    merged_vars, pre_results = _run_pre_requests(parsed_pre, context_variables)
 
     # 前置脚本
     pre_script_result = None
@@ -501,7 +611,7 @@ async def run_test_multipart(
             "variables": merged_vars,
             "request": {
                 "method": method,
-                "url": url,
+                "url": resolved_url,
                 "headers": parsed_headers,
                 "params": parsed_params,
                 "body": parsed_body,
@@ -512,14 +622,15 @@ async def run_test_multipart(
             merged_vars = pre_script_result["variables"]
 
     # 主请求（合并 Cookie + 重试）
-    parsed_headers = _build_cookie_header(parsed_cookies, parsed_headers)
+    parsed_headers = _build_cookie_header(request_cookies, parsed_headers)
     request_def = RequestDefinition(
         method=method,
-        url=url,
+        url=resolved_url,
         headers=parsed_headers,
         params=parsed_params,
         body=parsed_body,
         files=file_list if file_list else None,
+        extract_rules=parsed_extract_rules,
         timeout=timeout,
     )
     result, attempts = _execute_with_retry(
@@ -556,7 +667,7 @@ async def run_test_multipart(
     session_cookies = []
     if result.response and result.response.headers:
         new_cookies = _extract_cookies(result.response.headers)
-        session_cookies = _merge_cookies(parsed_cookies, new_cookies)
+        session_cookies = _merge_cookies(request_cookies, new_cookies)
     serialized["session_cookies"] = redact_sensitive_data(
         session_cookies,
         parent_key="session_cookies",
@@ -567,7 +678,7 @@ async def run_test_multipart(
     save_history(
         db,
         method=method,
-        url=url,
+        url=resolved_url,
         status=result.status,
         duration=result.duration,
         headers=parsed_headers,
@@ -582,6 +693,7 @@ async def run_test_multipart(
         pre_request_results=pre_results,
         has_files=bool(file_list),
         source="quick_test",
+        project_id=project_id,
         created_by=current_user.id,
     )
 

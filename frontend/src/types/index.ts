@@ -123,9 +123,6 @@ export interface TestCaseCreate {
   retry_interval?: number;
   pre_script?: string;
   post_script?: string;
-  auth_type?: string;
-  auth_config?: string;
-  session_cookies?: Array<{ name: string; value: string; path?: string; domain?: string }>;
 }
 
 export interface TestCaseUpdate {

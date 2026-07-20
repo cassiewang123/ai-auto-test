@@ -232,6 +232,7 @@ export interface ExecuteRequest {
   params?: Record<string, any>;
   body?: any;
   graphql_query?: string;
+  extract_rules?: any[];
   assertions?: any[];
   variables?: Record<string, any>;
   timeout?: number;
@@ -242,6 +243,8 @@ export interface ExecuteRequest {
   post_script?: string;
   retry_count?: number;
   retry_interval?: number;
+  project_id?: string;
+  environment_id?: string;
 }
 
 export interface ExecutionResultData {
@@ -279,6 +282,7 @@ export const executionApi = {
     formData.append('headers', JSON.stringify(fields.headers || {}));
     formData.append('params', JSON.stringify(fields.params || {}));
     formData.append('body', JSON.stringify(fields.body || ''));
+    formData.append('extract_rules', JSON.stringify(fields.extract_rules || []));
     formData.append('assertions', JSON.stringify(fields.assertions || []));
     formData.append('variables', JSON.stringify(fields.variables || {}));
     formData.append('timeout', String(fields.timeout || 30));
@@ -288,6 +292,12 @@ export const executionApi = {
     formData.append('post_script', fields.post_script || '');
     formData.append('retry_count', String(fields.retry_count || 0));
     formData.append('retry_interval', String(fields.retry_interval ?? 1.0));
+    if (fields.project_id) {
+      formData.append('project_id', fields.project_id);
+    }
+    if (fields.environment_id) {
+      formData.append('environment_id', fields.environment_id);
+    }
     fields.fileList.forEach((file, idx) => {
       const fieldName = fields.fileFields[idx] || 'file';
       // 用 field::filename 格式传递字段名

@@ -97,6 +97,7 @@ class ExecuteRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     body: dict | None = None
     graphql_query: str | None = None
+    extract_rules: list[dict] = Field(default_factory=list)
     assertions: list[dict] = Field(default_factory=list)
     variables: dict[str, Any] = Field(default_factory=dict)
     timeout: float = 30.0
@@ -112,3 +113,5 @@ class ExecuteRequest(BaseModel):
     # 失败重试
     retry_count: int = Field(0, ge=0)
     retry_interval: float = Field(1.0, ge=0)
+    project_id: str | None = None
+    environment_id: str | None = None
