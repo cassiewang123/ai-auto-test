@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
+  Alert,
   Card,
   Input,
   Button,
@@ -16,6 +17,7 @@ import {
   Empty,
   Modal,
   Form,
+  Segmented,
 } from 'antd';
 import {
   ThunderboltOutlined,
@@ -34,6 +36,8 @@ import type { ExecutionResultData, PreRequest } from '../services/api';
 import type { Project } from '../types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ConsoleWindow, { type ConsoleHandle } from '../components/ConsoleWindow';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import '../styles/quick-test-workspace.css';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
@@ -50,6 +54,185 @@ const statusColor: Record<string, string> = {
   passed: 'green', failed: 'red', error: 'orange',
 };
 
+interface KeyValueRow {
+  id: number;
+  key: string;
+  value: string;
+}
+
+let keyValueRowId = 0;
+
+function createKeyValueRow(key = '', value = ''): KeyValueRow {
+  keyValueRowId += 1;
+  return { id: keyValueRowId, key, value };
+}
+
+function parseDisplayValue(value: unknown) {
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function parseInputValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function jsonToRows(value: string): { rows: KeyValueRow[]; valid: boolean } {
+  try {
+    const parsed = value.trim() ? JSON.parse(value) : {};
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      return { rows: [], valid: false };
+    }
+    return {
+      rows: Object.entries(parsed).map(([key, item]) => createKeyValueRow(key, parseDisplayValue(item))),
+      valid: true,
+    };
+  } catch {
+    return { rows: [], valid: false };
+  }
+}
+
+function rowsToJson(rows: KeyValueRow[]) {
+  const value = rows.reduce<Record<string, unknown>>((result, row) => {
+    const key = row.key.trim();
+    if (key) result[key] = parseInputValue(row.value);
+    return result;
+  }, {});
+  return JSON.stringify(value, null, 2);
+}
+
+interface JsonKeyValueEditorProps {
+  value: string;
+  onChange: (value: string) => void;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+  rawPlaceholder: string;
+}
+
+function JsonKeyValueEditor({
+  value,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+  rawPlaceholder,
+}: JsonKeyValueEditorProps) {
+  const initial = jsonToRows(value);
+  const [mode, setMode] = useState<'table' | 'raw'>('table');
+  const [rows, setRows] = useState<KeyValueRow[]>(initial.rows);
+  const [validJson, setValidJson] = useState(initial.valid);
+  const lastEmittedValue = useRef(value);
+
+  useEffect(() => {
+    if (value === lastEmittedValue.current) return;
+    const parsed = jsonToRows(value);
+    setRows(parsed.rows);
+    setValidJson(parsed.valid);
+    lastEmittedValue.current = value;
+  }, [value]);
+
+  function updateRows(nextRows: KeyValueRow[]) {
+    const nextValue = rowsToJson(nextRows);
+    setRows(nextRows);
+    setValidJson(true);
+    lastEmittedValue.current = nextValue;
+    onChange(nextValue);
+  }
+
+  function updateRawValue(nextValue: string) {
+    onChange(nextValue);
+    lastEmittedValue.current = nextValue;
+    const parsed = jsonToRows(nextValue);
+    setValidJson(parsed.valid);
+    if (parsed.valid) setRows(parsed.rows);
+  }
+
+  return (
+    <div className="quick-test-key-value-editor">
+      <div className="quick-test-editor-toolbar">
+        <span className="quick-test-editor-summary">
+          {validJson ? `${rows.filter((row) => row.key.trim()).length} 项` : 'JSON 格式错误'}
+        </span>
+        <Segmented
+          size="small"
+          value={mode}
+          onChange={(nextMode) => setMode(nextMode as 'table' | 'raw')}
+          options={[
+            { label: '键值', value: 'table' },
+            { label: 'Raw JSON', value: 'raw' },
+          ]}
+        />
+      </div>
+
+      {mode === 'raw' ? (
+        <TextArea
+          rows={8}
+          value={value}
+          onChange={(event) => updateRawValue(event.target.value)}
+          placeholder={rawPlaceholder}
+          className="quick-test-raw-editor"
+        />
+      ) : !validJson ? (
+        <Alert
+          type="error"
+          showIcon
+          title="当前内容不是有效的 JSON 对象"
+          description="请切换到 Raw JSON 修正格式后，再使用键值视图。"
+          action={<Button size="small" onClick={() => setMode('raw')}>修正 JSON</Button>}
+        />
+      ) : (
+        <div className="quick-test-key-value-table">
+          <div className="quick-test-key-value-head" aria-hidden="true">
+            <span>键</span>
+            <span>值</span>
+            <span />
+          </div>
+          {rows.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无配置项" />
+          ) : rows.map((row) => (
+            <div className="quick-test-key-value-row" key={row.id}>
+              <Input
+                value={row.key}
+                onChange={(event) => updateRows(rows.map((item) => (
+                  item.id === row.id ? { ...item, key: event.target.value } : item
+                )))}
+                placeholder={keyPlaceholder}
+                aria-label="键"
+              />
+              <Input
+                value={row.value}
+                onChange={(event) => updateRows(rows.map((item) => (
+                  item.id === row.id ? { ...item, value: event.target.value } : item
+                )))}
+                placeholder={valuePlaceholder}
+                aria-label="值"
+              />
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => updateRows(rows.filter((item) => item.id !== row.id))}
+                aria-label={`删除 ${row.key || '配置项'}`}
+              />
+            </div>
+          ))}
+          <Button
+            type="dashed"
+            icon={<PlusOutlined />}
+            onClick={() => setRows([...rows, createKeyValueRow()])}
+          >
+            添加一项
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 文件上传项
 interface FileItem {
   file: File;
@@ -64,6 +247,14 @@ interface PreRequestItem extends PreRequest {
 export default function QuickTestPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { environments, selectedEnvironmentId } = useWorkspace();
+  const selectedEnvironment = environments.find(
+    (environment) => environment.id === selectedEnvironmentId,
+  );
+  const workspaceVariables = {
+    ...(selectedEnvironment?.base_url ? { base_url: selectedEnvironment.base_url } : {}),
+    ...(selectedEnvironment?.variables || {}),
+  };
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('');
   const [headers, setHeaders] = useState('{\n  "Content-Type": "application/json"\n}');
@@ -228,7 +419,13 @@ export default function QuickTestPage() {
     try { parsedHeaders = headers ? JSON.parse(headers) : {}; } catch { message.error('Headers JSON 格式不正确'); return; }
     try { parsedParams = params ? JSON.parse(params) : {}; } catch { message.error('Params JSON 格式不正确'); return; }
     try { if (body.trim()) parsedBody = JSON.parse(body); } catch { message.error('Body JSON 格式不正确'); return; }
-    try { parsedVars = envVariables ? JSON.parse(envVariables) : {}; } catch { message.error('环境变量 JSON 格式不正确'); return; }
+    try {
+      const localVariables = envVariables ? JSON.parse(envVariables) : {};
+      parsedVars = { ...workspaceVariables, ...localVariables };
+    } catch {
+      message.error('环境变量 JSON 格式不正确');
+      return;
+    }
 
     // 应用认证配置（合并到 headers / params）
     const authConfig: AuthConfig = {
@@ -439,8 +636,9 @@ export default function QuickTestPage() {
   }
 
   return (
-    <div>
+    <div className="quick-test-workspace">
       <Card
+        className="quick-test-request-card"
         title={
           <Space>
             <ThunderboltOutlined /><span>快速测试</span>
@@ -460,6 +658,19 @@ export default function QuickTestPage() {
           </Space>
         }
       >
+        {selectedEnvironment && (
+          <div className="quick-test-environment-context" data-testid="quick-test-environment-context">
+            <div className="quick-test-environment-primary">
+              <Tag color="blue">当前环境</Tag>
+              <strong>{selectedEnvironment.name}</strong>
+              <code>{selectedEnvironment.base_url || '未配置 Base URL'}</code>
+            </div>
+            <span className="quick-test-environment-summary">
+              自动提供 base_url 和 {Object.keys(selectedEnvironment.variables || {}).length} 个环境变量，本页变量可覆盖同名值
+            </span>
+          </div>
+        )}
+
         {/* 请求行 */}
         <div className="quick-test-request-row">
           <Select value={method} onChange={setMethod} data-testid="method-select"
@@ -471,32 +682,8 @@ export default function QuickTestPage() {
           <InputNumber value={timeout} onChange={(v) => setTimeoutVal(v || 30)} min={1} max={300} />
         </div>
 
-        <Tabs
-          items={[
-            // ---- 请求配置 ----
-            {
-              key: 'request',
-              label: '请求配置',
-              children: (
-                <>
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontWeight: 600, marginBottom: 4, display: 'block' }}>Headers (JSON)</label>
-                    <TextArea rows={3} value={headers} onChange={(e) => setHeaders(e.target.value)}
-                      placeholder='{"Content-Type": "application/json"}' />
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontWeight: 600, marginBottom: 4, display: 'block' }}>Query Params (JSON)</label>
-                    <TextArea rows={3} value={params} onChange={(e) => setParams(e.target.value)}
-                      placeholder='{"page": 1, "size": 20}' />
-                  </div>
-                  <div>
-                    <label style={{ fontWeight: 600, marginBottom: 4, display: 'block' }}>Body (JSON)</label>
-                    <TextArea rows={5} value={body} onChange={(e) => setBody(e.target.value)}
-                      placeholder='{"name": "Ada", "email": "ada@example.com"}' />
-                  </div>
-                </>
-              ),
-            },
+        {(() => {
+          const workspacePanels = [
             // ---- 文件上传 ----
             {
               key: 'files',
@@ -699,8 +886,8 @@ export default function QuickTestPage() {
               children: (
                 <div>
                   <div style={{ marginBottom: 8, padding: 10, background: '#f0fdf4', borderRadius: 6, fontSize: 13, color: '#166534' }}>
-                    环境变量会与前置条件提取的变量合并，用于渲染请求中的 <code>{'{{var}}'}</code> 占位符。
-                    前置条件提取的变量优先级高于此处设置的环境变量。
+                    当前工作区环境的 <code>base_url</code> 与环境变量会自动作为默认值。
+                    此处填写的变量会覆盖同名环境变量，并与前置条件提取结果一起用于渲染 <code>{'{{var}}'}</code> 占位符。
                   </div>
                   <TextArea rows={6} value={envVariables} onChange={(e) => setEnvVariables(e.target.value)}
                     placeholder='{"base_url": "https://api.example.com", "token": "xxx"}' />
@@ -860,13 +1047,140 @@ export default function QuickTestPage() {
                 </div>
               ),
             },
-          ]}
-        />
+          ];
+          const panelByKey = Object.fromEntries(
+            workspacePanels.map((panel) => [panel.key, panel]),
+          ) as Record<string, (typeof workspacePanels)[number]>;
+          const advancedCount = fileItems.length
+            + preRequests.length
+            + sessionCookies.length
+            + (envVariables.trim() && envVariables.trim() !== '{}' ? 1 : 0)
+            + (preScript.trim() ? 1 : 0)
+            + (postScript.trim() ? 1 : 0);
+
+          return (
+            <>
+              <Tabs
+                className="quick-test-core-tabs"
+                items={[
+                  {
+                    key: 'params',
+                    label: 'Params',
+                    children: (
+                      <JsonKeyValueEditor
+                        value={params}
+                        onChange={setParams}
+                        keyPlaceholder="参数名"
+                        valuePlaceholder="参数值"
+                        rawPlaceholder='{"page": 1, "size": 20}'
+                      />
+                    ),
+                  },
+                  {
+                    key: 'headers',
+                    label: 'Headers',
+                    children: (
+                      <JsonKeyValueEditor
+                        value={headers}
+                        onChange={setHeaders}
+                        keyPlaceholder="Header 名"
+                        valuePlaceholder="Header 值"
+                        rawPlaceholder='{"Content-Type": "application/json"}'
+                      />
+                    ),
+                  },
+                  {
+                    key: 'body',
+                    label: 'Body',
+                    children: (
+                      <div className="quick-test-body-editor">
+                        <div className="quick-test-editor-toolbar">
+                          <span className="quick-test-editor-summary">JSON 请求体</span>
+                          <Tag bordered={false}>Raw JSON</Tag>
+                        </div>
+                        <TextArea
+                          rows={10}
+                          value={body}
+                          onChange={(event) => setBody(event.target.value)}
+                          placeholder='{"name": "Ada", "email": "ada@example.com"}'
+                          className="quick-test-raw-editor"
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    ...panelByKey.auth,
+                    key: 'auth',
+                    label: 'Auth',
+                  },
+                  {
+                    ...panelByKey.assertions,
+                    key: 'tests',
+                    label: `Tests (${assertions.length})`,
+                  },
+                ]}
+              />
+
+              <Collapse
+                className="quick-test-advanced-settings"
+                items={[
+                  {
+                    key: 'advanced',
+                    label: (
+                      <Space size="small">
+                        <span>高级设置</span>
+                        {advancedCount > 0 && <Tag color="blue">{advancedCount}</Tag>}
+                        <span className="quick-test-advanced-hint">
+                          文件、前置请求、变量、脚本与 Cookie
+                        </span>
+                      </Space>
+                    ),
+                    children: (
+                      <Tabs
+                        size="small"
+                        items={[
+                          panelByKey.files,
+                          panelByKey['pre-requests'],
+                          panelByKey.variables,
+                          panelByKey.scripts,
+                          panelByKey.cookies,
+                        ]}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            </>
+          );
+        })()}
       </Card>
+
+      <section className="quick-test-output-section" aria-label="响应与执行结果">
+        <div className="quick-test-output-header">
+          <div>
+            <h2>响应与执行</h2>
+            <span>请求结果、断言、提取变量与调试日志</span>
+          </div>
+          {result && !executing && (
+            <Space size="small">
+              <Tag color={statusColor[result.status] || 'default'}>{result.status}</Tag>
+              <span>{result.duration.toFixed(3)}s</span>
+            </Space>
+          )}
+        </div>
+
+        {!executing && !result && (
+          <div className="quick-test-output-empty">
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="发送请求后在此查看响应和测试结果"
+            />
+          </div>
+        )}
 
       {/* 前置条件执行结果 */}
       {result && (result as any).pre_request_results && (result as any).pre_request_results.length > 0 && (
-        <Card style={{ marginTop: 16 }} title="前置条件执行结果" size="small">
+        <Card title="前置条件执行结果" size="small">
           <Table
             dataSource={(result as any).pre_request_results}
             rowKey="index"
@@ -1068,10 +1382,20 @@ export default function QuickTestPage() {
         </Card>
       )}
 
-      {/* Console 窗口 */}
-      <div style={{ marginTop: 16 }}>
-        <ConsoleWindow ref={consoleRef} height={320} />
-      </div>
+        {/* Console 窗口 */}
+        <Collapse
+          className="quick-test-console-collapse"
+          defaultActiveKey={[]}
+          items={[
+            {
+              key: 'console',
+              label: 'Console',
+              forceRender: true,
+              children: <ConsoleWindow ref={consoleRef} height={260} />,
+            },
+          ]}
+        />
+      </section>
 
       {/* 保存到接口列表 Modal */}
       <Modal
