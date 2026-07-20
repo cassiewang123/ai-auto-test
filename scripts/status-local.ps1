@@ -12,8 +12,17 @@ try {
     $projectRoot = Get-AiretestProjectRoot
     $runtimeDir = Join-Path $projectRoot ".runtime"
     $logDir = Join-Path $runtimeDir "logs"
-    $databasePath = Join-Path $projectRoot "airetest-lite.db"
-    $artifactPath = Join-Path $projectRoot "backend\.uploads"
+    $pythonPath = Resolve-AiretestPython
+    $pathsJson = & $pythonPath (Join-Path $PSScriptRoot "local_data.py") `
+        --project-root $projectRoot paths
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to resolve local data paths."
+    }
+    $dataPaths = $pathsJson | ConvertFrom-Json
+    $databasePath = [string]$dataPaths.database
+    $artifactPath = [string]$dataPaths.artifact_root
+    $legacyArtifactPath = [string]$dataPaths.legacy_artifact_root
+    $backupRoot = [string]$dataPaths.backup_root
 
     $backend = Get-AiretestManagedProcess `
         -PidFile (Join-Path $runtimeDir "backend.pid") `
@@ -60,6 +69,13 @@ try {
         Write-Host "  SQLite: not created"
     }
     Write-Host "  Artifacts: $artifactPath"
+    if (
+        $legacyArtifactPath -ne $artifactPath -and
+        (Test-Path -LiteralPath $legacyArtifactPath -PathType Container)
+    ) {
+        Write-Host "  Legacy artifacts: $legacyArtifactPath"
+    }
+    Write-Host "  Backups: $backupRoot"
     Write-Host "  Logs: $logDir"
 
     if (-not $backendReady) {
