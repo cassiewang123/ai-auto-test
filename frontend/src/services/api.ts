@@ -8,6 +8,7 @@ import type {
   ProjectCreate,
   TestCase,
   TestCaseCreate,
+  TestCaseUpdate,
   TestPlan,
   TestPlanCreate,
   TestResult,
@@ -82,7 +83,7 @@ export const testCaseApi = {
     api.get<unknown, ApiResponse<TestCase>>(`/test-cases/${id}`),
   create: (data: TestCaseCreate) =>
     api.post<unknown, ApiResponse<TestCase>>('/test-cases', data),
-  update: (id: string, data: Partial<TestCaseCreate>) =>
+  update: (id: string, data: TestCaseUpdate) =>
     api.put<unknown, ApiResponse<TestCase>>(`/test-cases/${id}`, data),
   delete: (id: string) =>
     api.delete<unknown, ApiResponse<TestCase>>(`/test-cases/${id}`),

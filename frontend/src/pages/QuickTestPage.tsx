@@ -247,7 +247,13 @@ interface PreRequestItem extends PreRequest {
 export default function QuickTestPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { environments, selectedEnvironmentId } = useWorkspace();
+  const {
+    environments,
+    selectedEnvironmentId,
+    setSelectedEnvironmentId,
+    setSelectedProjectId,
+  } = useWorkspace();
+  const sourceCaseId = searchParams.get('case_id');
   const selectedEnvironment = environments.find(
     (environment) => environment.id === selectedEnvironmentId,
   );
@@ -262,8 +268,8 @@ export default function QuickTestPage() {
   const [body, setBody] = useState('');
   const [timeout, setTimeoutVal] = useState(30);
   // 重试配置
-  const [retryCount] = useState(0);
-  const [retryInterval] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
+  const [retryInterval, setRetryInterval] = useState(0);
   const [assertions, setAssertions] = useState<any[]>([]);
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<ExecutionResultData | null>(null);
@@ -299,11 +305,69 @@ export default function QuickTestPage() {
   // 保存到接口列表
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sourceCaseLoading, setSourceCaseLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [saveForm] = Form.useForm();
 
-  // 从 URL 查询参数预填表单（接口文档"试一下"跳转时携带）
+  // 已保存用例仅通过 case_id 交接，避免请求头和认证信息进入浏览器历史。
   useEffect(() => {
+    if (sourceCaseId) {
+      let active = true;
+      setSourceCaseLoading(true);
+      testCaseApi
+        .get(sourceCaseId)
+        .then((response) => {
+          if (!active) return;
+          const testCase = response.data;
+          setMethod(testCase.method);
+          setUrl(testCase.url);
+          setHeaders(JSON.stringify(testCase.headers || {}, null, 2));
+          setParams(JSON.stringify(testCase.params || {}, null, 2));
+          setBody(
+            testCase.body === null || testCase.body === undefined
+              ? ''
+              : JSON.stringify(testCase.body, null, 2)
+          );
+          setAssertions(
+            (testCase.assertions || []).map((assertion) => ({
+              assertion_type: assertion.assertion_type,
+              expression: assertion.expression || '',
+              operator: assertion.operator,
+              expected: assertion.expected ?? '',
+            }))
+          );
+          setRetryCount(testCase.retry_count || 0);
+          setRetryInterval(testCase.retry_interval || 0);
+          setPreScript(testCase.pre_script || '');
+          setPostScript(testCase.post_script || '');
+          setAuthType('none');
+          setAuthToken('');
+          setApiKeyName('');
+          setApiKeyValue('');
+          setBasicUser('');
+          setBasicPass('');
+          setSessionCookies([]);
+          setResult(null);
+          consoleRef.current?.clear();
+          setSelectedProjectId(testCase.project_id ?? null);
+          setSelectedEnvironmentId(testCase.environment_id ?? null);
+        })
+        .catch((error: any) => {
+          if (active) {
+            message.error(error.message);
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setSourceCaseLoading(false);
+          }
+        });
+      return () => {
+        active = false;
+      };
+    }
+
+    // 保留其他页面使用的简单参数预填兼容。
     const pMethod = searchParams.get('method');
     const pUrl = searchParams.get('url');
     const pHeaders = searchParams.get('headers');
@@ -320,8 +384,12 @@ export default function QuickTestPage() {
     if (pBody) {
       try { setBody(JSON.stringify(JSON.parse(pBody), null, 2)); } catch { setBody(pBody); }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [
+    searchParams,
+    setSelectedEnvironmentId,
+    setSelectedProjectId,
+    sourceCaseId,
+  ]);
 
   // ---- 文件处理 ----
   function addFiles(files: FileList | File[] | null) {
@@ -649,10 +717,23 @@ export default function QuickTestPage() {
         }
         extra={
           <Space>
-            <Button icon={<SaveOutlined />} onClick={openSaveModal} size="large" data-testid="save-btn">
+            <Button
+              icon={<SaveOutlined />}
+              onClick={openSaveModal}
+              size="large"
+              data-testid="save-btn"
+              disabled={sourceCaseLoading}
+            >
               保存到接口列表
             </Button>
-            <Button type="primary" icon={<SendOutlined />} loading={executing} onClick={handleExecute} size="large" data-testid="send-btn">
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              loading={executing || sourceCaseLoading}
+              onClick={handleExecute}
+              size="large"
+              data-testid="send-btn"
+            >
               发送请求
             </Button>
           </Space>

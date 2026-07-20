@@ -128,6 +128,29 @@ export interface TestCaseCreate {
   session_cookies?: Array<{ name: string; value: string; path?: string; domain?: string }>;
 }
 
+export interface TestCaseUpdate {
+  title?: string;
+  method?: string;
+  url?: string;
+  description?: string | null;
+  group_path?: string | null;
+  markers?: string[];
+  headers?: Record<string, string>;
+  params?: Record<string, any>;
+  body?: any | null;
+  graphql_query?: string | null;
+  files?: any[] | null;
+  extract_rules?: any[];
+  environment_id?: string | null;
+  project_id?: string | null;
+  is_active?: boolean;
+  sort_order?: number;
+  retry_count?: number;
+  retry_interval?: number;
+  pre_script?: string | null;
+  post_script?: string | null;
+}
+
 // 全局变量/工作空间变量
 export interface GlobalVariable {
   id: string;

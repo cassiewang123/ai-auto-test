@@ -115,15 +115,7 @@ export default function ApiDocsPage() {
 
   // 跳转到接口调试页并预填数据
   function handleTryIt(c: TestCase) {
-    const params = new URLSearchParams({
-      method: c.method,
-      url: c.url,
-      headers: JSON.stringify(c.headers || {}),
-      params: JSON.stringify(c.params || {}),
-    });
-    if (c.body) params.set('body', JSON.stringify(c.body));
-    if (c.title) params.set('title', c.title);
-    navigate(`/quick-test?${params.toString()}`);
+    navigate(`/quick-test?case_id=${encodeURIComponent(c.id)}`);
   }
 
   // 渲染单个接口卡片

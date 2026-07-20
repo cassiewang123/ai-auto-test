@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Table,
@@ -51,7 +51,13 @@ import {
   historyApi,
 } from '../services/api';
 import type { CallHistoryRecord } from '../services/api';
-import type { TestCase, Project, ProjectCreate, TestCaseCreate } from '../types';
+import type {
+  TestCase,
+  Project,
+  ProjectCreate,
+  TestCaseCreate,
+  TestCaseUpdate,
+} from '../types';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import '../styles/api-workspace.css';
 
@@ -119,6 +125,8 @@ export default function ApiListPage() {
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [lastResults, setLastResults] = useState<Record<string, string>>({});
   const [recentResults, setRecentResults] = useState<Record<string, CallHistoryRecord>>({});
+  const casesRequestId = useRef(0);
+  const recentResultsRequestId = useRef(0);
   const [queryProjectInitialized, setQueryProjectInitialized] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -226,6 +234,7 @@ export default function ApiListPage() {
   }
 
   async function loadData() {
+    const requestId = ++casesRequestId.current;
     setLoading(true);
     try {
       const params: { page: number; page_size: number; project_id?: string } = {
@@ -234,15 +243,22 @@ export default function ApiListPage() {
       };
       if (selectedProjectId) params.project_id = selectedProjectId;
       const res = await testCaseApi.list(params);
-      setCases(res.data || []);
+      if (requestId === casesRequestId.current) {
+        setCases(res.data || []);
+      }
     } catch (e: any) {
-      message.error(e.message);
+      if (requestId === casesRequestId.current) {
+        message.error(e.message);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === casesRequestId.current) {
+        setLoading(false);
+      }
     }
   }
 
   async function loadRecentResults() {
+    const requestId = ++recentResultsRequestId.current;
     try {
       const res = await historyApi.list({
         page: 1,
@@ -255,9 +271,13 @@ export default function ApiListPage() {
           latestByCase[record.test_case_id] = record;
         }
       });
-      setRecentResults(latestByCase);
+      if (requestId === recentResultsRequestId.current) {
+        setRecentResults(latestByCase);
+      }
     } catch {
-      setRecentResults({});
+      if (requestId === recentResultsRequestId.current) {
+        setRecentResults({});
+      }
     }
   }
 
@@ -656,29 +676,41 @@ export default function ApiListPage() {
     try {
       const values = await caseForm.validateFields();
       setCreatingCase(true);
-      const payload: TestCaseCreate = {
+      const requestDefinition = {
         title: values.title,
         method: values.method,
         url: values.url,
         headers: values.headers ? JSON.parse(values.headers as string) : {},
         params: values.params ? JSON.parse(values.params as string) : {},
-        body: values.body ? JSON.parse(values.body as string) : undefined,
-        group_path: values.group_path || '',
-        project_id: values.project_id || selectedProjectId || undefined,
-        markers: [],
-        assertions: [
-          {
-            assertion_type: 'status_code',
-            operator: 'eq',
-            expected: '200',
-            priority: 'P0',
-            order: 0,
-          },
-        ],
       };
-      const res = editingCase
-        ? await testCaseApi.update(editingCase.id, payload)
-        : await testCaseApi.create(payload);
+      let res;
+      if (editingCase) {
+        const updatePayload: TestCaseUpdate = {
+          ...requestDefinition,
+          body: values.body?.trim() ? JSON.parse(values.body) : null,
+          group_path: values.group_path || null,
+          project_id: values.project_id ?? null,
+        };
+        res = await testCaseApi.update(editingCase.id, updatePayload);
+      } else {
+        const createPayload: TestCaseCreate = {
+          ...requestDefinition,
+          body: values.body?.trim() ? JSON.parse(values.body) : undefined,
+          group_path: values.group_path || '',
+          project_id: values.project_id || selectedProjectId || undefined,
+          markers: [],
+          assertions: [
+            {
+              assertion_type: 'status_code',
+              operator: 'eq',
+              expected: '200',
+              priority: 'P0',
+              order: 0,
+            },
+          ],
+        };
+        res = await testCaseApi.create(createPayload);
+      }
       message.success(editingCase ? '接口更新成功' : '用例创建成功');
       setCaseModalOpen(false);
       setEditingCase(null);
@@ -720,17 +752,7 @@ export default function ApiListPage() {
   }
 
   function openDebugger(record: TestCase) {
-    const params = new URLSearchParams({
-      method: record.method,
-      url: record.url,
-      headers: JSON.stringify(record.headers || {}),
-      params: JSON.stringify(record.params || {}),
-    });
-    if (record.body !== undefined && record.body !== null) {
-      params.set('body', JSON.stringify(record.body));
-    }
-    if (record.title) params.set('title', record.title);
-    navigate(`/quick-test?${params.toString()}`);
+    navigate(`/quick-test?case_id=${encodeURIComponent(record.id)}`);
   }
 
   const renderActions = (c: TestCase) => (
