@@ -1,0 +1,383 @@
+.perf-dashboard-workspace {
+  min-width: 0;
+}
+
+.perf-dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.perf-dashboard-title {
+  min-width: 0;
+}
+
+.perf-dashboard-title__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.perf-dashboard-title__scene {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perf-dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.perf-dashboard-scene-select {
+  width: 280px;
+  max-width: 100%;
+}
+
+.perf-dashboard-empty {
+  min-height: 260px;
+}
+
+.perf-dashboard-empty .ant-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 258px;
+}
+
+.perf-sla-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 12px;
+  padding: 16px 18px;
+  border: 1px solid #d1d5db;
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.perf-sla-summary--passed {
+  border-left-color: #16a34a;
+  background: #f7fcf8;
+}
+
+.perf-sla-summary--failed {
+  border-left-color: #dc2626;
+  background: #fff8f7;
+}
+
+.perf-sla-summary--warning {
+  border-left-color: #d97706;
+  background: #fffaf0;
+}
+
+.perf-sla-summary--running {
+  border-left-color: #2563eb;
+  background: #f7faff;
+}
+
+.perf-sla-summary--pending {
+  border-left-color: #6b7280;
+}
+
+.perf-sla-summary__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.perf-sla-summary__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 18px;
+}
+
+.perf-sla-summary--passed .perf-sla-summary__icon {
+  color: #15803d;
+}
+
+.perf-sla-summary--failed .perf-sla-summary__icon {
+  color: #b91c1c;
+}
+
+.perf-sla-summary--warning .perf-sla-summary__icon {
+  color: #b45309;
+}
+
+.perf-sla-summary--running .perf-sla-summary__icon {
+  color: #1d4ed8;
+}
+
+.perf-sla-summary__status strong,
+.perf-sla-summary__status span {
+  display: block;
+}
+
+.perf-sla-summary__status strong {
+  color: #111827;
+  font-size: 16px;
+}
+
+.perf-sla-summary__status span {
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.perf-sla-summary__thresholds {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.perf-sla-summary__thresholds .ant-tag {
+  margin-inline-end: 0;
+}
+
+.perf-headline-metrics {
+  margin-bottom: 20px;
+}
+
+.perf-headline-metric {
+  height: 100%;
+  border-top: 3px solid #d1d5db;
+}
+
+.perf-headline-metric--success {
+  border-top-color: #16a34a;
+}
+
+.perf-headline-metric--warning {
+  border-top-color: #d97706;
+}
+
+.perf-headline-metric--error {
+  border-top-color: #dc2626;
+}
+
+.perf-headline-metric .ant-statistic-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perf-headline-metric__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  margin-top: 8px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.perf-headline-metric__footer strong {
+  color: #4b5563;
+  font-weight: 500;
+  text-align: right;
+}
+
+.perf-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+
+.perf-section-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.perf-section-heading strong {
+  color: #111827;
+  font-size: 16px;
+}
+
+.perf-section-heading span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.perf-live-metrics {
+  margin-bottom: 12px;
+}
+
+.perf-live-metrics .ant-card {
+  height: 100%;
+}
+
+.perf-chart-grid {
+  margin-bottom: 12px;
+}
+
+.perf-chart-card {
+  min-width: 0;
+}
+
+.perf-chart-card .ant-card-body {
+  height: 260px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.perf-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.perf-idle-workspace {
+  align-items: stretch;
+}
+
+.perf-idle-workspace > .ant-col {
+  display: flex;
+}
+
+.perf-latest-result,
+.perf-launch-card {
+  width: 100%;
+}
+
+.perf-latest-result .ant-card-head-wrapper {
+  gap: 12px;
+}
+
+.perf-launch-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 260px;
+}
+
+.perf-launch-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 22px;
+}
+
+.perf-launch-card strong,
+.perf-launch-card span {
+  display: block;
+}
+
+.perf-launch-card strong {
+  color: #111827;
+  font-size: 16px;
+}
+
+.perf-launch-card span {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.perf-launch-card__meta {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+}
+
+.perf-launch-card__meta .ant-tag {
+  margin-inline-end: 0;
+}
+
+@media (max-width: 767px) {
+  .perf-dashboard-header {
+    flex-direction: column;
+  }
+
+  .perf-dashboard-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .perf-dashboard-scene-select {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .perf-sla-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .perf-sla-summary__thresholds {
+    justify-content: flex-start;
+  }
+
+  .perf-headline-metric__footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .perf-headline-metric__footer strong {
+    text-align: left;
+  }
+
+  .perf-live-metrics .ant-statistic-title {
+    min-height: 44px;
+  }
+
+  .perf-live-metrics .ant-statistic-content {
+    font-size: 20px;
+  }
+
+  .perf-chart-card .ant-card-body {
+    height: 220px;
+    padding: 8px;
+  }
+
+  .perf-latest-result .ant-card-head-wrapper {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 10px 0;
+  }
+
+  .perf-latest-result .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}

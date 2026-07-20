@@ -43,6 +43,11 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
     return sorted_values[f] + (sorted_values[c] - sorted_values[f]) * (k - f)
 
 
+def _seconds_to_milliseconds(value: float) -> float:
+    """Convert execution-engine durations to the performance metric unit."""
+    return max(0.0, float(value)) * 1000.0
+
+
 def _build_request_def_from_case(case: TestCase):
     """从 TestCase 模型构建 RequestDefinition（避免在子线程访问 ORM session）."""
     from app.schemas.execution import RequestDefinition  # noqa: E402
@@ -234,7 +239,7 @@ def execute_performance_test(test_id: str, run_id: str | None = None) -> str:
                     result = executor_instance.execute(
                         request_def=req_def, assertions=assertions, variables={},
                     )
-                    rt = result.duration
+                    rt = _seconds_to_milliseconds(result.duration)
                     with lock:
                         all_response_times.append(rt)
                         recent_times.append(rt)
