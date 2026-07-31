@@ -58,7 +58,9 @@ import type {
   TestCaseCreate,
   TestCaseUpdate,
 } from '../types';
+import JsonEditor from '../components/JsonEditor';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { jsonFormValidator, parseJsonText } from '../utils/json';
 import '../styles/api-workspace.css';
 
 const methodColor: Record<string, string> = {
@@ -680,14 +682,20 @@ export default function ApiListPage() {
         title: values.title,
         method: values.method,
         url: values.url,
-        headers: values.headers ? JSON.parse(values.headers as string) : {},
-        params: values.params ? JSON.parse(values.params as string) : {},
+        headers: parseJsonText(values.headers, 'Headers', {
+          expectedType: 'object',
+        }) as Record<string, string>,
+        params: parseJsonText(values.params, 'Query Params', {
+          expectedType: 'object',
+        }) as Record<string, unknown>,
       };
       let res;
       if (editingCase) {
         const updatePayload: TestCaseUpdate = {
           ...requestDefinition,
-          body: values.body?.trim() ? JSON.parse(values.body) : null,
+          body: values.body?.trim()
+            ? parseJsonText(values.body, 'Body')
+            : null,
           group_path: values.group_path || null,
           project_id: values.project_id ?? null,
         };
@@ -695,7 +703,9 @@ export default function ApiListPage() {
       } else {
         const createPayload: TestCaseCreate = {
           ...requestDefinition,
-          body: values.body?.trim() ? JSON.parse(values.body) : undefined,
+          body: values.body?.trim()
+            ? parseJsonText(values.body, 'Body')
+            : undefined,
           group_path: values.group_path || '',
           project_id: values.project_id || selectedProjectId || undefined,
           markers: [],
@@ -1524,14 +1534,30 @@ export default function ApiListPage() {
               options={projects.map((p) => ({ label: p.name, value: p.id }))}
             />
           </Form.Item>
-          <Form.Item name="headers" label="Headers (JSON)">
-            <Input.TextArea rows={2} placeholder='{"Content-Type": "application/json"}' />
+          <Form.Item
+            name="headers"
+            label="Headers (JSON)"
+            rules={[{ validator: jsonFormValidator('Headers', { expectedType: 'object' }) }]}
+          >
+            <JsonEditor
+              rows={2}
+              expectedType="object"
+              placeholder='{"Content-Type": "application/json"}'
+            />
           </Form.Item>
-          <Form.Item name="params" label="Query Params (JSON)">
-            <Input.TextArea rows={2} placeholder='{"page": 1}' />
+          <Form.Item
+            name="params"
+            label="Query Params (JSON)"
+            rules={[{ validator: jsonFormValidator('Query Params', { expectedType: 'object' }) }]}
+          >
+            <JsonEditor rows={2} expectedType="object" placeholder='{"page": 1}' />
           </Form.Item>
-          <Form.Item name="body" label="Body (JSON)">
-            <Input.TextArea rows={3} placeholder='{"name": "test"}' />
+          <Form.Item
+            name="body"
+            label="Body (JSON)"
+            rules={[{ validator: jsonFormValidator('Body') }]}
+          >
+            <JsonEditor rows={4} placeholder='{"name": "test"}' />
           </Form.Item>
         </Form>
       </Modal>

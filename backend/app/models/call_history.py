@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Any
+from typing import Any
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,7 +25,7 @@ class CallHistory(Base):
     url: Mapped[str] = mapped_column(String(2048))
     headers: Mapped[dict | None] = mapped_column(JSONText, default=None)
     params: Mapped[dict | None] = mapped_column(JSONText, default=None)
-    body: Mapped[dict | None] = mapped_column(JSONText, default=None)
+    body: Mapped[Any] = mapped_column(JSONText, default=None)
     status_code: Mapped[int | None] = mapped_column(default=None)
     response_headers: Mapped[dict | None] = mapped_column(JSONText, default=None)
     response_body: Mapped[Any | None] = mapped_column(JSONText, default=None)

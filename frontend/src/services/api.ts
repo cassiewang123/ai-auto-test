@@ -281,7 +281,10 @@ export const executionApi = {
     formData.append('url', fields.url);
     formData.append('headers', JSON.stringify(fields.headers || {}));
     formData.append('params', JSON.stringify(fields.params || {}));
-    formData.append('body', JSON.stringify(fields.body || ''));
+    formData.append(
+      'body',
+      fields.body === undefined ? '' : JSON.stringify(fields.body)
+    );
     formData.append('extract_rules', JSON.stringify(fields.extract_rules || []));
     formData.append('assertions', JSON.stringify(fields.assertions || []));
     formData.append('variables', JSON.stringify(fields.variables || {}));

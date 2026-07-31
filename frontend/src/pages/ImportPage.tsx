@@ -31,8 +31,8 @@ import { useNavigate } from 'react-router-dom';
 import { importApi, captureApi, projectApi } from '../services/api';
 import type { ImportedEndpoint, CapturedEndpoint } from '../services/api';
 import type { Project, ProjectCreate } from '../types';
-
-const { TextArea } = Input;
+import JsonEditor from '../components/JsonEditor';
+import { parseJsonText } from '../utils/json';
 
 const methodColor: Record<string, string> = {
   GET: 'green', POST: 'orange', PUT: 'blue', PATCH: 'purple', DELETE: 'red',
@@ -112,7 +112,10 @@ export default function ImportPage() {
           return;
         }
         try {
-          data.spec = JSON.parse(specJson);
+          data.spec = parseJsonText(specJson, 'OpenAPI JSON', {
+            allowEmpty: false,
+            expectedType: 'object',
+          });
         } catch {
           message.error('JSON 格式不正确');
           setLoading(false);
@@ -151,7 +154,10 @@ export default function ImportPage() {
       if (activeTab === 'url') {
         data.url = url.trim();
       } else {
-        data.spec = JSON.parse(specJson);
+        data.spec = parseJsonText(specJson, 'OpenAPI JSON', {
+          allowEmpty: false,
+          expectedType: 'object',
+        });
       }
 
       const res = await importApi.importOpenapi(data);
@@ -393,11 +399,13 @@ export default function ImportPage() {
                     style={{ marginBottom: 16 }}
                     title="直接粘贴 OpenAPI/Swagger 的 JSON 内容"
                   />
-                  <TextArea
+                  <JsonEditor
                     rows={10}
+                    expectedType="object"
+                    allowEmpty={false}
                     placeholder='{"openapi": "3.0.0", "paths": {"/api/v1/users": {"get": {...}}}, ...}'
                     value={specJson}
-                    onChange={(e) => setSpecJson(e.target.value)}
+                    onChange={setSpecJson}
                   />
                 </div>
               ),

@@ -40,6 +40,8 @@ import {
 } from '@ant-design/icons';
 import { testCaseApi, executionApi, projectApi, changeLogApi, dbAssertionApi, environmentApi } from '../services/api';
 import type { TestCase, Project, TestCaseCreate, Environment } from '../types';
+import JsonEditor from '../components/JsonEditor';
+import { jsonFormValidator, parseJsonText } from '../utils/json';
 
 const methodColor: Record<string, string> = {
   GET: 'green', POST: 'orange', PUT: 'blue', PATCH: 'purple', DELETE: 'red',
@@ -284,9 +286,15 @@ export default function TestCasesPage() {
         title: values.title,
         method: values.method,
         url: values.url,
-        headers: values.headers ? JSON.parse(values.headers) : {},
-        params: values.params ? JSON.parse(values.params) : {},
-        body: values.body ? JSON.parse(values.body) : undefined,
+        headers: parseJsonText(values.headers, 'Headers', {
+          expectedType: 'object',
+        }) as Record<string, string>,
+        params: parseJsonText(values.params, 'Query Params', {
+          expectedType: 'object',
+        }) as Record<string, unknown>,
+        body: values.body?.trim()
+          ? parseJsonText(values.body, 'Body')
+          : undefined,
         group_path: values.group_path || undefined,
         project_id: values.project_id || selectedProjectId || undefined,
         markers: [],
@@ -683,14 +691,30 @@ export default function TestCasesPage() {
                       options={projects.map(p => ({ label: p.name, value: p.id }))}
                     />
                   </Form.Item>
-                  <Form.Item name="headers" label="Headers (JSON)">
-                    <Input.TextArea rows={2} placeholder='{"Content-Type": "application/json"}' />
+                  <Form.Item
+                    name="headers"
+                    label="Headers (JSON)"
+                    rules={[{ validator: jsonFormValidator('Headers', { expectedType: 'object' }) }]}
+                  >
+                    <JsonEditor
+                      rows={2}
+                      expectedType="object"
+                      placeholder='{"Content-Type": "application/json"}'
+                    />
                   </Form.Item>
-                  <Form.Item name="params" label="Query Params (JSON)">
-                    <Input.TextArea rows={2} placeholder='{"page": 1}' />
+                  <Form.Item
+                    name="params"
+                    label="Query Params (JSON)"
+                    rules={[{ validator: jsonFormValidator('Query Params', { expectedType: 'object' }) }]}
+                  >
+                    <JsonEditor rows={2} expectedType="object" placeholder='{"page": 1}' />
                   </Form.Item>
-                  <Form.Item name="body" label="Body (JSON)">
-                    <Input.TextArea rows={3} placeholder='{"name": "test"}' />
+                  <Form.Item
+                    name="body"
+                    label="Body (JSON)"
+                    rules={[{ validator: jsonFormValidator('Body') }]}
+                  >
+                    <JsonEditor rows={4} placeholder='{"name": "test"}' />
                   </Form.Item>
                 </Form>
               ),

@@ -76,6 +76,15 @@ class TestCreateTestCase:
         assert data["extract_rules"] == []
         assert data["is_active"] is True
 
+    def test_create_accepts_json_array_body(self, client):
+        case = _create_case(
+            client,
+            title="批量创建用户",
+            body=[{"username": "alice"}, {"username": "bob"}],
+        )
+
+        assert case["body"] == [{"username": "alice"}, {"username": "bob"}]
+
     def test_create_assertion_defaults(self, client):
         """断言规则字段缺省时使用默认值。"""
         resp = client.post(

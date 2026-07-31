@@ -27,6 +27,8 @@ import {
 } from '@ant-design/icons';
 import { mockApi, projectApi } from '../services/api';
 import type { Project } from '../types';
+import JsonEditor from '../components/JsonEditor';
+import { jsonFormValidator, parseJsonText } from '../utils/json';
 
 const { TextArea } = Input;
 
@@ -132,17 +134,11 @@ export default function MockServicePage() {
       const values = await form.validateFields();
       setSaving(true);
       // 校验 JSON
-      let responseHeaders: any = {};
+      let responseHeaders: Record<string, unknown> = {};
       let responseBody: any = {};
-      try {
-        responseHeaders = values.response_headers
-          ? JSON.parse(values.response_headers)
-          : {};
-      } catch {
-        message.error('响应头 JSON 格式不正确');
-        setSaving(false);
-        return;
-      }
+      responseHeaders = parseJsonText(values.response_headers, '响应头', {
+        expectedType: 'object',
+      }) as Record<string, unknown>;
       try {
         // 响应体允许是任意 JSON 或纯文本
         if (values.response_body) {
@@ -453,9 +449,14 @@ export default function MockServicePage() {
             />
           </Form.Item>
 
-          <Form.Item name="response_headers" label="响应头（JSON）">
-            <TextArea
+          <Form.Item
+            name="response_headers"
+            label="响应头（JSON）"
+            rules={[{ validator: jsonFormValidator('响应头', { expectedType: 'object' }) }]}
+          >
+            <JsonEditor
               rows={3}
+              expectedType="object"
               placeholder='{"Content-Type": "application/json"}'
             />
           </Form.Item>

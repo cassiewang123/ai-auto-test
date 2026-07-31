@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -40,7 +41,7 @@ class TestCase(Base):
     url: Mapped[str] = mapped_column(String(2048))
     headers: Mapped[dict] = mapped_column(JSONText, default=dict)
     params: Mapped[dict] = mapped_column(JSONText, default=dict)
-    body: Mapped[dict | None] = mapped_column(JSONText, nullable=True)
+    body: Mapped[Any] = mapped_column(JSONText, nullable=True)
     # GraphQL 专用
     graphql_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 文件上传

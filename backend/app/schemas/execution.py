@@ -17,7 +17,7 @@ class RequestDefinition(BaseModel):
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
-    body: dict | None = None
+    body: Any = None
     graphql_query: str | None = None
     files: list[dict] | None = None
     # 变量提取规则
@@ -83,7 +83,7 @@ class PreRequest(BaseModel):
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
-    body: dict | None = None
+    body: Any = None
     # 从该请求响应中提取变量，传递给后续请求
     extract_rules: list[dict] = Field(default_factory=list)
 
@@ -95,7 +95,7 @@ class ExecuteRequest(BaseModel):
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
-    body: dict | None = None
+    body: Any = None
     graphql_query: str | None = None
     extract_rules: list[dict] = Field(default_factory=list)
     assertions: list[dict] = Field(default_factory=list)

@@ -21,8 +21,8 @@ import {
 } from '@ant-design/icons';
 import { environmentApi } from '../services/api';
 import type { Environment, EnvironmentCreate } from '../types';
-
-const { TextArea } = Input;
+import JsonEditor from '../components/JsonEditor';
+import { jsonFormValidator, parseJsonText } from '../utils/json';
 
 // 校验 Base URL 是否为 IP 地址格式（如 http://192.168.1.1:8080）
 function isValidIpUrl(url: string): boolean {
@@ -114,13 +114,9 @@ export default function EnvironmentsPage() {
         message.error('Base URL 仅支持 IP 地址格式（如 http://192.168.1.1:8080）');
         return;
       }
-      let variables = {};
-      try {
-        variables = values.variables ? JSON.parse(values.variables) : {};
-      } catch {
-        message.error('变量 JSON 格式不正确');
-        return;
-      }
+      const variables = parseJsonText(values.variables, '环境变量', {
+        expectedType: 'object',
+      }) as Record<string, unknown>;
       // 打包数据库配置：仅在填写了关键字段时才提交 db_config
       let db_config: EnvironmentCreate['db_config'] = null;
       if (values.db_database || values.db_host) {
@@ -332,9 +328,14 @@ export default function EnvironmentsPage() {
           <Form.Item name="description" label="描述">
             <Input placeholder="环境描述（可选）" />
           </Form.Item>
-          <Form.Item name="variables" label="环境变量（JSON）">
-            <TextArea
+          <Form.Item
+            name="variables"
+            label="环境变量（JSON）"
+            rules={[{ validator: jsonFormValidator('环境变量', { expectedType: 'object' }) }]}
+          >
+            <JsonEditor
               rows={4}
+              expectedType="object"
               placeholder='{"token": "xxx", "db_url": "mysql://..."}'
             />
           </Form.Item>

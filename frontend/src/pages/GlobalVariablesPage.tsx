@@ -21,6 +21,8 @@ import {
 } from '@ant-design/icons';
 import { globalVariableApi, projectApi } from '../services/api';
 import type { GlobalVariable, GlobalVariableCreate, Project } from '../types';
+import JsonEditor from '../components/JsonEditor';
+import { formatJson, jsonFormValidator, parseJsonText } from '../utils/json';
 
 const { TextArea } = Input;
 
@@ -64,6 +66,7 @@ export default function GlobalVariablesPage() {
   const [editing, setEditing] = useState<GlobalVariable | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
+  const selectedVarType = Form.useWatch('var_type', form) || 'string';
 
   async function loadData(p = page, ps = pageSize, kw = keyword, scope = scopeFilter) {
     setLoading(true);
@@ -119,10 +122,18 @@ export default function GlobalVariablesPage() {
         message.warning('工作空间作用域必须选择项目');
         return;
       }
+      const variableValue =
+        values.var_type === 'json'
+          ? formatJson(
+              parseJsonText(values.value, '变量值', {
+                allowEmpty: false,
+              })
+            )
+          : values.value ?? '';
       setSubmitting(true);
       const payload: GlobalVariableCreate = {
         name: values.name,
-        value: values.value ?? '',
+        value: variableValue,
         var_type: values.var_type,
         description: values.description,
         scope: values.scope,
@@ -308,8 +319,24 @@ export default function GlobalVariablesPage() {
           >
             <Input placeholder="如：base_url、token" />
           </Form.Item>
-          <Form.Item name="value" label="值">
-            <TextArea rows={2} placeholder="变量值（json 类型请输入合法 JSON）" />
+          <Form.Item
+            name="value"
+            label="值"
+            rules={
+              selectedVarType === 'json'
+                ? [{ validator: jsonFormValidator('变量值', { allowEmpty: false }) }]
+                : []
+            }
+          >
+            {selectedVarType === 'json' ? (
+              <JsonEditor
+                rows={3}
+                allowEmpty={false}
+                placeholder='{"token": "example-token"}'
+              />
+            ) : (
+              <TextArea rows={2} placeholder="变量值" />
+            )}
           </Form.Item>
           <Space style={{ width: '100%' }} size="middle">
             <Form.Item name="var_type" label="变量类型" style={{ width: 200 }}>

@@ -37,7 +37,9 @@ import type { ExecutionResultData, PreRequest } from '../services/api';
 import type { Project } from '../types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ConsoleWindow, { type ConsoleHandle } from '../components/ConsoleWindow';
+import JsonEditor from '../components/JsonEditor';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { parseJsonText } from '../utils/json';
 import '../styles/quick-test-workspace.css';
 
 const { TextArea } = Input;
@@ -536,7 +538,7 @@ export default function QuickTestPage() {
     }
     let parsedHeaders: Record<string, string> = {};
     let parsedParams: Record<string, unknown> = {};
-    let parsedBody: Record<string, unknown> | undefined;
+    let parsedBody: unknown;
     let parsedVars: Record<string, unknown> = {};
     try {
       parsedHeaders = parseHeadersJson(headers);
@@ -551,7 +553,7 @@ export default function QuickTestPage() {
       return;
     }
     try {
-      if (body.trim()) parsedBody = parseJsonObject(body, 'Body');
+      parsedBody = parseJsonText(body, 'Body', { allowEmpty: true });
     } catch (error: any) {
       message.error(error.message || 'Body JSON 格式不正确');
       return;
@@ -720,7 +722,7 @@ export default function QuickTestPage() {
       // 解析当前请求配置
       let parsedHeaders: Record<string, string> = {};
       let parsedParams: Record<string, unknown> = {};
-      let parsedBody: Record<string, unknown> | undefined;
+      let parsedBody: unknown;
       try {
         parsedHeaders = parseHeadersJson(headers);
       } catch (error: any) {
@@ -734,7 +736,7 @@ export default function QuickTestPage() {
         return;
       }
       try {
-        if (body.trim()) parsedBody = parseJsonObject(body, 'Body');
+        parsedBody = parseJsonText(body, 'Body', { allowEmpty: true });
       } catch (error: any) {
         message.error(error.message || 'Body JSON 格式不正确');
         return;
@@ -1346,12 +1348,12 @@ export default function QuickTestPage() {
                           <span className="quick-test-editor-summary">JSON 请求体</span>
                           <Tag bordered={false}>Raw JSON</Tag>
                         </div>
-                        <TextArea
-                          rows={10}
+                        <JsonEditor
                           value={body}
-                          onChange={(event) => setBody(event.target.value)}
+                          onChange={setBody}
+                          rows={10}
                           placeholder='{"name": "Ada", "email": "ada@example.com"}'
-                          className="quick-test-raw-editor"
+                          data-testid="request-body-input"
                         />
                       </div>
                     ),

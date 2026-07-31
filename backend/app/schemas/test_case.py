@@ -47,7 +47,7 @@ class TestCaseBase(BaseModel):
     url: str = Field(..., max_length=2048)
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
-    body: dict | None = None
+    body: Any = None
     markers: list[str] = Field(default_factory=list)
     group_path: str | None = Field(default=None, max_length=256)
     extract_rules: list[dict[str, Any]] = Field(default_factory=list)
@@ -76,7 +76,7 @@ class TestCaseUpdate(BaseModel):
     url: str | None = None
     headers: dict[str, Any] | None = None
     params: dict[str, Any] | None = None
-    body: dict | None = None
+    body: Any = None
     markers: list[str] | None = None
     group_path: str | None = None
     extract_rules: list[dict[str, Any]] | None = None
