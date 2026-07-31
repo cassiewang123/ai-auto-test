@@ -40,6 +40,7 @@ import AuditLogsPage from './pages/AuditLogsPage';
 import AiOpsPage from './pages/AiOpsPage';
 import QualityGatesPage from './pages/QualityGatesPage';
 import DefectsPage from './pages/DefectsPage';
+import JsonComparePage from './pages/JsonComparePage';
 
 export default function App() {
   return (
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/quick-test" element={<QuickTestPage />} />
+        <Route path="/json-compare" element={<JsonComparePage />} />
         <Route path="/api-list" element={<ApiListPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/import" element={<ImportPage />} />

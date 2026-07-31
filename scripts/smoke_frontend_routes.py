@@ -16,6 +16,7 @@ ROUTES = [
     "/dashboard",
     "/jobs",
     "/quick-test",
+    "/json-compare",
     "/api-list",
     "/projects",
     "/import",
