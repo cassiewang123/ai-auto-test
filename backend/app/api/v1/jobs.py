@@ -283,6 +283,57 @@ def get_artifacts(
     return DataResponse(data=[JobArtifactResponse.model_validate(a) for a in artifacts])
 
 
+@router.get("/{job_id}/artifacts/{artifact_id}")
+def download_artifact(
+    job_id: str,
+    artifact_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下载任务产物的文件内容（读取产物并返回文件字节）。"""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from app.core.exceptions import NotFoundError as NF
+    from app.models.job_artifact import JobArtifact
+    from app.services.ui.artifact_service import get_artifact_root
+
+    service = JobService(db)
+    job = service.get_job(job_id)
+    if not job:
+        raise NotFoundError("Job", job_id)
+    ensure_job_access(db, current_user, job)
+
+    artifact = (
+        db.query(JobArtifact)
+        .filter(JobArtifact.job_id == job_id, JobArtifact.id == artifact_id)
+        .one_or_none()
+    )
+    if not artifact:
+        raise NotFoundError("JobArtifact", artifact_id)
+
+    root = get_artifact_root()
+    storage_key = artifact.storage_key or ""
+    path = (root / storage_key).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError as exc:
+        raise NF("JobArtifact", artifact_id) from exc
+    if not path.is_file():
+        raise NotFoundError("JobArtifact", artifact_id)
+
+    return FileResponse(
+        path,
+        filename=artifact.filename or path.name,
+        media_type=(
+            "application/json"
+            if path.suffix.lower() in {".json", ".har"}
+            else "application/octet-stream"
+        ),
+    )
+
+
 @router.websocket("/{job_id}/stream")
 async def job_stream(websocket: WebSocket, job_id: str):
     """WebSocket 实时事件流。

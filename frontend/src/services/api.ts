@@ -889,6 +889,10 @@ export const jobsApi = {
     }),
   getArtifacts: (id: string) =>
     apiClient.get<unknown, ApiResponse<JobArtifact[]>>(`/jobs/${id}/artifacts`),
+  getArtifactContent: (id: string, artifactId: string) =>
+    apiClient.get<unknown, string>(`/jobs/${id}/artifacts/${artifactId}`, {
+      responseType: 'text',
+    }),
   getStreamUrl: (id: string, token: string) => {
     const configuredBase = apiClient.defaults.baseURL || '/api/v1';
     const baseUrl = new URL(configuredBase, window.location.origin);

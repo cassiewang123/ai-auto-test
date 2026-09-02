@@ -46,7 +46,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { uiTestCaseApi, projectApi, visualRegressionApi, uiTestRecordApi, stepLibraryApi, aiApi } from '../services/api';
+import { uiTestCaseApi, projectApi, visualRegressionApi, uiTestRecordApi, stepLibraryApi, jobsApi } from '../services/api';
 import type { Project } from '../types';
 
 const browserColor: Record<string, string> = {
@@ -427,7 +427,7 @@ export default function UiTestCasesPage() {
     }
   }
 
-  // ===================== AI 加工：人工录制步骤 + AI 优化 =====================
+  // ===================== AI 加工：人工录制步骤 + AI 优化（接入统一任务中心） =====================
   function openAiOptimize(record: any) {
     setAiTarget(record);
     setAiPlan([]);
@@ -443,14 +443,56 @@ export default function UiTestCasesPage() {
   }
 
   async function handleAiProcess(record: any) {
+    if (!record?.steps?.length) return;
     setAiLoading(true);
-    const steps = record?.steps || [];
+    setAiPlan([]);
+    setAiOptimized(null);
+    setAiSummary(null);
+    let jobId: string | null = null;
     try {
-      const planRes = await aiApi.generateUiPlan({ steps });
-      const optRes = await aiApi.optimizeUiSteps({ steps });
-      setAiPlan(planRes?.data?.plan || []);
-      setAiOptimized(optRes?.data?.optimized_steps || null);
-      setAiSummary(optRes?.data?.summary || null);
+      // 通过统一任务中心异步执行 AI 加工
+      const res = await jobsApi.create({
+        job_type: 'ai_ui_optimize',
+        project_id: record?.project_id || filterProject,
+        config: { steps: record.steps },
+      });
+      jobId = res?.data?.id || null;
+      if (!jobId) {
+        message.error('AI 加工任务创建失败');
+        return;
+      }
+      // 轮询任务直到终态
+      const deadline = Date.now() + 120000; // 最多等待 2 分钟
+      let job = res.data;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const q = await jobsApi.get(jobId);
+        job = q?.data;
+        if (!job) break;
+        if (['succeeded', 'failed', 'cancelled', 'timed_out'].includes(job.status)) break;
+      }
+      if (!job || job.status !== 'succeeded') {
+        message.error(`AI 加工未成功: ${job?.error_message || job?.status || '未知'}`);
+        return;
+      }
+      // 读取 JSON 报告产物
+      const arts = await jobsApi.getArtifacts(jobId);
+      const reportArt = (arts?.data || []).find((a: any) => a.artifact_type === 'report');
+      let reportData: any = null;
+      if (reportArt?.id) {
+        try {
+          const text = await jobsApi.getArtifactContent(jobId, reportArt.id);
+          reportData = (text as any)?.data ?? (typeof text === 'string' ? text : null);
+          if (typeof reportData === 'string') {
+            reportData = JSON.parse(reportData as unknown as string);
+          }
+        } catch (e) {
+          /* ignore parse error, fall back to empty plan */
+        }
+      }
+      setAiPlan(reportData?.plan || []);
+      setAiOptimized(reportData?.optimized_steps || null);
+      setAiSummary(reportData?.summary || null);
     } catch (e: any) {
       message.error(e.message);
     } finally {

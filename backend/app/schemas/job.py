@@ -8,7 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class JobCreate(BaseModel):
-    job_type: Literal["api_case", "ui_case", "ui_suite", "performance"]
+    job_type: Literal[
+        "api_case",
+        "ui_case",
+        "ui_suite",
+        "performance",
+        "ai_ui_optimize",
+    ]
     resource_id: str | None = None
     config: dict = Field(default_factory=dict)
     project_id: str | None = None

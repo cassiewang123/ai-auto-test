@@ -573,6 +573,8 @@ class JobService:
             return self._run_ui_suite(job)
         if job.job_type == "performance":
             return self._run_performance(job)
+        if job.job_type == "ai_ui_optimize":
+            return self._run_ai_ui_optimize(job)
         raise ValueError(f"不支持的任务类型: {job.job_type}")
 
     def _run_api_case(self, job: ExecutionJob) -> dict[str, Any]:
@@ -1186,6 +1188,76 @@ class JobService:
                         "error": failed_reason,
                     }
                 ],
+            },
+        }
+
+    def _run_ai_ui_optimize(self, job: ExecutionJob) -> dict[str, Any]:
+        """将人工录制的 UI 步骤交给 AI 加工，产出用例计划与优化步骤。
+
+        输入来自 job.config.steps；复用 AIService 的 generate_ui_test_plan /
+        optimize_ui_steps。生成 JSON 报告产物，并把统计写入 metrics。
+        """
+        from app.services.ai_service import AIService
+
+        config = job.config if isinstance(job.config, dict) else {}
+        steps = config.get("steps") or []
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("ai_ui_optimize 任务缺少 config.steps")
+
+        try:
+            service = AIService()
+            plan = service.generate_ui_test_plan(steps)
+            optimized = service.optimize_ui_steps(steps)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"AI 加工失败: {exc}") from exc
+
+        plan_items = plan.get("plan", [])
+        optimized_steps = optimized.get("optimized_steps", [])
+        summary_data = optimized.get("summary", {})
+        added_asserts = int(summary_data.get("added_asserts") or 0)
+        added_waits = int(summary_data.get("added_waits") or 0)
+        removed_duplicates = int(summary_data.get("removed_duplicates") or 0)
+
+        report = self._write_json_artifact(
+            job.id,
+            f"ai_ui_optimize_{job.id[:8]}.json",
+            {
+                "plan": plan_items,
+                "optimized_steps": optimized_steps,
+                "summary": summary_data,
+                "source": plan.get("source"),
+            },
+        )
+        total_optimized = len(optimized_steps)
+        self._emit_event(
+            job.id,
+            "job.log",
+            {
+                "plan_steps": len(plan_items),
+                "optimized_steps": total_optimized,
+                "added_asserts": added_asserts,
+                "added_waits": added_waits,
+                "removed_duplicates": removed_duplicates,
+            },
+        )
+        return {
+            "status": "succeeded",
+            "summary": (
+                f"AI 加工完成：{len(plan_items)} 步计划，{total_optimized} 步优化"
+                f"（去重 {removed_duplicates} · 补断言 {added_asserts} · 补等待 {added_waits}）"
+            ),
+            "artifacts": [report],
+            "metrics": {
+                "total": total_optimized,
+                "passed": total_optimized,
+                "failed": 0,
+                "error": 0,
+                "skipped": 0,
+                "added_asserts": added_asserts,
+                "added_waits": added_waits,
+                "removed_duplicates": removed_duplicates,
+                "plan_steps": len(plan_items),
+                "results": [],
             },
         }
 

@@ -29,18 +29,22 @@ class LLMConfig(BaseModel):
     max_tokens: int = 2000
 
 
+def get_ai_service_settings() -> LLMConfig:
+    settings = get_settings()
+    return LLMConfig(
+        model=settings.LLM_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        base_url=settings.LLM_BASE_URL,
+    )
+
+
 class AIService:
     """AI 增强服务，封装测试相关的 LLM 与规则能力。"""
 
     def __init__(self, config: LLMConfig | None = None) -> None:
         """初始化服务，未提供 config 时从全局 Settings 读取。"""
         if config is None:
-            settings = get_settings()
-            config = LLMConfig(
-                model=settings.LLM_MODEL,
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.LLM_BASE_URL,
-            )
+            config = get_ai_service_settings()
         self.config = config
 
     # ------------------------------------------------------------------

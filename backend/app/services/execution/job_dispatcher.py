@@ -27,6 +27,7 @@ _TASK_NAMES = {
     "ui_case": "airetest.jobs.ui",
     "ui_suite": "airetest.jobs.ui",
     "performance": "airetest.jobs.performance",
+    "ai_ui_optimize": "airetest.jobs.api",
 }
 
 
@@ -313,7 +314,7 @@ class JobDispatcher:
         return "local"
 
     def _queue_for(self, job_type: str) -> str:
-        if job_type == "api_case":
+        if job_type in {"api_case", "ai_ui_optimize"}:
             return str(self.settings.CELERY_API_QUEUE)
         if job_type in {"ui_case", "ui_suite"}:
             return str(self.settings.CELERY_UI_QUEUE)

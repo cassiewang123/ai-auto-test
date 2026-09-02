@@ -374,7 +374,12 @@ export type JobStatus =
   | 'cancelled'
   | 'timed_out';
 
-export type JobType = 'api_case' | 'ui_case' | 'ui_suite' | 'performance';
+export type JobType =
+  | 'api_case'
+  | 'ui_case'
+  | 'ui_suite'
+  | 'performance'
+  | 'ai_ui_optimize';
 
 export interface Job {
   id: string;

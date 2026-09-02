@@ -69,6 +69,7 @@ const jobTypeLabelMap: Record<JobType, string> = {
   ui_case: 'UI 用例',
   ui_suite: 'UI 套件',
   performance: '性能测试',
+  ai_ui_optimize: 'AI 加工',
 };
 
 const statusFilterOptions = Object.entries(statusLabelMap).map(([value, label]) => ({
