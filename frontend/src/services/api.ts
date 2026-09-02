@@ -212,6 +212,34 @@ export const aiApi = {
       '/ai/import-cases',
       data
     ),
+  // 把人工录制的 UI 步骤加工为可读用例计划（步骤 + 预期）
+  generateUiPlan: (data: { steps: any[] }) =>
+    api.post<unknown, ApiResponse<{ plan: any[]; source?: string }>>(
+      '/ai/ui-plan',
+      data
+    ),
+  // 优化 UI 录制步骤：补断言/补等待/去重，输出可稳定回归步骤
+  optimizeUiSteps: (data: { steps: any[] }) =>
+    api.post<
+      unknown,
+      ApiResponse<{
+        optimized_steps: any[];
+        summary: { added_asserts: number; added_waits: number; removed_duplicates: number };
+        source?: string;
+      }>
+    >('/ai/optimize-ui-steps', data),
+  // 分析 UI 用例失败，返回根因、定位器修复建议与修复后步骤
+  suggestUiFix: (data: { url: string; steps: any[]; failed_step: any; error: string }) =>
+    api.post<
+      unknown,
+      ApiResponse<{
+        root_cause: string;
+        category: string;
+        suggestions: string[];
+        repaired_steps: any[];
+        source?: string;
+      }>
+    >('/ai/suggest-ui-fix', data),
 };
 
 // ========== 执行测试 ==========

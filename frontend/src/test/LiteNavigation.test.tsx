@@ -70,6 +70,7 @@ describe('lite navigation', () => {
       '/api-list',
       '/api-docs',
       '/quick-test',
+      '/json-compare',
       '/test-cases',
       '/test-plans',
       '/test-data',

@@ -23,6 +23,7 @@ import {
   Radio,
   Upload,
   InputNumber,
+  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -41,9 +42,11 @@ import {
   PictureOutlined,
   UploadOutlined,
   ApartmentOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { uiTestCaseApi, projectApi, visualRegressionApi, uiTestRecordApi, stepLibraryApi } from '../services/api';
+import { uiTestCaseApi, projectApi, visualRegressionApi, uiTestRecordApi, stepLibraryApi, aiApi } from '../services/api';
 import type { Project } from '../types';
 
 const browserColor: Record<string, string> = {
@@ -151,6 +154,15 @@ export default function UiTestCasesPage() {
   const [stepGroupPreviewLoading, setStepGroupPreviewLoading] = useState(false);
   // 保存 Form.List 的 add 函数引用，供步骤组选择器回调使用
   const addStepRef = useRef<((step: any) => void) | null>(null);
+
+  // AI 加工（人工录制 + AI 补断言/补等待/生成用例计划）
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiApplying, setAiApplying] = useState(false);
+  const [aiTarget, setAiTarget] = useState<any>(null);
+  const [aiPlan, setAiPlan] = useState<any[]>([]);
+  const [aiOptimized, setAiOptimized] = useState<any[] | null>(null);
+  const [aiSummary, setAiSummary] = useState<any>(null);
 
   async function loadData(
     p = page,
@@ -415,6 +427,151 @@ export default function UiTestCasesPage() {
     }
   }
 
+  // ===================== AI 加工：人工录制步骤 + AI 优化 =====================
+  function openAiOptimize(record: any) {
+    setAiTarget(record);
+    setAiPlan([]);
+    setAiOptimized(null);
+    setAiSummary(null);
+    setAiOpen(true);
+    const steps = record?.steps || [];
+    if (!steps.length) {
+      message.warning('该用例暂无步骤，请先录制或手动添加步骤');
+      return;
+    }
+    handleAiProcess(record);
+  }
+
+  async function handleAiProcess(record: any) {
+    setAiLoading(true);
+    const steps = record?.steps || [];
+    try {
+      const planRes = await aiApi.generateUiPlan({ steps });
+      const optRes = await aiApi.optimizeUiSteps({ steps });
+      setAiPlan(planRes?.data?.plan || []);
+      setAiOptimized(optRes?.data?.optimized_steps || null);
+      setAiSummary(optRes?.data?.summary || null);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleAiApply() {
+    if (!aiTarget || !aiOptimized) return;
+    setAiApplying(true);
+    try {
+      await uiTestCaseApi.update(aiTarget.id, { steps: aiOptimized });
+      message.success(
+        `已应用优化步骤（去重 ${aiSummary?.removed_duplicates || 0} · ` +
+        `补断言 ${aiSummary?.added_asserts || 0} · 补等待 ${aiSummary?.added_waits || 0}）`
+      );
+      setAiOpen(false);
+      loadData();
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setAiApplying(false);
+    }
+  }
+
+  function renderAiPanel() {
+    if (aiLoading) {
+      return (
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <Spin tip="AI 正在分析录制步骤..." />
+        </div>
+      );
+    }
+    if (!aiTarget) return <Empty description="请选择用例" />;
+    return (
+      <div>
+        <Alert
+          type="info"
+          showIcon
+          icon={<RobotOutlined />}
+          style={{ marginBottom: 16 }}
+          message="人工录制 + AI 加工"
+          description="基于人工录制的操作步骤，AI 去重冗余、补充断言与等待，将流程沉淀为可稳定回归的用例。"
+        />
+        {aiPlan.length > 0 && (
+          <Collapse
+            ghost
+            items={[
+              {
+                key: 'plan',
+                label: `用例计划（${aiPlan.length} 步）`,
+                children: (
+                  <List
+                    size="small"
+                    dataSource={aiPlan}
+                    renderItem={(item: any) => (
+                      <List.Item style={{ padding: '6px 0' }}>
+                        <span style={{ marginRight: 8, color: '#8c8c8c' }}>
+                          {item.step}.
+                        </span>
+                        <Tag color="blue" style={{ marginRight: 8 }}>
+                          {item.action}
+                        </Tag>
+                        <span style={{ flex: 1 }}>{item.operation}</span>
+                        <span style={{ color: '#52c41a' }}>预期: {item.expected}</span>
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+              {
+                key: 'optimized',
+                label: `优化后步骤（${aiOptimized?.length || 0} 步）`,
+                children: (
+                  <div>
+                    {aiSummary && (
+                      <Alert
+                        type="success"
+                        style={{ marginBottom: 12 }}
+                        message={`优化统计：去重 ${aiSummary.removed_duplicates} · 补断言 ${aiSummary.added_asserts} · 补等待 ${aiSummary.added_waits}`}
+                      />
+                    )}
+                    <List
+                      size="small"
+                      dataSource={aiOptimized || []}
+                      renderItem={(step: any, i: number) => (
+                        <List.Item style={{ padding: '6px 0' }}>
+                          <span style={{ marginRight: 8, color: '#8c8c8c' }}>{i + 1}.</span>
+                          <Tag color="geekblue" style={{ marginRight: 8 }}>
+                            {step.action}
+                          </Tag>
+                          <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}>
+                            {step.selector || '-'}
+                          </span>
+                          <span style={{ color: '#595959', fontSize: 12 }}>
+                            {step.value || step.description || ''}
+                          </span>
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                ),
+              },
+            ]}
+          />
+        )}
+        <div style={{ marginTop: 16, textAlign: 'right' }}>
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={aiApplying}
+            disabled={!aiOptimized || !aiOptimized.length}
+            onClick={handleAiApply}
+          >
+            应用优化步骤
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const columns = [
     { title: '标题', dataIndex: 'title', width: 180, ellipsis: true },
     { title: '起始 URL', dataIndex: 'url', width: 220, ellipsis: true },
@@ -468,6 +625,14 @@ export default function UiTestCasesPage() {
             data-testid="run-ui-case-btn"
           >
             运行
+          </Button>
+          <Button
+            size="small"
+            icon={<RobotOutlined />}
+            data-testid="ai-optimize-ui-btn"
+            onClick={() => openAiOptimize(record)}
+          >
+            AI 加工
           </Button>
           <Button
             size="small"
@@ -1825,6 +1990,23 @@ export default function UiTestCasesPage() {
         ) : (
           renderResultContent()
         )}
+      </Modal>
+
+      {/* AI 加工 Modal（人工录制 + AI 补断言） */}
+      <Modal
+        title={
+          <Space>
+            <RobotOutlined />
+            <span>AI 加工录制步骤</span>
+          </Space>
+        }
+        open={aiOpen}
+        onCancel={() => setAiOpen(false)}
+        width={860}
+        footer={null}
+        destroyOnHidden
+      >
+        {renderAiPanel()}
       </Modal>
 
       {/* 录制用例 Modal */}

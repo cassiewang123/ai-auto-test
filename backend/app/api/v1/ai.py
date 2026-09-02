@@ -174,3 +174,63 @@ def import_cases(
         "message": "ok",
         "data": {"created_count": len(created_ids), "case_ids": created_ids},
     }
+
+
+# ---------------------------------------------------------------------------
+# UI 录制步骤加工（人工录制 + AI 加工方案）
+# ---------------------------------------------------------------------------
+
+class UiPlanRequest(BaseModel):
+    """生成 UI 用例计划请求。"""
+
+    steps: list[dict]
+
+
+class OptimizeUiStepsRequest(BaseModel):
+    """优化 UI 录制步骤请求。"""
+
+    steps: list[dict]
+
+
+class SuggestUiFixRequest(BaseModel):
+    """分析 UI 用例失败并给出修复建议请求。"""
+
+    url: str
+    steps: list[dict]
+    failed_step: dict
+    error: str
+
+
+@router.post("/ui-plan")
+def generate_ui_test_plan(
+    request: UiPlanRequest,
+    service: AIService = Depends(get_ai_service),
+) -> dict:
+    """把人工录制的 UI 步骤加工为可读用例计划（步骤 + 预期）。"""
+    data = service.generate_ui_test_plan(request.steps)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/optimize-ui-steps")
+def optimize_ui_steps(
+    request: OptimizeUiStepsRequest,
+    service: AIService = Depends(get_ai_service),
+) -> dict:
+    """优化人工录制的 UI 步骤：补断言/补等待/去重，输出可稳定回归步骤。"""
+    data = service.optimize_ui_steps(request.steps)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/suggest-ui-fix")
+def suggest_ui_fix(
+    request: SuggestUiFixRequest,
+    service: AIService = Depends(get_ai_service),
+) -> dict:
+    """分析 UI 用例失败，返回根因、定位器修复建议与修复后步骤。"""
+    data = service.suggest_ui_fix(
+        url=request.url,
+        steps=request.steps,
+        failed_step=request.failed_step,
+        error=request.error,
+    )
+    return {"code": 0, "message": "ok", "data": data}
