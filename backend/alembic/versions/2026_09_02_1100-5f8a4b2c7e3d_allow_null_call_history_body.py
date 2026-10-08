@@ -22,8 +22,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.alter_column("call_history", "body", nullable=True)
+    with op.batch_alter_table("call_history") as batch_op:
+        batch_op.alter_column("body", nullable=True)
 
 
 def downgrade() -> None:
-    op.alter_column("call_history", "body", nullable=False)
+    with op.batch_alter_table("call_history") as batch_op:
+        batch_op.alter_column("body", nullable=False)
