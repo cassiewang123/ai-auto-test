@@ -34,6 +34,7 @@ describe('lite navigation', () => {
       'perf-test',
       '/reports',
       '/coverage',
+      'tools',
       '/scheduled-tasks',
       '/environments',
       '/variables',
@@ -70,7 +71,6 @@ describe('lite navigation', () => {
       '/api-list',
       '/api-docs',
       '/quick-test',
-      '/json-compare',
       '/test-cases',
       '/test-plans',
       '/test-data',
@@ -87,6 +87,15 @@ describe('lite navigation', () => {
       '/perf-dashboard',
       '/reports',
       '/coverage',
+      '/tools',
+      '/tools/json-compare',
+      '/tools/text-compare',
+      '/tools/regex',
+      '/tools/encoding',
+      '/tools/word-count',
+      '/tools/timestamp',
+      '/tools/data-generator',
+      '/tools/log-analysis',
       '/quality-gates',
       '/defects',
       '/scheduled-tasks',
@@ -120,6 +129,7 @@ describe('lite navigation', () => {
       findNavigationItemByPath(allNavigationItems, '/users')?.label
     ).toBe('用户管理');
     expect(getOpenKeys(allNavigationItems, '/test-data')).toEqual(['api-test']);
+    expect(getOpenKeys(allNavigationItems, '/tools/regex')).toEqual(['tools']);
     expect(getOpenKeys(allNavigationItems, '/knowledge/rules')).toEqual([
       'knowledge',
     ]);

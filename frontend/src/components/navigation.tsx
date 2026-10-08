@@ -30,11 +30,12 @@ import {
   SafetyOutlined,
   ScheduleOutlined,
   SolutionOutlined,
-  SwapOutlined,
   TeamOutlined,
   ThunderboltOutlined,
+  ToolOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
+import { toolNavChildren } from '../pages/tools/toolCatalog';
 
 export type AppMode = 'lite' | 'full';
 
@@ -57,7 +58,6 @@ const navigationItems: NavigationItem[] = [
       { key: '/api-list', icon: <ApiOutlined />, label: '接口定义' },
       { key: '/api-docs', icon: <ReadOutlined />, label: '接口文档' },
       { key: '/quick-test', icon: <ThunderboltOutlined />, label: '接口调试' },
-      { key: '/json-compare', icon: <SwapOutlined />, label: 'JSON 对比' },
       { key: '/test-cases', icon: <UnorderedListOutlined />, label: '用例管理' },
       { key: '/test-plans', icon: <ScheduleOutlined />, label: '测试计划' },
       { key: '/test-data', icon: <DatabaseOutlined />, label: '数据驱动' },
@@ -90,6 +90,15 @@ const navigationItems: NavigationItem[] = [
   },
   { key: '/reports', icon: <BarChartOutlined />, label: '测试报告' },
   { key: '/coverage', icon: <PieChartOutlined />, label: '覆盖率看板' },
+  {
+    key: 'tools',
+    icon: <ToolOutlined />,
+    label: '工具集',
+    children: [
+      { key: '/tools', icon: <ToolOutlined />, label: '工具总览' },
+      ...toolNavChildren,
+    ],
+  },
   { key: '/quality-gates', icon: <SafetyOutlined />, label: '质量门禁' },
   { key: '/defects', icon: <BugOutlined />, label: '缺陷管理' },
   { key: '/scheduled-tasks', icon: <ClockCircleOutlined />, label: '定时任务' },
@@ -132,6 +141,7 @@ const liteRootKeys = new Set([
   'perf-test',
   '/reports',
   '/coverage',
+  'tools',
   '/scheduled-tasks',
   '/environments',
   '/variables',

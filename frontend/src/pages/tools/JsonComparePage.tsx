@@ -21,13 +21,14 @@ import {
   DiffOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
-import JsonEditor from '../components/JsonEditor';
+import ToolPage from '../../components/ToolPage';
+import JsonEditor from '../../components/JsonEditor';
 import {
   compareJson,
   jsonDiffLabel,
   type JsonDifference,
-} from '../utils/jsonCompare';
-import { formatJson, validateJsonText } from '../utils/json';
+} from '../../utils/jsonCompare';
+import { formatJson, validateJsonText } from '../../utils/json';
 
 const diffColor: Record<JsonDifference['kind'], string> = {
   added: 'green',
@@ -176,32 +177,28 @@ export default function JsonComparePage() {
   ];
 
   return (
-    <div>
-      <Card
-        title={
-          <Space>
-            <DiffOutlined />
-            <span>JSON 对比</span>
-          </Space>
-        }
-        extra={
-          <Space>
-            <Button icon={<SwapOutlined />} onClick={swapInputs}>
-              交换
-            </Button>
-            <Button icon={<ClearOutlined />} onClick={clearAll}>
-              清空
-            </Button>
-            <Button type="primary" icon={<DiffOutlined />} onClick={handleCompare}>
-              开始对比
-            </Button>
-          </Space>
-        }
-      >
+    <ToolPage
+      icon={<DiffOutlined />}
+      title="JSON 数据对比"
+      description="按路径比较两份 JSON，识别新增、删除、修改和类型变化。"
+      extra={
+        <Space wrap>
+          <Button icon={<SwapOutlined />} onClick={swapInputs}>
+            交换
+          </Button>
+          <Button icon={<ClearOutlined />} onClick={clearAll}>
+            清空
+          </Button>
+          <Button type="primary" icon={<DiffOutlined />} onClick={handleCompare}>
+            开始对比
+          </Button>
+        </Space>
+      }
+    >
+      <div className="tools-page-body">
         <Alert
           type="info"
           showIcon
-          style={{ marginBottom: 16 }}
           title="所有 JSON 对比都在当前浏览器内完成，不会上传到外部网站。"
           description="支持对象、数组和基本类型；对象字段顺序不会影响结果，可选择是否忽略数组顺序。"
         />
@@ -237,7 +234,7 @@ export default function JsonComparePage() {
             </Card>
           </Col>
         </Row>
-        <Space style={{ marginTop: 16 }} wrap>
+        <Space wrap>
           <Checkbox
             checked={ignoreArrayOrder}
             onChange={(event) => {
@@ -247,77 +244,82 @@ export default function JsonComparePage() {
           >
             忽略数组顺序
           </Checkbox>
-          <span style={{ color: '#6b7280' }}>
-            对象字段顺序始终忽略
-          </span>
+          <span style={{ color: '#6b7280' }}>对象字段顺序始终忽略</span>
         </Space>
-      </Card>
 
-      <Card
-        title="对比结果"
-        style={{ marginTop: 16 }}
-        extra={
-          <Space>
-            <Button
-              icon={<CopyOutlined />}
-              onClick={copyReport}
-              disabled={differences === null}
-            >
-              复制报告
-            </Button>
-            <Button
-              icon={<DownloadOutlined />}
-              onClick={downloadReport}
-              disabled={differences === null}
-            >
-              导出报告
-            </Button>
-          </Space>
-        }
-      >
-        {differences === null ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="输入两份有效 JSON 后点击“开始对比”"
-          />
-        ) : differences.length === 0 ? (
-          <Alert
-            type="success"
-            showIcon
-            title="两份 JSON 一致"
-            description="在当前比较选项下未发现结构、类型或值差异。"
-          />
-        ) : (
-          <>
-            <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-              <Col xs={12} sm={6}>
-                <Statistic title="差异总数" value={differences.length} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic title="新增" value={summary.added} styles={{ content: { color: '#059669' } }} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic title="删除" value={summary.removed} styles={{ content: { color: '#dc2626' } }} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic
-                  title="修改/类型变化"
-                  value={summary.changed + summary.typeChanged}
-                  styles={{ content: { color: '#d97706' } }}
-                />
-              </Col>
-            </Row>
-            <Table
-              dataSource={differences}
-              rowKey={(record) => `${record.kind}-${record.path}`}
-              columns={columns}
-              size="small"
-              pagination={{ pageSize: 20, showSizeChanger: true }}
-              scroll={{ x: 900 }}
+        <Card
+          title="对比结果"
+          extra={
+            <Space>
+              <Button
+                icon={<CopyOutlined />}
+                onClick={copyReport}
+                disabled={differences === null}
+              >
+                复制报告
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={downloadReport}
+                disabled={differences === null}
+              >
+                导出报告
+              </Button>
+            </Space>
+          }
+        >
+          {differences === null ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="输入两份有效 JSON 后点击“开始对比”"
             />
-          </>
-        )}
-      </Card>
-    </div>
+          ) : differences.length === 0 ? (
+            <Alert
+              type="success"
+              showIcon
+              title="两份 JSON 一致"
+              description="在当前比较选项下未发现结构、类型或值差异。"
+            />
+          ) : (
+            <>
+              <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                <Col xs={12} sm={6}>
+                  <Statistic title="差异总数" value={differences.length} />
+                </Col>
+                <Col xs={12} sm={6}>
+                  <Statistic
+                    title="新增"
+                    value={summary.added}
+                    styles={{ content: { color: '#059669' } }}
+                  />
+                </Col>
+                <Col xs={12} sm={6}>
+                  <Statistic
+                    title="删除"
+                    value={summary.removed}
+                    styles={{ content: { color: '#dc2626' } }}
+                  />
+                </Col>
+                <Col xs={12} sm={6}>
+                  <Statistic
+                    title="修改/类型变化"
+                    value={summary.changed + summary.typeChanged}
+                    styles={{ content: { color: '#d97706' } }}
+                  />
+                </Col>
+              </Row>
+              <Table
+                dataSource={differences}
+                rowKey={(record) => `${record.kind}-${record.path}`}
+                columns={columns}
+                size="small"
+                pagination={{ pageSize: 20, showSizeChanger: true }}
+                scroll={{ x: 900 }}
+              />
+            </>
+          )}
+        </Card>
+      </div>
+    </ToolPage>
   );
 }
