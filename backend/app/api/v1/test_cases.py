@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid as _uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote
 
@@ -243,24 +244,28 @@ def batch_execute(
     from app.services.security.url_policy import URLPolicy
 
     settings = get_settings()
-    _executor = TestCaseExecutor(
-        request_builder=RequestBuilder(
-            url_policy=URLPolicy(
-                allow_private=settings.URL_ALLOW_PRIVATE,
-                allowed_domains=[
-                    d.strip()
-                    for d in settings.URL_ALLOWED_DOMAINS.split(",")
-                    if d.strip()
-                ],
-                blocked_domains=[
-                    d.strip()
-                    for d in settings.URL_BLOCKED_DOMAINS.split(",")
-                    if d.strip()
-                ],
-            ),
-            max_response_size=settings.URL_MAX_RESPONSE_SIZE,
+
+    def _make_executor() -> TestCaseExecutor:
+        """每个执行线程使用独立的执行器与 HTTP 客户端."""
+        return TestCaseExecutor(
+            request_builder=RequestBuilder(
+                url_policy=URLPolicy(
+                    allow_private=settings.URL_ALLOW_PRIVATE,
+                    allowed_domains=[
+                        d.strip()
+                        for d in settings.URL_ALLOWED_DOMAINS.split(",")
+                        if d.strip()
+                    ],
+                    blocked_domains=[
+                        d.strip()
+                        for d in settings.URL_BLOCKED_DOMAINS.split(",")
+                        if d.strip()
+                    ],
+                ),
+                max_response_size=settings.URL_MAX_RESPONSE_SIZE,
+            )
         )
-    )
+
     results = []
     passed = 0
     failed = 0
@@ -272,97 +277,132 @@ def batch_execute(
             db, current_user, case, "tester", owner_field=None
         )
 
+    # 1. 在主线程准备每个用例的请求定义与变量（不跨线程复用 Session）
+    prepared = []
     for case in cases:
-        case_id = case.id
-        try:
-            variables = load_case_variables(db, case)
-            env_vars, env_cookies, base_url = load_environment_context(db, case)
-            variables.update(env_vars)
-            request_def = _build_request_def_from_case(case)
-            if env_cookies:
-                from app.api.v1.execution import _build_cookie_header
+        variables = load_case_variables(db, case)
+        env_vars, env_cookies, base_url = load_environment_context(db, case)
+        variables.update(env_vars)
+        request_def = _build_request_def_from_case(
+            case, timeout=settings.BATCH_EXECUTE_REQUEST_TIMEOUT
+        )
+        if env_cookies:
+            from app.api.v1.execution import _build_cookie_header
 
-                request_def.headers = _build_cookie_header(
-                    env_cookies, request_def.headers
-                )
-            if base_url and not request_def.url.startswith("http"):
-                request_def.url = (
-                    f"{base_url.rstrip('/')}/{request_def.url.lstrip('/')}"
-                )
-            result = _executor.execute(
-                request_def=request_def,
-                assertions=[a.__dict__ for a in case.assertions],
-                variables=variables,
+            request_def.headers = _build_cookie_header(
+                env_cookies, request_def.headers
             )
-            status = result.status
-            if status == "passed":
-                passed += 1
-            elif status == "failed":
-                failed += 1
-            else:
-                errored += 1
+        if base_url and not request_def.url.startswith("http"):
+            request_def.url = (
+                f"{base_url.rstrip('/')}/{request_def.url.lstrip('/')}"
+            )
+        prepared.append(
+            {
+                "case": case,
+                "request_def": request_def,
+                "variables": variables,
+                "assertions": [a.__dict__ for a in case.assertions],
+            }
+        )
 
-            results.append({
-                "case_id": case_id,
-                "title": case.title,
-                "method": case.method,
-                # 展示变量渲染后的真实请求 URL
-                "url": result.request.url if result.request else case.url,
-                "status": status,
-                "duration": round(result.duration, 4),
-                "status_code": result.response.status_code if result.response else None,
-                "error": result.error_message,
-            })
-            # 批量执行同样写入调用历史，便于在历史记录中排查
-            try:
-                save_history(
-                    db,
-                    method=case.method,
-                    url=result.request.url if result.request else case.url,
-                    status=status,
-                    duration=result.duration,
-                    headers=(
-                        redact_sensitive_data(
-                            result.request.headers or {},
-                            transport_only=True,
-                        )
-                        if result.request
-                        else case.headers
-                    ),
-                    params=(
-                        result.request.params
-                        if result.request and result.request.params
-                        else case.params
-                    ),
-                    body=case.body,
-                    status_code=(
-                        result.response.status_code if result.response else None
-                    ),
-                    response_headers=(
-                        result.response.headers if result.response else None
-                    ),
-                    response_body=result.response.body if result.response else None,
-                    response_text=result.response.text if result.response else None,
-                    assertion_results=[
-                        r.model_dump() for r in result.assertion_results
-                    ],
-                    error_message=result.error_message,
-                    has_files=bool(case.files),
-                    source="batch_execute",
-                    test_case_id=case.id,
-                    project_id=case.project_id,
-                    created_by=current_user.id,
-                )
-            except Exception as history_exc:  # noqa: BLE001 - 历史写入失败不应影响批量执行
-                logger.warning("批量执行历史写入失败: %s", history_exc)
-        except Exception as exc:
+    # 2. 受限并发执行，缩短批量场景的总耗时（避免前端请求超时）
+    max_workers = max(1, min(settings.BATCH_EXECUTE_MAX_WORKERS, len(prepared) or 1))
+
+    def _run_prepared(item: dict) -> dict:
+        case = item["case"]
+        try:
+            result = _make_executor().execute(
+                request_def=item["request_def"],
+                assertions=item["assertions"],
+                variables=item["variables"],
+                test_case_id=case.id,
+            )
+            return {"case": case, "result": result, "error": None}
+        except Exception as exc:  # noqa: BLE001 - 单条失败不影响整批
+            return {"case": case, "result": None, "error": exc}
+
+    if max_workers == 1 or len(prepared) <= 1:
+        outcomes = [_run_prepared(item) for item in prepared]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            outcomes = list(pool.map(_run_prepared, prepared))
+
+    # 3. 汇总结果并写入调用历史（数据库操作回到主线程）
+    for outcome in outcomes:
+        case = outcome["case"]
+        case_id = case.id
+        result = outcome["result"]
+        if result is None:
             errored += 1
             results.append({
                 "case_id": case_id,
                 "title": case.title,
                 "status": "error",
-                "error": str(exc),
+                "error": str(outcome["error"]),
             })
+            continue
+
+        status = result.status
+        if status == "passed":
+            passed += 1
+        elif status == "failed":
+            failed += 1
+        else:
+            errored += 1
+
+        results.append({
+            "case_id": case_id,
+            "title": case.title,
+            "method": case.method,
+            # 展示变量渲染后的真实请求 URL
+            "url": result.request.url if result.request else case.url,
+            "status": status,
+            "duration": round(result.duration, 4),
+            "status_code": result.response.status_code if result.response else None,
+            "error": result.error_message,
+        })
+        # 批量执行同样写入调用历史，便于在历史记录中排查
+        try:
+            save_history(
+                db,
+                method=case.method,
+                url=result.request.url if result.request else case.url,
+                status=status,
+                duration=result.duration,
+                headers=(
+                    redact_sensitive_data(
+                        result.request.headers or {},
+                        transport_only=True,
+                    )
+                    if result.request
+                    else case.headers
+                ),
+                params=(
+                    result.request.params
+                    if result.request and result.request.params
+                    else case.params
+                ),
+                body=case.body,
+                status_code=(
+                    result.response.status_code if result.response else None
+                ),
+                response_headers=(
+                    result.response.headers if result.response else None
+                ),
+                response_body=result.response.body if result.response else None,
+                response_text=result.response.text if result.response else None,
+                assertion_results=[
+                    r.model_dump() for r in result.assertion_results
+                ],
+                error_message=result.error_message,
+                has_files=bool(case.files),
+                source="batch_execute",
+                test_case_id=case.id,
+                project_id=case.project_id,
+                created_by=current_user.id,
+            )
+        except Exception as history_exc:  # noqa: BLE001 - 历史写入失败不应影响批量执行
+            logger.warning("批量执行历史写入失败: %s", history_exc)
 
     # 创建批次汇总记录并更新已有 TestResult 的 run_id
     run_id = str(_uuid.uuid4())
@@ -613,7 +653,7 @@ def download_case_doc(
 
 # ---------- 辅助函数 ----------
 
-def _build_request_def_from_case(case: TestCase):
+def _build_request_def_from_case(case: TestCase, timeout: float = 30.0):
     """从 TestCase 模型构建 RequestDefinition."""
     from app.schemas.execution import RequestDefinition  # noqa: E402
 
@@ -626,5 +666,5 @@ def _build_request_def_from_case(case: TestCase):
         graphql_query=case.graphql_query,
         files=list(case.files) if case.files else None,
         extract_rules=list(case.extract_rules or []),
-        timeout=30.0,
+        timeout=timeout,
     )

@@ -130,6 +130,7 @@ def _collect_history_items(
     method: str | None = None,
     url: str | None = None,
     project_id: str | None = None,
+    source: str | None = None,
 ) -> list[dict[str, Any]]:
     """聚合当前用户可见的调用历史和终态执行任务."""
     call_stmt = scope_project_resources(
@@ -145,6 +146,8 @@ def _collect_history_items(
         call_stmt = call_stmt.where(CallHistory.url.ilike(f"%{url}%"))
     if project_id is not None:
         call_stmt = call_stmt.where(CallHistory.project_id == project_id)
+    if source:
+        call_stmt = call_stmt.where(CallHistory.source == source)
 
     sortable_items = [
         {
@@ -175,6 +178,8 @@ def _collect_history_items(
     for job in jobs:
         run = normalize_job_run(db, job)
         if status and run.get("status") != status:
+            continue
+        if source and job.job_type != source:
             continue
         if normalized_method and str(run.get("method") or "").upper() != normalized_method:
             continue
@@ -267,6 +272,7 @@ def list_history(
     method: str | None = Query(None),
     url: str | None = Query(None),
     project_id: str | None = Query(None),
+    source: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -281,6 +287,7 @@ def list_history(
         method=method,
         url=url,
         project_id=project_id,
+        source=source,
     )
     total = len(items)
     start = (page - 1) * page_size

@@ -154,9 +154,66 @@ def test_batch_execute_writes_call_history(client, monkeypatch, workspace_case, 
     # 历史接口能查到该记录
     history = client.get(
         "/api/v1/history",
-        params={"test_case_id": workspace_case.id, "page": 1, "page_size": 10},
+        params={"page": 1, "page_size": 10},
     )
     assert history.status_code == 200
     payload = history.json()
     assert payload["total"] == 1
     assert payload["data"][0]["source"] == "batch_execute"
+
+
+def test_history_source_filter(client, monkeypatch, workspace_case, db_session):
+    """历史列表支持按来源维度筛选."""
+    from app.models.call_history import CallHistory
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 200})
+
+    real_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(handler))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", patched_client)
+
+    batch = client.post(
+        "/api/v1/test-cases/batch-execute",
+        json={"case_ids": [workspace_case.id]},
+    )
+    assert batch.status_code == 200
+
+    # 再写入一条其他来源的记录，验证筛选确实生效
+    db_session.add(
+        CallHistory(
+            method="GET",
+            url="http://example.com/quick",
+            status="passed",
+            duration=0.1,
+            source="quick_test",
+            project_id=workspace_case.project_id,
+        )
+    )
+    db_session.commit()
+
+    batch_only = client.get(
+        "/api/v1/history",
+        params={"page": 1, "page_size": 10, "source": "batch_execute"},
+    )
+    assert batch_only.status_code == 200
+    batch_payload = batch_only.json()
+    assert batch_payload["total"] == 1
+    assert all(item["source"] == "batch_execute" for item in batch_payload["data"])
+
+    quick_only = client.get(
+        "/api/v1/history",
+        params={"page": 1, "page_size": 10, "source": "quick_test"},
+    )
+    assert quick_only.status_code == 200
+    quick_payload = quick_only.json()
+    assert quick_payload["total"] == 1
+    assert quick_payload["data"][0]["url"] == "http://example.com/quick"
+
+    everything = client.get("/api/v1/history", params={"page": 1, "page_size": 10})
+    assert everything.status_code == 200
+    assert everything.json()["total"] == 2

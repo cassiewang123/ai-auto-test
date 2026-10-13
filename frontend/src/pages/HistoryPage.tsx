@@ -31,6 +31,21 @@ const methodColor: Record<string, string> = {
 const statusColor: Record<string, string> = {
   passed: 'green', failed: 'red', error: 'orange', skipped: 'default',
 };
+const sourceLabels: Record<string, string> = {
+  saved_case: '用例执行',
+  batch_execute: '批量执行',
+  quick_test: '快速测试',
+  api_case: '接口任务',
+  ui_case: 'UI 任务',
+  performance: '性能场景',
+  test_plan: '测试计划',
+  scheduler: '定时任务',
+  data_driven: '数据驱动',
+};
+const sourceOptions = Object.entries(sourceLabels).map(([value, label]) => ({
+  value,
+  label: `${label}（${value}）`,
+}));
 
 export default function HistoryPage() {
   const [data, setData] = useState<CallHistoryRecord[]>([]);
@@ -41,21 +56,34 @@ export default function HistoryPage() {
   const [stats, setStats] = useState<HistoryStats | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterMethod, setFilterMethod] = useState<string>('');
+  const [filterSource, setFilterSource] = useState<string>('');
   const [filterUrl, setFilterUrl] = useState('');
 
   // 详情 Modal
   const [detail, setDetail] = useState<CallHistoryRecord | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  async function loadData(p = page, ps = pageSize) {
+  type HistoryFilters = {
+    status?: string;
+    method?: string;
+    source?: string;
+    url?: string;
+  };
+
+  async function loadData(p = page, ps = pageSize, override?: HistoryFilters) {
     setLoading(true);
     try {
+      const filters: HistoryFilters = {
+        status: filterStatus || undefined,
+        method: filterMethod || undefined,
+        source: filterSource || undefined,
+        url: filterUrl || undefined,
+        ...override,
+      };
       const res = await historyApi.list({
         page: p,
         page_size: ps,
-        status: filterStatus || undefined,
-        method: filterMethod || undefined,
-        url: filterUrl || undefined,
+        ...filters,
       });
       setData(res.data || []);
       setTotal(res.total);
@@ -183,7 +211,12 @@ export default function HistoryPage() {
             allowClear
             style={{ width: 140 }}
             value={filterStatus || undefined}
-            onChange={(v) => setFilterStatus(v || '')}
+            onChange={(v) => {
+              const next = v || '';
+              setFilterStatus(next);
+              setPage(1);
+              loadData(1, pageSize, { status: next || undefined });
+            }}
             options={[
               { label: 'passed', value: 'passed' },
               { label: 'failed', value: 'failed' },
@@ -196,8 +229,26 @@ export default function HistoryPage() {
             allowClear
             style={{ width: 120 }}
             value={filterMethod || undefined}
-            onChange={(v) => setFilterMethod(v || '')}
+            onChange={(v) => {
+              const next = v || '';
+              setFilterMethod(next);
+              setPage(1);
+              loadData(1, pageSize, { method: next || undefined });
+            }}
             options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({ label: m, value: m }))}
+          />
+          <Select
+            placeholder="按来源筛选"
+            allowClear
+            style={{ width: 190 }}
+            value={filterSource || undefined}
+            onChange={(v) => {
+              const next = v || '';
+              setFilterSource(next);
+              setPage(1);
+              loadData(1, pageSize, { source: next || undefined });
+            }}
+            options={sourceOptions}
           />
           <Input.Search
             placeholder="搜索 URL"
@@ -205,9 +256,9 @@ export default function HistoryPage() {
             style={{ flex: '1 1 220px', minWidth: 0, maxWidth: 300 }}
             value={filterUrl}
             onChange={(e) => setFilterUrl(e.target.value)}
-            onSearch={() => {
+            onSearch={(v) => {
               setPage(1);
-              loadData(1);
+              loadData(1, pageSize, { url: v || undefined });
             }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => { loadData(); loadStats(); }}>
@@ -269,8 +320,10 @@ export default function HistoryPage() {
             {
               title: '来源',
               dataIndex: 'source',
-              width: 100,
-              render: (s: string) => <Tag>{s}</Tag>,
+              width: 110,
+              render: (s: string) => (
+                <Tag>{sourceLabels[s] || s}</Tag>
+              ),
             },
             {
               title: '文件',

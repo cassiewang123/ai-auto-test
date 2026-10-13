@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     # 执行安全
     ALLOW_SYNC_EXECUTION: bool = True  # 生产环境应设为 False
     SCRIPT_EXECUTION_TIMEOUT: int = 30  # 脚本执行超时（秒）
+    # 批量执行的并发线程数（受限于被调用方的承载能力，默认保守值）
+    BATCH_EXECUTE_MAX_WORKERS: int = 8
+    # 批量执行中单条请求的超时（秒），比默认 30s 更宽松，避免慢接口直接失败
+    BATCH_EXECUTE_REQUEST_TIMEOUT: float = 60.0
 
     # 文件产物
     ARTIFACT_ROOT: Path = Path(".uploads")

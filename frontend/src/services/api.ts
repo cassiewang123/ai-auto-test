@@ -90,7 +90,7 @@ export const testCaseApi = {
   copy: (id: string) =>
     api.post<unknown, ApiResponse<TestCase>>(`/test-cases/${id}/copy`),
   batchExecute: (caseIds: string[]) =>
-    api.post<unknown, ApiResponse<BatchExecuteResult>>('/test-cases/batch-execute', { case_ids: caseIds }),
+    api.post<unknown, ApiResponse<BatchExecuteResult>>('/test-cases/batch-execute', { case_ids: caseIds }, { timeout: 900000 }),
   batchDelete: (caseIds: string[]) =>
     api.post<unknown, ApiResponse<BatchDeleteResult>>('/test-cases/batch-delete', { case_ids: caseIds }),
   batchMove: (caseIds: string[], projectId: string | null) =>
@@ -395,6 +395,7 @@ export const historyApi = {
     method?: string;
     url?: string;
     project_id?: string;
+    source?: string;
   }) => api.get<unknown, PageResponse<CallHistoryRecord>>('/history', { params }),
   get: (id: string) =>
     api.get<unknown, ApiResponse<CallHistoryRecord>>(`/history/${id}`),
