@@ -870,11 +870,12 @@ def run_saved_case(
     save_history(
         db,
         method=case.method,
-        url=case_url,
+        # 记录实际发出的请求：变量渲染后的 URL 与请求头
+        url=result.request.url if result.request else case_url,
         status=result.status,
         duration=result.duration,
-        headers=request_headers,
-        params=case.params,
+        headers=result.request.headers if result.request else request_headers,
+        params=result.request.params if result.request else case.params,
         body=case.body,
         status_code=result.response.status_code if result.response else None,
         response_headers=result.response.headers if result.response else None,

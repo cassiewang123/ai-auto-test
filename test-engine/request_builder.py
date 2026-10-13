@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -46,11 +47,14 @@ class RequestBuilder:
 
     # ---------------- 公共 API ----------------
     def send(self, request_def: RequestDefinition, variables: dict | None = None) -> ResponseData:
-        """渲染变量并发送请求，返回 ResponseData。网络/超时异常会向上抛出."""
+        """渲染变量并发送请求，返回 ResponseData。网络/超时异常会向上抛出.
+
+        渲染后的 url / headers / params 会写回 request_def，便于调用方记录真实请求。
+        """
         variables = variables or {}
         method = request_def.method.upper()
 
-        url = self._render_str(request_def.url, variables)
+        url = self._render_url(request_def.url, variables)
 
         # SEC-05: URL 出站策略校验
         if self._url_policy is not None:
@@ -60,6 +64,9 @@ class RequestBuilder:
 
         headers = self._render_mapping(request_def.headers, variables)
         params = self._render_mapping(request_def.params, variables)
+        request_def.url = url
+        request_def.headers = headers
+        request_def.params = params
 
         request_kwargs: dict[str, Any] = {"headers": headers, "params": params}
         self._fill_body(request_kwargs, request_def, variables)
@@ -178,6 +185,26 @@ class RequestBuilder:
         )
 
     # ---------------- 模板渲染 ----------------
+    @classmethod
+    def _render_url(cls, value: str, variables: dict) -> str:
+        """渲染 URL 并规范化路径.
+
+        变量值常带前导/尾随斜杠（如 contentContext=/gateway），与模板中的 "/" 叠加后
+        会产生 "//gateway" 这类路径，网关通常会路由失败。
+        """
+        if not isinstance(value, str):
+            return value
+        return cls._collapse_path_slashes(cls._render_str(value, variables))
+
+    @staticmethod
+    def _collapse_path_slashes(url: str) -> str:
+        """合并 URL 路径中的重复斜杠，保留 scheme:// 与查询参数原样."""
+        if "://" not in url:
+            return re.sub(r"/{2,}", "/", url)
+        parts = urlsplit(url)
+        path = re.sub(r"/{2,}", "/", parts.path)
+        return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
     @classmethod
     def _render_str(cls, value: str, variables: dict) -> str:
         if not isinstance(value, str):

@@ -276,6 +276,34 @@ class TestVariableRendering:
         )
         assert captured["body"] == {"name": "alice"}
 
+    def test_variable_value_with_slashes_does_not_double_path_separator(self):
+        """变量值带前导/尾随斜杠时（Postman contentContext），路径应合并为单斜杠."""
+        captured = {}
+
+        def handler(request):
+            captured["url"] = str(request.url)
+            return httpx.Response(200, json={"ok": True})
+
+        request_def = RequestDefinition(
+            method="POST",
+            url="{{proto}}://{{host}}:{{port}}/{{context}}/{{version}}/apiService/queryPage",
+        )
+        make_builder(handler).send(
+            request_def,
+            variables={
+                "proto": "http",
+                "host": "192.168.120.82",
+                "port": "9002",
+                "context": "/swgdimapgateway/swgd-imap-content",
+                "version": "v1",
+            },
+        )
+        assert captured["url"] == (
+            "http://192.168.120.82:9002/swgdimapgateway/swgd-imap-content/v1/apiService/queryPage"
+        )
+        # 渲染后的 URL 写回请求定义，便于历史记录展示真实请求
+        assert request_def.url == captured["url"]
+
 
 # ----------------------------- 响应解析 / 耗时 -----------------------------
 class TestResponseAndTiming:
