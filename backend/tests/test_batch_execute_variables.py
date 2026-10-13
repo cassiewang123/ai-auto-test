@@ -112,3 +112,51 @@ def test_batch_execute_renders_workspace_variables(client, monkeypatch, workspac
     assert captured["eptoken"] == "token-123"
     # 返回结果里展示的也应是渲染后的真实 URL
     assert data["results"][0]["url"] == captured["url"]
+
+
+def test_batch_execute_writes_call_history(client, monkeypatch, workspace_case, db_session):
+    from app.models.call_history import CallHistory
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 200})
+
+    real_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(handler))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", patched_client)
+
+    response = client.post(
+        "/api/v1/test-cases/batch-execute",
+        json={"case_ids": [workspace_case.id]},
+    )
+    assert response.status_code == 200
+
+    records = (
+        db_session.query(CallHistory)
+        .filter(
+            CallHistory.test_case_id == workspace_case.id,
+            CallHistory.source == "batch_execute",
+        )
+        .all()
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.url == (
+        "http://192.168.120.82:9002/swgdimapgateway/swgd-imap-content/v1/apiService/queryPage"
+    )
+    assert record.status == "passed"
+    assert record.status_code == 200
+    assert "swgdimapgateway" in record.url
+
+    # 历史接口能查到该记录
+    history = client.get(
+        "/api/v1/history",
+        params={"test_case_id": workspace_case.id, "page": 1, "page_size": 10},
+    )
+    assert history.status_code == 200
+    payload = history.json()
+    assert payload["total"] == 1
+    assert payload["data"][0]["source"] == "batch_execute"

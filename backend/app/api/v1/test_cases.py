@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid as _uuid
 from typing import Any
 from urllib.parse import quote
@@ -30,8 +31,10 @@ from app.services.project_access import (
     ensure_resource_role,
     scope_project_resources,
 )
+from app.services.security.data_redaction import redact_sensitive_data
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _get_or_404(db: Session, case_id: str) -> TestCase:
@@ -233,6 +236,8 @@ def batch_execute(
     from test_engine.executor import TestCaseExecutor
     from test_engine.request_builder import RequestBuilder
 
+    # 延迟导入，避免 history 模块与 test_cases 模块形成循环依赖
+    from app.api.v1.history import save_history
     from app.config import get_settings
     from app.services.execution.variables import load_environment_context
     from app.services.security.url_policy import URLPolicy
@@ -308,6 +313,48 @@ def batch_execute(
                 "status_code": result.response.status_code if result.response else None,
                 "error": result.error_message,
             })
+            # 批量执行同样写入调用历史，便于在历史记录中排查
+            try:
+                save_history(
+                    db,
+                    method=case.method,
+                    url=result.request.url if result.request else case.url,
+                    status=status,
+                    duration=result.duration,
+                    headers=(
+                        redact_sensitive_data(
+                            result.request.headers or {},
+                            transport_only=True,
+                        )
+                        if result.request
+                        else case.headers
+                    ),
+                    params=(
+                        result.request.params
+                        if result.request and result.request.params
+                        else case.params
+                    ),
+                    body=case.body,
+                    status_code=(
+                        result.response.status_code if result.response else None
+                    ),
+                    response_headers=(
+                        result.response.headers if result.response else None
+                    ),
+                    response_body=result.response.body if result.response else None,
+                    response_text=result.response.text if result.response else None,
+                    assertion_results=[
+                        r.model_dump() for r in result.assertion_results
+                    ],
+                    error_message=result.error_message,
+                    has_files=bool(case.files),
+                    source="batch_execute",
+                    test_case_id=case.id,
+                    project_id=case.project_id,
+                    created_by=current_user.id,
+                )
+            except Exception as history_exc:  # noqa: BLE001 - 历史写入失败不应影响批量执行
+                logger.warning("批量执行历史写入失败: %s", history_exc)
         except Exception as exc:
             errored += 1
             results.append({
