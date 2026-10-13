@@ -15,6 +15,7 @@ from app.models import TestCase
 from app.models.scheduled_task import ScheduledTask
 from app.models.test_run_summary import TestRunSummary
 from app.schemas.common import DataResponse, PageResponse
+from app.services.execution.variables import load_case_variables
 
 router = APIRouter()
 
@@ -127,6 +128,7 @@ def run_task_now(task_id: str, db: Session = Depends(get_db)):
         raise NotFoundError("定时任务", task_id)
 
     from test_engine.executor import TestCaseExecutor
+
     from app.schemas.execution import RequestDefinition
 
     _executor = TestCaseExecutor()
@@ -162,7 +164,7 @@ def run_task_now(task_id: str, db: Session = Depends(get_db)):
             result = _executor.execute(
                 request_def=req_def,
                 assertions=[a.__dict__ for a in case.assertions],
-                variables={},
+                variables=load_case_variables(db, case),
             )
             status = result.status
             if status == "passed":

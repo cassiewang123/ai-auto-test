@@ -23,6 +23,7 @@ from app.schemas.test_case import (
     TestCaseUpdate,
 )
 from app.services.auth_service import get_current_user
+from app.services.execution.variables import load_case_variables
 from app.services.project_access import (
     ensure_project_assignment,
     ensure_project_role,
@@ -230,8 +231,31 @@ def batch_execute(
 ):
     """批量执行测试用例，返回每个用例的执行结果摘要."""
     from test_engine.executor import TestCaseExecutor
+    from test_engine.request_builder import RequestBuilder
 
-    _executor = TestCaseExecutor()
+    from app.config import get_settings
+    from app.services.execution.variables import load_environment_context
+    from app.services.security.url_policy import URLPolicy
+
+    settings = get_settings()
+    _executor = TestCaseExecutor(
+        request_builder=RequestBuilder(
+            url_policy=URLPolicy(
+                allow_private=settings.URL_ALLOW_PRIVATE,
+                allowed_domains=[
+                    d.strip()
+                    for d in settings.URL_ALLOWED_DOMAINS.split(",")
+                    if d.strip()
+                ],
+                blocked_domains=[
+                    d.strip()
+                    for d in settings.URL_BLOCKED_DOMAINS.split(",")
+                    if d.strip()
+                ],
+            ),
+            max_response_size=settings.URL_MAX_RESPONSE_SIZE,
+        )
+    )
     results = []
     passed = 0
     failed = 0
@@ -246,10 +270,24 @@ def batch_execute(
     for case in cases:
         case_id = case.id
         try:
+            variables = load_case_variables(db, case)
+            env_vars, env_cookies, base_url = load_environment_context(db, case)
+            variables.update(env_vars)
+            request_def = _build_request_def_from_case(case)
+            if env_cookies:
+                from app.api.v1.execution import _build_cookie_header
+
+                request_def.headers = _build_cookie_header(
+                    env_cookies, request_def.headers
+                )
+            if base_url and not request_def.url.startswith("http"):
+                request_def.url = (
+                    f"{base_url.rstrip('/')}/{request_def.url.lstrip('/')}"
+                )
             result = _executor.execute(
-                request_def=_build_request_def_from_case(case),
+                request_def=request_def,
                 assertions=[a.__dict__ for a in case.assertions],
-                variables={},
+                variables=variables,
             )
             status = result.status
             if status == "passed":
@@ -263,7 +301,8 @@ def batch_execute(
                 "case_id": case_id,
                 "title": case.title,
                 "method": case.method,
-                "url": case.url,
+                # 展示变量渲染后的真实请求 URL
+                "url": result.request.url if result.request else case.url,
                 "status": status,
                 "duration": round(result.duration, 4),
                 "status_code": result.response.status_code if result.response else None,

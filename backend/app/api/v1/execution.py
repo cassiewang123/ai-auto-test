@@ -299,45 +299,17 @@ def _merge_cookies(existing: list[dict], new: list[dict]) -> list[dict]:
 
 
 def _load_global_variables(db: Session, project_id: str | None = None) -> dict[str, Any]:
-    """从数据库加载全局变量并按类型转换，返回变量字典."""
-    from app.models import GlobalVariable
+    """从数据库加载全局/工作空间变量，返回变量字典."""
+    from app.services.execution.variables import load_global_variables
 
-    query = db.query(GlobalVariable)
-    if project_id:
-        # 全局变量 + 该项目的工作空间变量
-        from sqlalchemy import or_
-
-        query = query.filter(
-            or_(
-                GlobalVariable.scope == "global",
-                GlobalVariable.project_id == project_id,
-            )
-        )
-    else:
-        query = query.filter(GlobalVariable.scope == "global")
-
-    variables: dict[str, Any] = {}
-    for var in query.all():
-        variables[var.name] = _cast_variable(var.value, var.var_type)
-    return variables
+    return load_global_variables(db, project_id)
 
 
 def _cast_variable(value: str | None, var_type: str) -> Any:
     """按变量类型转换字符串值为对应 Python 类型."""
-    if value is None:
-        return ""
-    try:
-        if var_type == "number":
-            if "." in str(value):
-                return float(value)
-            return int(value)
-        if var_type == "boolean":
-            return str(value).lower() in ("true", "1", "yes")
-        if var_type == "json":
-            return json.loads(value)
-    except (ValueError, TypeError):
-        pass
-    return value
+    from app.services.execution.variables import cast_variable
+
+    return cast_variable(value, var_type)
 
 
 def _resolve_environment_url(url: str, base_url: str | None) -> str:

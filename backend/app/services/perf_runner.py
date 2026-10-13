@@ -206,8 +206,16 @@ def execute_performance_test(test_id: str, run_id: str | None = None) -> str:
             perf_realtime.set_status(test_id, "failed", error="关联的测试用例均不存在")
             return run_id
 
+        from app.services.execution.variables import load_case_variables
+
         request_defs = [
-            (_build_request_def_from_case(c), [a.__dict__ for a in c.assertions], c.id, c.title)
+            (
+                _build_request_def_from_case(c),
+                [a.__dict__ for a in c.assertions],
+                c.id,
+                c.title,
+                load_case_variables(db, c),
+            )
             for c in cases
         ]
 
@@ -221,7 +229,7 @@ def execute_performance_test(test_id: str, run_id: str | None = None) -> str:
         recent_times: deque[float] = deque(maxlen=500)
         counters = {"success": 0, "fail": 0}
         detail_stats: dict[str, Any] = {}
-        for _, _, cid, title in request_defs:
+        for _, _, cid, title, _vars in request_defs:
             detail_stats[cid] = {
                 "title": title, "count": 0, "success": 0, "fail": 0,
                 "response_times": [],
@@ -234,10 +242,10 @@ def execute_performance_test(test_id: str, run_id: str | None = None) -> str:
             """单个虚拟用户在当前阶段内循环执行用例。"""
             idx = user_index % len(request_defs)
             while time.perf_counter() < deadline_ts:
-                req_def, assertions, cid, _ = request_defs[idx]
+                req_def, assertions, cid, _title, case_vars = request_defs[idx]
                 try:
                     result = executor_instance.execute(
-                        request_def=req_def, assertions=assertions, variables={},
+                        request_def=req_def, assertions=assertions, variables=case_vars,
                     )
                     rt = _seconds_to_milliseconds(result.duration)
                     with lock:

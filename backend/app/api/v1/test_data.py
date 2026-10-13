@@ -22,12 +22,12 @@ from app.models.test_case import TestCase
 from app.models.test_data_set import TestDataSet
 from app.schemas.common import DataResponse, PageResponse
 from app.schemas.test_data import (
+    DataDrivenExecutionRequest,
+    DataDrivenExecutionResult,
     DataSetCreate,
     DataSetPreviewResponse,
     DataSetResponse,
     DataSetUpdate,
-    DataDrivenExecutionRequest,
-    DataDrivenExecutionResult,
 )
 from app.services.data_driven_service import (
     execute_data_driven,
@@ -35,6 +35,7 @@ from app.services.data_driven_service import (
     parse_csv,
     parse_json,
 )
+from app.services.execution.variables import load_global_variables
 
 router = APIRouter()
 
@@ -138,7 +139,12 @@ def execute_data_driven_endpoint(
     if env_id:
         environment = db.get(Environment, env_id)
 
-    results = execute_data_driven(case, data_rows, environment)
+    results = execute_data_driven(
+        case,
+        data_rows,
+        environment,
+        base_variables=load_global_variables(db, case.project_id),
+    )
     passed = sum(1 for r in results if r["status"] == "passed")
     failed = sum(1 for r in results if r["status"] != "passed")
 

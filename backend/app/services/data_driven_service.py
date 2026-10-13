@@ -125,11 +125,12 @@ def execute_data_driven(
     test_case: Any,
     data_rows: list[dict[str, Any]],
     environment: Any | None = None,
+    base_variables: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """遍历每行数据，替换变量，执行用例，收集结果.
 
     对每行数据：
-        1. 合并环境变量 + 当前行数据（行数据优先）
+        1. 合并全局/工作空间变量 + 环境变量 + 当前行数据（后者覆盖前者）
         2. 替换 url/headers/params/body 中的 {{var}}（兼容 ${var}）
         3. 调用 TestCaseExecutor 执行请求与断言
         4. 记录行号、输入数据、响应状态、断言结果
@@ -138,6 +139,7 @@ def execute_data_driven(
         test_case: TestCase ORM 模型实例。
         data_rows: 解析后的数据行列表。
         environment: 可选的 Environment ORM 模型实例，提供 base_url 与变量。
+        base_variables: 可选的基础变量池（全局/工作空间变量），调用方从数据库加载。
 
     Returns:
         每行数据的执行结果列表。
@@ -175,8 +177,8 @@ def execute_data_driven(
 
     results: list[dict[str, Any]] = []
     for index, row in enumerate(data_rows):
-        # 合并变量：环境变量 + 当前行数据（行数据优先）
-        merged_vars = {**env_vars, **row}
+        # 合并变量：基础变量 + 环境变量 + 当前行数据（后者优先）
+        merged_vars = {**(base_variables or {}), **env_vars, **row}
 
         # 替换变量（{{var}} 标准语法，兼容 ${var}）
         url = substitute_variables(test_case.url, merged_vars)
