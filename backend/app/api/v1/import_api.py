@@ -1,8 +1,12 @@
-"""接口导入 API：从 OpenAPI/Swagger 规范批量生成测试用例.
+"""接口导入 API：从 OpenAPI/Swagger、HAR、Postman Collection 批量生成测试用例.
 
 端点：
-    POST /api/v1/import/openapi  — 解析 OpenAPI JSON 并批量创建用例
-    POST /api/v1/import/preview  — 预览解析结果（不创建）
+    POST /api/v1/import/openapi          — 解析 OpenAPI JSON 并批量创建用例
+    POST /api/v1/import/preview          — 预览 OpenAPI 解析结果（不创建）
+    POST /api/v1/import/har/preview      — 预览 HAR 抓包解析结果
+    POST /api/v1/import/har/import       — 将选中的 HAR 接口创建为用例
+    POST /api/v1/import/postman/preview  — 预览 Postman Collection 解析结果
+    POST /api/v1/import/postman/import   — 将选中的 Postman 请求创建为用例
 """
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppException
 from app.database import get_db
 from app.models.test_case import AssertionRule, TestCase
 from app.schemas.common import DataResponse
@@ -447,3 +452,131 @@ def import_har(payload: HarImportRequest, db: Session = Depends(get_db)):
         created_ids.append(case.id)
     db.commit()
     return DataResponse(data={"created_count": len(created_ids), "case_ids": created_ids})
+
+
+# ---------------------------------------------------------------------------
+# Postman Collection 导入
+# ---------------------------------------------------------------------------
+class PostmanPreviewRequest(BaseModel):
+    collection: dict
+    variables: dict | None = None
+    default_headers: dict | None = None
+
+
+class PostmanImportRequest(BaseModel):
+    selected_interfaces: list[dict]
+    project_id: str | None = None
+    # 是否把集合变量写入工作区全局变量（已存在的同名变量不覆盖）
+    import_variables: bool = True
+
+
+def _postman_case_kwargs(iface: dict, project_id: str | None) -> dict:
+    """将 Postman 预览项转换为 TestCase 字段."""
+    return {
+        "title": iface.get("suggested_name") or iface.get("name") or iface.get("path", "未命名接口"),
+        "description": f"Postman 导入：{iface.get('group_path') or '未分组'}",
+        "group_path": iface.get("group_path") or None,
+        "method": iface["method"],
+        "url": iface.get("url") or iface.get("full_url") or iface.get("path", ""),
+        "headers": iface.get("headers", {}),
+        "params": iface.get("params", {}),
+        "body": iface.get("body"),
+        "files": iface.get("files"),
+        "project_id": project_id,
+        "markers": ["api", "postman_imported"],
+    }
+
+
+@router.post("/postman/preview", response_model=DataResponse[dict])
+def preview_postman(payload: PostmanPreviewRequest, db: Session = Depends(get_db)):
+    """解析 Postman Collection，返回接口预览、分组、变量缺口."""
+    from app.services.postman_importer import parse_postman_collection
+
+    try:
+        endpoints, warnings, merged_variables = parse_postman_collection(
+            payload.collection,
+            variables=payload.variables,
+            default_headers=payload.default_headers,
+        )
+    except ValueError as exc:
+        raise AppException(status_code=422, message=str(exc)) from exc
+
+    groups = sorted({item.get("group_path") or "未分组" for item in endpoints})
+    methods: dict[str, int] = {}
+    unresolved: list[str] = []
+    for endpoint in endpoints:
+        methods[endpoint["method"]] = methods.get(endpoint["method"], 0) + 1
+        for variable in endpoint.get("variables", []):
+            if variable not in unresolved:
+                unresolved.append(variable)
+
+    return DataResponse(
+        data={
+            "interfaces": [
+                {**endpoint, "resolved_variables": merged_variables}
+                for endpoint in endpoints
+            ],
+            "total": len(endpoints),
+            "groups": groups,
+            "methods": methods,
+            "warnings": warnings,
+            "variables": merged_variables,
+            "unresolved_variables": unresolved,
+            "upload_count": sum(1 for item in endpoints if item.get("has_upload")),
+        }
+    )
+
+
+@router.post("/postman/import", response_model=DataResponse[dict])
+def import_postman(payload: PostmanImportRequest, db: Session = Depends(get_db)):
+    """将选中的 Postman 请求批量创建为 TestCase."""
+    created_ids = []
+    variables: dict[str, str] = {}
+    for iface in payload.selected_interfaces:
+        case = TestCase(**_postman_case_kwargs(iface, payload.project_id))
+        db.add(case)
+        db.flush()
+        # Postman 集合不携带响应定义，默认生成 200 状态码断言
+        for assertion in _auto_generate_assertions(iface):
+            db.add(AssertionRule(test_case_id=case.id, **assertion))
+        created_ids.append(case.id)
+        for name, value in (iface.get("resolved_variables") or {}).items():
+            if value != "":
+                variables.setdefault(name, value)
+
+    imported_variables = 0
+    if payload.import_variables and variables:
+        from app.models.global_variable import GlobalVariable
+
+        for name, value in variables.items():
+            exists = (
+                db.query(GlobalVariable)
+                .filter(
+                    GlobalVariable.name == name,
+                    GlobalVariable.scope == "workspace",
+                    GlobalVariable.project_id == payload.project_id,
+                )
+                .first()
+            )
+            if exists:
+                continue
+            db.add(
+                GlobalVariable(
+                    name=name,
+                    value=value,
+                    var_type="string",
+                    description="Postman 集合导入",
+                    scope="workspace",
+                    project_id=payload.project_id,
+                )
+            )
+            imported_variables += 1
+
+    db.commit()
+    return DataResponse(
+        data={
+            "created_count": len(created_ids),
+            "case_ids": created_ids,
+            "imported_variables": imported_variables,
+        }
+    )

@@ -457,6 +457,39 @@ export const importApi = {
       '/import/har/import',
       data
     ),
+  // Postman Collection 导入：预览解析结果
+  previewPostman: (data: {
+    collection: any;
+    variables?: Record<string, string>;
+    default_headers?: Record<string, string>;
+  }) =>
+    api.post<
+      unknown,
+      ApiResponse<{
+        total: number;
+        interfaces: any[];
+        groups: string[];
+        methods: Record<string, number>;
+        warnings: string[];
+        variables: Record<string, string>;
+        unresolved_variables: string[];
+        upload_count: number;
+      }>
+    >('/import/postman/preview', data),
+  // Postman Collection 导入：批量创建用例并按需写入工作区变量
+  importPostman: (data: {
+    selected_interfaces: any[];
+    project_id?: string;
+    import_variables?: boolean;
+  }) =>
+    api.post<
+      unknown,
+      ApiResponse<{
+        created_count: number;
+        case_ids: string[];
+        imported_variables: number;
+      }>
+    >('/import/postman/import', data),
 };
 
 // ========== 项目管理 ==========

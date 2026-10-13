@@ -18,6 +18,7 @@ import {
   Select,
   Form,
   Upload,
+  Checkbox,
 } from 'antd';
 import {
   ImportOutlined,
@@ -71,6 +72,25 @@ export default function ImportPage() {
   const [harInterfaces, setHarInterfaces] = useState<any[]>([]);
   const [harSelectedKeys, setHarSelectedKeys] = useState<Key[]>([]);
   const [harHasResults, setHarHasResults] = useState(false);
+
+  // Postman Collection 导入相关状态
+  const [postmanCollection, setPostmanCollection] = useState<any>(null);
+  const [postmanFileName, setPostmanFileName] = useState('');
+  const [postmanToken, setPostmanToken] = useState('');
+  const [postmanProjectId, setPostmanProjectId] = useState<string | undefined>(undefined);
+  const [postmanImportVariables, setPostmanImportVariables] = useState(true);
+  const [postmanLoading, setPostmanLoading] = useState(false);
+  const [postmanImporting, setPostmanImporting] = useState(false);
+  const [postmanInterfaces, setPostmanInterfaces] = useState<any[]>([]);
+  const [postmanSelectedKeys, setPostmanSelectedKeys] = useState<Key[]>([]);
+  const [postmanSummary, setPostmanSummary] = useState<{
+    total: number;
+    groups: string[];
+    methods: Record<string, number>;
+    warnings: string[];
+    unresolved: string[];
+    uploadCount: number;
+  } | null>(null);
 
   // 项目相关
   const [projects, setProjects] = useState<Project[]>([]);
@@ -316,6 +336,89 @@ export default function ImportPage() {
     }
   }
 
+  // Postman Collection：预览解析
+  async function handlePostmanPreview() {
+    if (!postmanCollection) {
+      message.warning('请先上传 Postman Collection 文件');
+      return;
+    }
+    setPostmanLoading(true);
+    setPostmanInterfaces([]);
+    setPostmanSelectedKeys([]);
+    setPostmanSummary(null);
+    try {
+      const variables: Record<string, string> = {};
+      if (postmanToken.trim()) {
+        variables.epToken = postmanToken.trim();
+      }
+      const res = await importApi.previewPostman({
+        collection: postmanCollection,
+        variables,
+      });
+      const data = res.data;
+      setPostmanInterfaces(data.interfaces || []);
+      setPostmanSelectedKeys((data.interfaces || []).map((_, index) => index));
+      setPostmanSummary({
+        total: data.total,
+        groups: data.groups || [],
+        methods: data.methods || {},
+        warnings: data.warnings || [],
+        unresolved: data.unresolved_variables || [],
+        uploadCount: data.upload_count || 0,
+      });
+      message.success(`解析到 ${data.total} 个请求，覆盖 ${data.groups?.length || 0} 个分组`);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setPostmanLoading(false);
+    }
+  }
+
+  // Postman Collection：导入选中请求
+  async function handlePostmanImport() {
+    if (postmanSelectedKeys.length === 0) {
+      message.warning('请至少选择一个接口');
+      return;
+    }
+    if (postmanImportVariables && !postmanProjectId) {
+      message.warning('写入集合变量需要先选择导入项目');
+      return;
+    }
+    setPostmanImporting(true);
+    try {
+      const selected = postmanSelectedKeys.map((key) => postmanInterfaces[key as number]);
+      const res = await importApi.importPostman({
+        selected_interfaces: selected,
+        project_id: postmanProjectId,
+        import_variables: postmanImportVariables,
+      });
+      const result = res.data;
+      message.success(`成功导入 ${result.created_count} 个测试用例`);
+      Modal.success({
+        title: '导入完成',
+        content: (
+          <div>
+            <p>成功创建 {result.created_count} 个测试用例</p>
+            <p>写入工作区变量 {result.imported_variables} 个</p>
+            {postmanSummary?.unresolved?.includes('epToken') && (
+              <p style={{ color: '#d97706' }}>
+                提示：epToken 仍为空，请在变量管理中补充有效值后再执行请求。
+              </p>
+            )}
+            <p style={{ marginTop: 16 }}>
+              可前往接口列表查看，或在用例管理中批量执行。
+            </p>
+          </div>
+        ),
+        onOk: () => navigate('/api-list'),
+      });
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setPostmanImporting(false);
+    }
+  }
+
   // 新建项目
   async function handleCreateProject() {
     try {
@@ -349,7 +452,7 @@ export default function ImportPage() {
             <ImportOutlined />
             <span>接口导入</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
-              从 OpenAPI/Swagger 文档或页面抓取自动解析接口并生成测试用例
+              从 OpenAPI/Swagger、页面抓取、HAR 抓包或 Postman Collection 自动解析接口并生成测试用例
             </span>
           </Space>
         }
@@ -573,6 +676,119 @@ export default function ImportPage() {
                       </Button>
                     </Col>
                   </Row>
+                </div>
+              ),
+            },
+            {
+              key: 'postman',
+              label: 'Postman Collection',
+              children: (
+                <div>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    title="上传 Postman Collection v2.x 文件，系统将按文件夹导入请求并保留 {{变量}} 模板"
+                    description="建议同时上传/填写 Postman 环境中的 epToken、contentHost 等变量，执行时由工作区变量渲染。集合中的文件上传请求需要导入后手动选择文件。"
+                  />
+                  <Upload.Dragger
+                    accept=".json"
+                    maxCount={1}
+                    beforeUpload={(file) => {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        try {
+                          const content = JSON.parse(event.target?.result as string);
+                          const schema = content?.info?.schema || '';
+                          if (schema && !String(schema).includes('/collection/v2')) {
+                            message.error('仅支持 Postman Collection v2.x 文件');
+                            return;
+                          }
+                          setPostmanCollection(content);
+                          setPostmanFileName(file.name);
+                          setPostmanInterfaces([]);
+                          setPostmanSelectedKeys([]);
+                          setPostmanSummary(null);
+                          message.success(`已加载集合：${file.name}`);
+                        } catch {
+                          message.error('Collection 文件解析失败，请确认是合法 JSON');
+                        }
+                      };
+                      reader.readAsText(file);
+                      return false;
+                    }}
+                  >
+                    <p className="ant-upload-drag-icon">
+                      <InboxOutlined />
+                    </p>
+                    <p className="ant-upload-text">点击或拖拽 Postman Collection JSON 到此处</p>
+                    <p className="ant-upload-hint">支持 Postman Collection v2.0 / v2.1，不执行脚本</p>
+                  </Upload.Dragger>
+                  {postmanFileName && (
+                    <div style={{ marginTop: 8, color: '#6b7280' }}>
+                      已加载文件：<Tag color="blue">{postmanFileName}</Tag>
+                    </div>
+                  )}
+                  <Row gutter={16} style={{ marginTop: 16 }}>
+                    <Col xs={24} md={10}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        导入到项目（可选）
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Select
+                          value={postmanProjectId}
+                          onChange={(value) => setPostmanProjectId(value)}
+                          placeholder="选择导入到的项目"
+                          showSearch
+                          optionFilterProp="label"
+                          style={{ flex: 1 }}
+                          options={projects.map((project) => ({
+                            value: project.id,
+                            label: project.name,
+                          }))}
+                        />
+                        <Button
+                          icon={<PlusOutlined />}
+                          onClick={() => setProjectModalOpen(true)}
+                        >
+                          新建项目
+                        </Button>
+                      </div>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        epToken（可选）
+                      </label>
+                      <Input.Password
+                        value={postmanToken}
+                        onChange={(event) => setPostmanToken(event.target.value)}
+                        placeholder="集合变量中的令牌，留空则导入后补充"
+                      />
+                    </Col>
+                    <Col
+                      xs={24}
+                      md={6}
+                      style={{ display: 'flex', alignItems: 'flex-end' }}
+                    >
+                      <Button
+                        type="primary"
+                        icon={<EyeOutlined />}
+                        loading={postmanLoading}
+                        onClick={handlePostmanPreview}
+                        size="large"
+                        disabled={!postmanCollection}
+                      >
+                        预览解析结果
+                      </Button>
+                    </Col>
+                  </Row>
+                  <Checkbox
+                    style={{ marginTop: 12 }}
+                    checked={postmanImportVariables}
+                    onChange={(event) => setPostmanImportVariables(event.target.checked)}
+                  >
+                    将集合变量写入所选项目的工作区变量（同名变量不覆盖）
+                  </Checkbox>
                 </div>
               ),
             },
@@ -857,6 +1073,147 @@ export default function ImportPage() {
             />
           )}
         </Card>
+      )}
+
+      {/* Postman Collection 预览结果 */}
+      {activeTab === 'postman' && postmanLoading && (
+        <Card style={{ marginTop: 16, textAlign: 'center' }}>
+          <Spin size="large" description="正在解析 Postman Collection..." />
+        </Card>
+      )}
+
+      {activeTab === 'postman' && postmanSummary && !postmanLoading && (
+        <>
+          {postmanSummary.unresolved.length > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              showIcon
+              title={`有 ${postmanSummary.unresolved.length} 个变量在集合中为空`}
+              description={
+                <span>
+                  未解析变量：{postmanSummary.unresolved.map((name) => (
+                    <Tag key={name}>{name}</Tag>
+                  ))}
+                  导入后可在「变量管理」中补充，执行时会自动渲染。
+                </span>
+              }
+            />
+          )}
+          {postmanSummary.warnings.length > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              showIcon
+              title={`有 ${postmanSummary.warnings.length} 条解析提示`}
+              description={postmanSummary.warnings.join('；')}
+            />
+          )}
+          {postmanSummary.uploadCount > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="info"
+              showIcon
+              title={`包含 ${postmanSummary.uploadCount} 个文件上传请求`}
+              description="导入后请在用例中补充上传文件路径，否则执行时会因缺少文件而失败。"
+            />
+          )}
+          <Card
+            style={{ marginTop: 16 }}
+            title={
+              <Space wrap>
+                <span>解析结果</span>
+                <Tag color="blue">{postmanInterfaces.length} 个请求</Tag>
+                <Tag>{postmanSummary.groups.length} 个分组</Tag>
+                <span style={{ color: '#6b7280', fontWeight: 400 }}>
+                  已选择 {postmanSelectedKeys.length} 个
+                </span>
+              </Space>
+            }
+            extra={
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                loading={postmanImporting}
+                onClick={handlePostmanImport}
+                size="large"
+                disabled={postmanSelectedKeys.length === 0}
+              >
+                导入选中的 {postmanSelectedKeys.length} 个接口
+              </Button>
+            }
+          >
+            {postmanInterfaces.length === 0 ? (
+              <Empty description="未解析到任何请求，请检查 Collection 内容" />
+            ) : (
+              <>
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {Object.entries(postmanSummary.methods).map(([method, count]) => (
+                    <Col xs={12} sm={8} md={6} lg={4} key={method}>
+                      <Card size="small">
+                        <Statistic
+                          title={<Tag color={methodColor[method] || 'default'}>{method}</Tag>}
+                          value={count}
+                        />
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+                <Table
+                  dataSource={postmanInterfaces.map((iface, idx) => ({ ...iface, key: idx }))}
+                  rowSelection={{
+                    selectedRowKeys: postmanSelectedKeys,
+                    onChange: setPostmanSelectedKeys,
+                  }}
+                  pagination={{ pageSize: 50, showTotal: (t) => `共 ${t} 条` }}
+                  scroll={{ x: 1100 }}
+                  columns={[
+                    {
+                      title: '方法',
+                      dataIndex: 'method',
+                      width: 80,
+                      render: (method: string) => (
+                        <Tag color={methodColor[method] || 'default'}>{method}</Tag>
+                      ),
+                    },
+                    { title: '名称', dataIndex: 'suggested_name', width: 200, ellipsis: true },
+                    { title: 'URL', dataIndex: 'url', ellipsis: true },
+                    {
+                      title: '分组',
+                      dataIndex: 'group_path',
+                      width: 200,
+                      ellipsis: true,
+                      render: (value: string) => (value ? <Tag>{value}</Tag> : '-'),
+                    },
+                    {
+                      title: '变量',
+                      dataIndex: 'variables',
+                      width: 120,
+                      render: (variables: string[]) =>
+                        variables?.length ? (
+                          <Tag color="orange">{variables.length} 个待补充</Tag>
+                        ) : (
+                          <Tag color="green">已齐备</Tag>
+                        ),
+                    },
+                    {
+                      title: 'Body',
+                      dataIndex: 'body',
+                      width: 70,
+                      render: (value: any) => (value ? <Tag color="cyan">有</Tag> : '-'),
+                    },
+                    {
+                      title: '上传',
+                      dataIndex: 'has_upload',
+                      width: 70,
+                      render: (value: boolean) => (value ? <Tag color="gold">需文件</Tag> : '-'),
+                    },
+                  ]}
+                />
+              </>
+            )}
+          </Card>
+        </>
       )}
 
       {/* 新建项目 Modal */}
