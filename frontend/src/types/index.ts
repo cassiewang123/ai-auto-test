@@ -70,9 +70,9 @@ export interface AssertionRule {
   id?: string;
   test_case_id?: string;
   assertion_type: string;
-  expression?: string;
+  expression?: string | null;
   operator: string;
-  expected?: string;
+  expected?: any;
   priority: string;
   order: number;
 }
@@ -146,6 +146,7 @@ export interface TestCaseUpdate {
   retry_interval?: number;
   pre_script?: string | null;
   post_script?: string | null;
+  assertions?: Omit<AssertionRule, 'id' | 'test_case_id'>[] | null;
 }
 
 // 全局变量/工作空间变量

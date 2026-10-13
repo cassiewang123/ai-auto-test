@@ -20,6 +20,8 @@ import {
   Switch,
   Alert,
   InputNumber,
+  Row,
+  Col,
 } from 'antd';
 import {
   PlusOutlined,
@@ -41,6 +43,15 @@ import {
 import { testCaseApi, executionApi, projectApi, changeLogApi, dbAssertionApi, environmentApi } from '../services/api';
 import type { TestCase, Project, TestCaseCreate, Environment } from '../types';
 import JsonEditor from '../components/JsonEditor';
+import {
+  ASSERTION_OPERATORS,
+  ASSERTION_TYPES,
+  assertionDefaults,
+  assertionToFormValue,
+  assertionTypeMeta,
+  assertionsFromFormValues,
+  defaultStatusCodeAssertion,
+} from '../utils/assertions';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
 
 const methodColor: Record<string, string> = {
@@ -249,6 +260,7 @@ export default function TestCasesPage() {
       retry_interval: 1.0,
       pre_script: '',
       post_script: '',
+      assertions: [defaultStatusCodeAssertion('P0')],
     });
     setDbAssertions([]);
     setCaseModalTab('basic');
@@ -270,6 +282,11 @@ export default function TestCasesPage() {
       retry_interval: record.retry_interval ?? 1.0,
       pre_script: record.pre_script || '',
       post_script: record.post_script || '',
+      assertions: record.assertions?.length
+        ? record.assertions.map((rule, index) =>
+            assertionToFormValue(rule, index)
+          )
+        : [defaultStatusCodeAssertion('P1')],
     });
     setCaseModalTab('basic');
     setCaseModalOpen(true);
@@ -302,9 +319,7 @@ export default function TestCasesPage() {
         retry_interval: values.retry_interval ?? 1.0,
         pre_script: values.pre_script || undefined,
         post_script: values.post_script || undefined,
-        assertions: [{
-          assertion_type: 'status_code', operator: 'eq', expected: '200', priority: 'P0', order: 0,
-        }],
+        assertions: assertionsFromFormValues(values.assertions),
       };
       if (editingCase) {
         await testCaseApi.update(editingCase.id, payload);
@@ -766,6 +781,167 @@ export default function TestCasesPage() {
                     />
                   </Form.Item>
                 </Form>
+              ),
+            },
+            {
+              key: 'http-assertion',
+              label: 'HTTP 断言',
+              children: (
+                <div>
+                  <div style={{ marginBottom: 12, color: '#6b7280', fontSize: 13 }}>
+                    校验响应状态码、JSONPath、响应头、耗时或 JSON Schema，执行用例时逐条判定。
+                  </div>
+                  <Form.List name="assertions">
+                    {(fields, { add, remove }) => (
+                      <div>
+                        {fields.length === 0 && (
+                          <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 8 }}>
+                            暂未配置断言，执行时只判断请求是否成功。
+                          </div>
+                        )}
+                        {fields.map(({ key, name, ...restField }) => {
+                          const type = form.getFieldValue([
+                            'assertions',
+                            name,
+                            'assertion_type',
+                          ]);
+                          const meta = assertionTypeMeta(type);
+                          const expectedText = form.getFieldValue([
+                            'assertions',
+                            name,
+                            'expected_text',
+                          ]);
+                          return (
+                            <Row key={key} gutter={8} align="top" style={{ marginBottom: 8 }}>
+                              <Col span={6}>
+                                <Form.Item
+                                  {...restField}
+                                  name={[name, 'assertion_type']}
+                                  rules={[{ required: true, message: '选择类型' }]}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Select
+                                    options={ASSERTION_TYPES.map((t) => ({
+                                      label: t.label,
+                                      value: t.value,
+                                    }))}
+                                    onChange={(value) => {
+                                      const defaults = assertionDefaults(value);
+                                      form.setFieldValue(['assertions', name], {
+                                        assertion_type: value,
+                                        ...defaults,
+                                        priority:
+                                          form.getFieldValue([
+                                            'assertions',
+                                            name,
+                                            'priority',
+                                          ]) || 'P1',
+                                        order: name,
+                                      });
+                                    }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={7}>
+                                <Form.Item
+                                  {...restField}
+                                  name={[name, 'expression']}
+                                  rules={[
+                                    {
+                                      required: meta.needsExpression,
+                                      message: '填写表达式',
+                                    },
+                                  ]}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Input
+                                    placeholder={
+                                      meta.value === 'json_path'
+                                        ? '$.data.total'
+                                        : meta.value === 'header'
+                                          ? 'Content-Type'
+                                          : '（无需填写）'
+                                    }
+                                    disabled={!meta.needsExpression}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  {...restField}
+                                  name={[name, 'operator']}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Select options={ASSERTION_OPERATORS} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={6}>
+                                <Form.Item
+                                  {...restField}
+                                  name={[name, 'expected_text']}
+                                  rules={[{ required: true, message: '填写期望值' }]}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Input
+                                    placeholder={
+                                      meta.value === 'json_schema'
+                                        ? 'JSON Schema'
+                                        : meta.value === 'response_time'
+                                          ? '1.0'
+                                          : '200'
+                                    }
+                                    disabled={meta.value === 'json_schema'}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={1}>
+                                <Button
+                                  type="text"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  onClick={() => remove(name)}
+                                />
+                              </Col>
+                              {meta.value === 'json_schema' && (
+                                <Col span={24}>
+                                  <Input.TextArea
+                                    rows={3}
+                                    style={{ fontFamily: 'monospace', fontSize: 12 }}
+                                    value={
+                                      typeof expectedText === 'string'
+                                        ? expectedText
+                                        : ''
+                                    }
+                                    placeholder='{"type": "object", "required": ["code"]}'
+                                    onChange={(e) =>
+                                      form.setFieldValue(
+                                        ['assertions', name, 'expected_text'],
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+                                </Col>
+                              )}
+                            </Row>
+                          );
+                        })}
+                        <Button
+                          type="dashed"
+                          block
+                          icon={<PlusOutlined />}
+                          onClick={() =>
+                            add({
+                              ...defaultStatusCodeAssertion('P1'),
+                              order: fields.length,
+                            })
+                          }
+                        >
+                          添加断言
+                        </Button>
+                      </div>
+                    )}
+                  </Form.List>
+                </div>
               ),
             },
             {

@@ -69,7 +69,7 @@ class TestCaseCreate(TestCaseBase):
 
 
 class TestCaseUpdate(BaseModel):
-    """更新测试用例，全部字段可选（不含断言规则，断言单独管理）."""
+    """更新测试用例，全部字段可选."""
 
     title: str | None = None
     method: str | None = None
@@ -91,6 +91,8 @@ class TestCaseUpdate(BaseModel):
     retry_interval: float | None = Field(default=None, ge=0)
     pre_script: str | None = None
     post_script: str | None = None
+    # 传入时整体替换该用例的断言规则；不传则保持原样
+    assertions: list[AssertionRuleCreate] | None = None
 
 
 class TestCaseResponse(TestCaseBase):

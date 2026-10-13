@@ -504,11 +504,12 @@ def update_test_case(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新用例（部分更新，不涉及断言规则）."""
+    """更新用例（部分更新，可整体替换断言规则）."""
     case = _get_or_404(db, case_id)
     ensure_resource_role(db, current_user, case, "developer", owner_field=None)
     before_snapshot = _snapshot_case(case)
     update_data = payload.model_dump(exclude_unset=True)
+    assertions_data = update_data.pop("assertions", None)
     if "project_id" in update_data and update_data["project_id"] != case.project_id:
         ensure_resource_role(db, current_user, case, "admin", owner_field=None)
         ensure_project_assignment(
@@ -516,6 +517,16 @@ def update_test_case(
         )
     for field, value in update_data.items():
         setattr(case, field, value)
+    if assertions_data is not None:
+        # 整体替换：先清空旧规则，再按提交顺序写入
+        for existing in list(case.assertions):
+            db.delete(existing)
+        db.flush()
+        for index, assertion in enumerate(assertions_data):
+            payload_dict = dict(assertion)
+            payload_dict.setdefault("order", index)
+            db.add(AssertionRule(test_case_id=case.id, **payload_dict))
+        db.flush()
     db.commit()
     db.refresh(case)
     # 记录更新变更日志
@@ -525,7 +536,8 @@ def update_test_case(
         "updated",
         before=before_snapshot,
         after=_snapshot_case(case),
-        changed_fields=list(update_data.keys()),
+        changed_fields=list(update_data.keys())
+        + (["assertions"] if assertions_data is not None else []),
     )
     return DataResponse[TestCaseResponse](data=case)
 

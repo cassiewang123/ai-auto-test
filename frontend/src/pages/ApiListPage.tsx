@@ -61,6 +61,14 @@ import type {
 import JsonEditor from '../components/JsonEditor';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
+import {
+  ASSERTION_OPERATORS,
+  ASSERTION_TYPES,
+  assertionDefaults,
+  assertionToFormValue,
+  assertionTypeMeta,
+  assertionsFromFormValues,
+} from '../utils/assertions';
 import '../styles/api-workspace.css';
 
 const methodColor: Record<string, string> = {
@@ -85,6 +93,15 @@ const statusLabel: Record<string, string> = {
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
+interface TestCaseAssertionFormValue {
+  assertion_type: string;
+  expression?: string;
+  operator: string;
+  expected_text?: string;
+  priority?: string;
+  order?: number;
+}
+
 interface TestCaseFormValues {
   title: string;
   method: string;
@@ -94,6 +111,7 @@ interface TestCaseFormValues {
   headers?: string;
   params?: string;
   body?: string;
+  assertions?: TestCaseAssertionFormValue[];
 }
 
 function hasContent(value: unknown): boolean {
@@ -654,12 +672,16 @@ export default function ApiListPage() {
     caseForm.setFieldsValue({
       method: 'GET',
       project_id: selectedProjectId || undefined,
+      assertions: [
+        { assertion_type: 'status_code', expression: '', operator: 'eq', expected_text: '200', priority: 'P0', order: 0 },
+      ],
     });
     setCaseModalOpen(true);
   }
 
   function openEditCase(record: TestCase) {
     setEditingCase(record);
+    const existing = record.assertions || [];
     caseForm.setFieldsValue({
       title: record.title,
       method: record.method,
@@ -669,6 +691,11 @@ export default function ApiListPage() {
       headers: formatJson(record.headers),
       params: formatJson(record.params),
       body: formatJson(record.body),
+      assertions: existing.length
+        ? existing.map((rule, index) => assertionToFormValue(rule, index))
+        : [
+            { assertion_type: 'status_code', expression: '', operator: 'eq', expected_text: '200', priority: 'P1', order: 0 },
+          ],
     });
     setCaseModalOpen(true);
   }
@@ -689,6 +716,7 @@ export default function ApiListPage() {
           expectedType: 'object',
         }) as Record<string, unknown>,
       };
+      const assertions = assertionsFromFormValues(values.assertions);
       let res;
       if (editingCase) {
         const updatePayload: TestCaseUpdate = {
@@ -698,6 +726,7 @@ export default function ApiListPage() {
             : null,
           group_path: values.group_path || null,
           project_id: values.project_id ?? null,
+          assertions,
         };
         res = await testCaseApi.update(editingCase.id, updatePayload);
       } else {
@@ -709,15 +738,17 @@ export default function ApiListPage() {
           group_path: values.group_path || '',
           project_id: values.project_id || selectedProjectId || undefined,
           markers: [],
-          assertions: [
-            {
-              assertion_type: 'status_code',
-              operator: 'eq',
-              expected: '200',
-              priority: 'P0',
-              order: 0,
-            },
-          ],
+          assertions: assertions.length
+            ? assertions
+            : [
+                {
+                  assertion_type: 'status_code',
+                  operator: 'eq',
+                  expected: '200',
+                  priority: 'P0',
+                  order: 0,
+                },
+              ],
         };
         res = await testCaseApi.create(createPayload);
       }
@@ -1497,7 +1528,7 @@ export default function ApiListPage() {
           setCaseModalOpen(false);
           setEditingCase(null);
         }}
-        width={640}
+        width={760}
         destroyOnHidden
       >
         <Form form={caseForm} layout="vertical" initialValues={{ method: 'GET' }}>
@@ -1559,6 +1590,170 @@ export default function ApiListPage() {
           >
             <JsonEditor rows={4} placeholder='{"name": "test"}' />
           </Form.Item>
+
+          <Divider style={{ margin: '8px 0 12px' }}>响应断言</Divider>
+          <Form.List name="assertions">
+            {(fields, { add, remove }) => (
+              <div>
+                {fields.length === 0 && (
+                  <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 8 }}>
+                    暂未配置断言，执行时只判断请求是否成功。可添加“状态码”“JSONPath”等断言校验响应内容。
+                  </div>
+                )}
+                {fields.map(({ key, name, ...restField }) => {
+                  const type = caseForm.getFieldValue([
+                    'assertions',
+                    name,
+                    'assertion_type',
+                  ]);
+                  const meta = assertionTypeMeta(type);
+                  const expectedText = caseForm.getFieldValue([
+                    'assertions',
+                    name,
+                    'expected_text',
+                  ]);
+                  return (
+                    <Row
+                      key={key}
+                      gutter={8}
+                      align="top"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Col span={6}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'assertion_type']}
+                          rules={[{ required: true, message: '选择类型' }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Select
+                            options={ASSERTION_TYPES.map((t) => ({
+                              label: t.label,
+                              value: t.value,
+                            }))}
+                            onChange={(value) => {
+                              const defaults = assertionDefaults(value);
+                              caseForm.setFieldValue(
+                                ['assertions', name],
+                                {
+                                  assertion_type: value,
+                                  ...defaults,
+                                  priority:
+                                    caseForm.getFieldValue([
+                                      'assertions',
+                                      name,
+                                      'priority',
+                                    ]) || 'P1',
+                                  order: name,
+                                }
+                              );
+                            }}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={7}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'expression']}
+                          rules={[
+                            {
+                              required: meta.needsExpression,
+                              message: '填写表达式',
+                            },
+                          ]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={
+                              meta.value === 'json_path'
+                                ? '$.data.total'
+                                : meta.value === 'header'
+                                  ? 'Content-Type'
+                                  : '（无需填写）'
+                            }
+                            disabled={!meta.needsExpression}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'operator']}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Select options={ASSERTION_OPERATORS} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'expected_text']}
+                          rules={[{ required: true, message: '填写期望值' }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={
+                              meta.value === 'json_schema'
+                                ? 'JSON Schema'
+                                : meta.value === 'response_time'
+                                  ? '1.0'
+                                  : '200'
+                            }
+                            disabled={meta.value === 'json_schema'}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={1}>
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => remove(name)}
+                        />
+                      </Col>
+                      {meta.value === 'json_schema' && (
+                        <Col span={24}>
+                          <Input.TextArea
+                            rows={3}
+                            style={{ fontFamily: 'monospace', fontSize: 12 }}
+                            value={
+                              typeof expectedText === 'string'
+                                ? expectedText
+                                : ''
+                            }
+                            placeholder='{"type": "object", "required": ["code"]}'
+                            onChange={(e) =>
+                              caseForm.setFieldValue(
+                                ['assertions', name, 'expected_text'],
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Col>
+                      )}
+                    </Row>
+                  );
+                })}
+                <Button
+                  type="dashed"
+                  block
+                  icon={<PlusOutlined />}
+                  onClick={() =>
+                    add({
+                      assertion_type: 'status_code',
+                      expression: '',
+                      operator: 'eq',
+                      expected_text: '200',
+                      priority: 'P1',
+                      order: fields.length,
+                    })
+                  }
+                >
+                  添加断言
+                </Button>
+              </div>
+            )}
+          </Form.List>
         </Form>
       </Modal>
 
