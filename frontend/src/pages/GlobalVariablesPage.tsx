@@ -377,7 +377,8 @@ export default function GlobalVariablesPage() {
             <TextArea rows={2} placeholder="变量说明（可选）" />
           </Form.Item>
           <div style={{ color: '#9ca3af', fontSize: 12 }}>
-            变量在执行时通过 <code>{'${变量名}'}</code> 占位符引用。优先级：临时变量 &gt; 环境变量 &gt; 全局变量。
+            变量在执行时通过 <code>{'{{变量名}}'}</code> 占位符引用，可写在 URL、请求头、查询参数和请求体中。
+            优先级：用例运行参数（临时）&gt; 环境变量 &gt; 全局 / 工作空间变量。
           </div>
         </Form>
       </Modal>
