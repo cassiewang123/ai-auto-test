@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import { PageTabsProvider } from '../contexts/PageTabsContext';
+import { setKeepAliveRoutes, resetKeepAliveRoutes } from '../components/KeepAliveOutlet';
 
 const authState = vi.hoisted(() => ({
   user: {
@@ -88,6 +89,14 @@ function mockResizeObserver() {
 }
 
 function renderLayout() {
+  setKeepAliveRoutes([
+    {
+      element: <AppLayout />,
+      children: [
+        { path: '/dashboard', element: <div>dashboard content</div> },
+      ],
+    },
+  ]);
   return render(
     <MemoryRouter initialEntries={['/dashboard']}>
       <PageTabsProvider>
@@ -108,6 +117,10 @@ describe('AppLayout workspace header', () => {
     window.sessionStorage.clear();
     workspaceState.setSelectedProjectId.mockReset();
     workspaceState.setSelectedEnvironmentId.mockReset();
+  });
+
+  afterEach(() => {
+    resetKeepAliveRoutes();
   });
 
   it('shows project and environment selectors without the date header', () => {

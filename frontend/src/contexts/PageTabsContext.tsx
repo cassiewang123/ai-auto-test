@@ -7,9 +7,14 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { allNavigationItems, findNavigationItemByPath } from '../components/navigation';
+import {
+  allNavigationItems,
+  findNavigationItemByPath,
+} from '../components/navigation';
+import type { KeepAliveHandle } from '../components/KeepAliveOutlet';
 
 export interface PageTab {
   /** 路由路径，同时作为 Tab 的身份标识 */
@@ -25,10 +30,17 @@ interface PageTabsContextValue {
   closeTab: (path: string) => void;
   closeOtherTabs: (path: string) => void;
   closeAllTabs: () => void;
+  /** 重新挂载某个标签对应的页面（清除缓存后重新加载） */
+  refreshTab: (path: string) => void;
+  /** 供保活容器注册页面缓存回调 */
+  keepAliveRef: RefObject<KeepAliveHandle | null>;
 }
 
 const DEFAULT_HOME: PageTab = { path: '/dashboard', label: '仪表盘' };
 const STORAGE_KEY = 'airetest.page-tabs';
+
+/** 跨渲染保持同一个 ref 对象，避免保活容器因 ref 变化重复注册 */
+const sharedKeepAliveRef: RefObject<KeepAliveHandle | null> = { current: null };
 
 const PageTabsContext = createContext<PageTabsContextValue | null>(null);
 
@@ -61,6 +73,7 @@ export function PageTabsProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [tabs, setTabs] = useState<PageTab[]>(loadStoredTabs);
+  const keepAliveRef = useRef<KeepAliveHandle | null>(sharedKeepAliveRef.current);
   const pathname = location.pathname;
   // 记住当前打开路径，关闭 Tab 时用它判断是否需要跳转
   const pathnameRef = useRef(pathname);
@@ -110,6 +123,7 @@ export function PageTabsProvider({ children }: { children: ReactNode }) {
 
   const closeTab = useCallback(
     (path: string) => {
+      keepAliveRef.current?.removePage(path);
       setTabs((prev) => {
         const index = prev.findIndex((tab) => tab.path === path);
         if (index === -1) return prev;
@@ -125,17 +139,30 @@ export function PageTabsProvider({ children }: { children: ReactNode }) {
     [navigate]
   );
 
-  const closeOtherTabs = useCallback((path: string) => {
-    setTabs((prev) => {
-      const keep = prev.filter((tab) => tab.path === path);
-      if (keep.length === 0) return prev;
-      if (path !== pathnameRef.current) navigate(path);
-      return keep;
-    });
-  }, [navigate]);
+  const closeOtherTabs = useCallback(
+    (path: string) => {
+      setTabs((prev) => {
+        prev
+          .filter((tab) => tab.path !== path)
+          .forEach((tab) => keepAliveRef.current?.removePage(tab.path));
+        const keep = prev.filter((tab) => tab.path === path);
+        if (keep.length === 0) return prev;
+        if (path !== pathnameRef.current) navigate(path);
+        return keep;
+      });
+    },
+    [navigate]
+  );
 
   const closeAllTabs = useCallback(() => {
-    setTabs([]);
+    setTabs((prev) => {
+      prev.forEach((tab) => keepAliveRef.current?.removePage(tab.path));
+      return [];
+    });
+  }, []);
+
+  const refreshTab = useCallback((path: string) => {
+    keepAliveRef.current?.refreshPage(path);
   }, []);
 
   const value = useMemo<PageTabsContextValue>(
@@ -147,8 +174,19 @@ export function PageTabsProvider({ children }: { children: ReactNode }) {
       closeTab,
       closeOtherTabs,
       closeAllTabs,
+      refreshTab,
+      keepAliveRef: keepAliveRef as RefObject<KeepAliveHandle | null>,
     }),
-    [tabs, pathname, openTab, selectTab, closeTab, closeOtherTabs, closeAllTabs]
+    [
+      tabs,
+      pathname,
+      openTab,
+      selectTab,
+      closeTab,
+      closeOtherTabs,
+      closeAllTabs,
+      refreshTab,
+    ]
   );
 
   return <PageTabsContext.Provider value={value}>{children}</PageTabsContext.Provider>;

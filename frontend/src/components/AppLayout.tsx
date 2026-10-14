@@ -21,9 +21,11 @@ import {
   ProjectOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import zhCN from 'antd/locale/zh_CN';
 import PageTabs from './PageTabs';
+import KeepAliveOutlet from './KeepAliveOutlet';
+import { usePageTabs } from '../contexts/PageTabsContext';
 import {
   allNavigationItems,
   findNavigationItemByPath,
@@ -46,6 +48,7 @@ export default function AppLayout() {
   const isMobile = screens.md === false;
   const { token: themeToken } = theme.useToken();
   const { user, logout, loading } = useAuth();
+  const { keepAliveRef } = usePageTabs();
   const {
     projects,
     environments,
@@ -333,7 +336,7 @@ export default function AppLayout() {
           >
             <PageTabs />
             <div style={{ padding: isMobile ? 12 : 24 }}>
-              <Outlet />
+              <KeepAliveOutlet handleRef={keepAliveRef} />
             </div>
           </Content>
         </Layout>

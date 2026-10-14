@@ -5,8 +5,15 @@ import { DEFAULT_HOME, usePageTabs } from '../contexts/PageTabsContext';
 
 export default function PageTabs() {
   const { token } = theme.useToken();
-  const { tabs, activeKey, selectTab, closeTab, closeOtherTabs, closeAllTabs } =
-    usePageTabs();
+  const {
+    tabs,
+    activeKey,
+    selectTab,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    refreshTab,
+  } = usePageTabs();
 
   if (tabs.length === 0) return null;
 
@@ -42,6 +49,12 @@ export default function PageTabs() {
               menu={{
                 items: [
                   {
+                    key: 'refresh',
+                    icon: <ReloadOutlined />,
+                    label: '刷新本页',
+                    onClick: () => refreshTab(tab.path),
+                  },
+                  {
                     key: 'closeOthers',
                     label: '关闭其他标签',
                     disabled: tabs.length <= 1,
@@ -72,7 +85,7 @@ export default function PageTabs() {
               key: 'reload',
               icon: <ReloadOutlined />,
               label: '刷新当前页',
-              onClick: () => window.location.reload(),
+              onClick: () => refreshTab(activeKey),
             },
             {
               key: 'closeOthers',
