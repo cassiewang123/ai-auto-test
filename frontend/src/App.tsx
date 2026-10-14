@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spin } from 'antd';
 import AppLayout from './components/AppLayout';
+import { PageTabsProvider } from './contexts/PageTabsContext';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const QuickTestPage = lazy(() => import('./pages/QuickTestPage'));
@@ -71,7 +72,8 @@ function RouteFallback() {
 export default function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
-      <Routes>
+      <PageTabsProvider>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -125,7 +127,8 @@ export default function App() {
           <Route path="/defects" element={<DefectsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
-      </Routes>
+        </Routes>
+      </PageTabsProvider>
     </Suspense>
   );
 }

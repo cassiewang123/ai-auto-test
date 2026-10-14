@@ -1,36 +1,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import ExecutionResultView from '../components/ExecutionResultView';
 import type { ExecutionResultData } from '../services/api';
-
-// antd Table/Tabs 依赖 ResizeObserver，jsdom 未实现
-class MockResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', MockResizeObserver);
-  vi.stubGlobal(
-    'matchMedia',
-    (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })
-  );
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 function makeResult(overrides: Partial<ExecutionResultData> = {}): ExecutionResultData {
   return {

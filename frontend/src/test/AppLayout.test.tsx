@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
+import { PageTabsProvider } from '../contexts/PageTabsContext';
 
 const authState = vi.hoisted(() => ({
   user: {
@@ -86,24 +87,31 @@ function mockResizeObserver() {
   });
 }
 
-describe('AppLayout workspace header', () => {
-  beforeEach(() => {
-    mockMatchMedia();
-    mockResizeObserver();
-    workspaceState.setSelectedProjectId.mockReset();
-    workspaceState.setSelectedEnvironmentId.mockReset();
-  });
-
-  it('shows project and environment selectors without the date header', () => {
-    render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+function renderLayout() {
+  return render(
+    <MemoryRouter initialEntries={['/dashboard']}>
+      <PageTabsProvider>
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<div>dashboard content</div>} />
           </Route>
         </Routes>
-      </MemoryRouter>
-    );
+      </PageTabsProvider>
+    </MemoryRouter>
+  );
+}
+
+describe('AppLayout workspace header', () => {
+  beforeEach(() => {
+    mockMatchMedia();
+    mockResizeObserver();
+    window.sessionStorage.clear();
+    workspaceState.setSelectedProjectId.mockReset();
+    workspaceState.setSelectedEnvironmentId.mockReset();
+  });
+
+  it('shows project and environment selectors without the date header', () => {
+    renderLayout();
 
     expect(screen.getByTestId('workspace-project-select')).toBeInTheDocument();
     expect(
@@ -115,15 +123,7 @@ describe('AppLayout workspace header', () => {
   });
 
   it('updates the selected project through the header selector', async () => {
-    render(
-      <MemoryRouter initialEntries={['/dashboard']}>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/dashboard" element={<div>dashboard content</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    );
+    renderLayout();
 
     fireEvent.mouseDown(screen.getByTestId('workspace-project-select'));
     const options = await screen.findAllByText('会员项目');

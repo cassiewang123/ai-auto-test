@@ -23,6 +23,7 @@ import {
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import zhCN from 'antd/locale/zh_CN';
+import PageTabs from './PageTabs';
 import {
   allNavigationItems,
   findNavigationItemByPath,
@@ -322,14 +323,18 @@ export default function AppLayout() {
           <Content
             style={{
               margin: isMobile ? 8 : 24,
-              padding: isMobile ? 12 : 24,
+              padding: 0,
               background: '#f9fafb',
               borderRadius: isMobile ? 0 : 8,
               minHeight: 280,
               minWidth: 0,
+              overflow: 'hidden',
             }}
           >
-            <Outlet />
+            <PageTabs />
+            <div style={{ padding: isMobile ? 12 : 24 }}>
+              <Outlet />
+            </div>
           </Content>
         </Layout>
       </Layout>
