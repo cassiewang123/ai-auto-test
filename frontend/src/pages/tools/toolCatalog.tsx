@@ -1,17 +1,21 @@
 import {
   BgColorsOutlined,
   CodeOutlined,
+  DatabaseOutlined,
   DiffOutlined,
   FileSearchOutlined,
   FieldTimeOutlined,
   FileTextOutlined,
   FontSizeOutlined,
+  FormatPainterOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 
 export type ToolIconKey =
   | 'json'
+  | 'json-format'
+  | 'sql'
   | 'text'
   | 'regex'
   | 'encoding'
@@ -35,6 +39,20 @@ export const toolDefinitions: ToolDefinition[] = [
     name: 'JSON 数据对比',
     description: '按路径比较两份 JSON，识别新增、删除、修改和类型变化。',
     icon: 'json',
+  },
+  {
+    id: 'json-format',
+    path: '/tools/json-format',
+    name: 'JSON 格式化',
+    description: '美化、压缩、按 key 排序和 Unicode 转义 JSON，实时提示语法错误位置。',
+    icon: 'json-format',
+  },
+  {
+    id: 'sql-format',
+    path: '/tools/sql-format',
+    name: 'SQL 格式化',
+    description: '美化或压缩 SQL，支持 Oracle、MySQL、PostgreSQL、Hive 等方言。',
+    icon: 'sql',
   },
   {
     id: 'text-compare',
@@ -89,6 +107,8 @@ export const toolDefinitions: ToolDefinition[] = [
 
 export const toolIcons: Record<ToolIconKey, ReactNode> = {
   json: <DiffOutlined />,
+  'json-format': <FormatPainterOutlined />,
+  sql: <DatabaseOutlined />,
   text: <SwapOutlined />,
   regex: <CodeOutlined />,
   encoding: <BgColorsOutlined />,

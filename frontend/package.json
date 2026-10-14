@@ -42,6 +42,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "recharts": "^3.9.1"
+    "recharts": "^3.9.1",
+    "sql-formatter": "^15.9.0"
   }
 }

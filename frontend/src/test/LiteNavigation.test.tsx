@@ -89,6 +89,8 @@ describe('lite navigation', () => {
       '/coverage',
       '/tools',
       '/tools/json-compare',
+      '/tools/json-format',
+      '/tools/sql-format',
       '/tools/text-compare',
       '/tools/regex',
       '/tools/encoding',

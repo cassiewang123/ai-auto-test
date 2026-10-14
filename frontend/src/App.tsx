@@ -46,6 +46,8 @@ const QualityGatesPage = lazy(() => import('./pages/QualityGatesPage'));
 const DefectsPage = lazy(() => import('./pages/DefectsPage'));
 const ToolsHubPage = lazy(() => import('./pages/tools/ToolsHubPage'));
 const JsonComparePage = lazy(() => import('./pages/tools/JsonComparePage'));
+const JsonFormatterPage = lazy(() => import('./pages/tools/JsonFormatterPage'));
+const SqlFormatterPage = lazy(() => import('./pages/tools/SqlFormatterPage'));
 const TextComparePage = lazy(() => import('./pages/tools/TextComparePage'));
 const RegexTesterPage = lazy(() => import('./pages/tools/RegexTesterPage'));
 const EncodingPage = lazy(() => import('./pages/tools/EncodingPage'));
@@ -81,6 +83,8 @@ export default function App() {
           <Route path="/quick-test" element={<QuickTestPage />} />
           <Route path="/tools" element={<ToolsHubPage />} />
           <Route path="/tools/json-compare" element={<JsonComparePage />} />
+          <Route path="/tools/json-format" element={<JsonFormatterPage />} />
+          <Route path="/tools/sql-format" element={<SqlFormatterPage />} />
           <Route path="/tools/text-compare" element={<TextComparePage />} />
           <Route path="/tools/regex" element={<RegexTesterPage />} />
           <Route path="/tools/encoding" element={<EncodingPage />} />
