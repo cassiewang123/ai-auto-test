@@ -50,7 +50,7 @@ import {
   changeLogApi,
   historyApi,
 } from '../services/api';
-import type { CallHistoryRecord } from '../services/api';
+import type { CallHistoryRecord, ExecutionResultData } from '../services/api';
 import type {
   TestCase,
   Project,
@@ -59,6 +59,7 @@ import type {
   TestCaseUpdate,
 } from '../types';
 import JsonEditor from '../components/JsonEditor';
+import ExecutionResultView from '../components/ExecutionResultView';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
 import {
@@ -162,6 +163,13 @@ export default function ApiListPage() {
     failed: number;
     error: number;
     results: any[];
+  } | null>(null);
+
+  // 单次执行结果
+  const [singleResult, setSingleResult] = useState<{
+    visible: boolean;
+    title: string;
+    result: ExecutionResultData;
   } | null>(null);
 
   // 新建用例
@@ -521,12 +529,17 @@ export default function ApiListPage() {
   }
 
   // ---- 单个执行 ----
-  async function handleQuickExecute(caseId: string) {
+  async function handleQuickExecute(caseId: string, title?: string) {
     setExecutingId(caseId);
     try {
       const res = await executionApi.runSavedCase(caseId);
       const status = res.data.status;
       setLastResults((prev) => ({ ...prev, [caseId]: status }));
+      setSingleResult({
+        visible: true,
+        title: title || cases.find((c) => c.id === caseId)?.title || '执行结果',
+        result: res.data,
+      });
       await loadRecentResults();
       if (status === 'passed') message.success('执行通过');
       else if (status === 'failed') message.warning('断言未通过');
@@ -817,7 +830,7 @@ export default function ApiListPage() {
           loading={executingId === c.id}
           onClick={(e) => {
             e.stopPropagation();
-            handleQuickExecute(c.id);
+            handleQuickExecute(c.id, c.title);
           }}
         />
       </Tooltip>
@@ -1318,7 +1331,7 @@ export default function ApiListPage() {
                         <Button
                           icon={<PlayCircleOutlined />}
                           loading={executingId === selectedCase.id}
-                          onClick={() => handleQuickExecute(selectedCase.id)}
+                          onClick={() => handleQuickExecute(selectedCase.id, selectedCase.title)}
                         >
                           执行
                         </Button>
@@ -1781,6 +1794,31 @@ export default function ApiListPage() {
             ...projects.map((p) => ({ value: p.id, label: p.name })),
           ]}
         />
+      </Modal>
+
+      {/* 单次执行结果 Modal */}
+      <Modal
+        title={`执行结果 · ${singleResult?.title || ''}`}
+        open={singleResult?.visible || false}
+        onCancel={() =>
+          setSingleResult((prev) => (prev ? { ...prev, visible: false } : null))
+        }
+        footer={
+          <Button
+            type="primary"
+            onClick={() =>
+              setSingleResult((prev) =>
+                prev ? { ...prev, visible: false } : null
+              )
+            }
+          >
+            关闭
+          </Button>
+        }
+        width={920}
+        destroyOnHidden
+      >
+        {singleResult && <ExecutionResultView result={singleResult.result} />}
       </Modal>
 
       {/* 批量执行结果 Modal */}

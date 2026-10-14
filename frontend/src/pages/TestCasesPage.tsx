@@ -41,8 +41,10 @@ import {
   ExperimentOutlined,
 } from '@ant-design/icons';
 import { testCaseApi, executionApi, projectApi, changeLogApi, dbAssertionApi, environmentApi } from '../services/api';
+import type { ExecutionResultData } from '../services/api';
 import type { TestCase, Project, TestCaseCreate, Environment } from '../types';
 import JsonEditor from '../components/JsonEditor';
+import ExecutionResultView from '../components/ExecutionResultView';
 import {
   ASSERTION_OPERATORS,
   ASSERTION_TYPES,
@@ -90,6 +92,13 @@ export default function TestCasesPage() {
   const [editingCase, setEditingCase] = useState<TestCase | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+
+  // 单次执行结果
+  const [singleResult, setSingleResult] = useState<{
+    visible: boolean;
+    title: string;
+    result: ExecutionResultData;
+  } | null>(null);
 
   // 移动到项目
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -162,12 +171,17 @@ export default function TestCasesPage() {
   projects.forEach(p => projectNameMap.set(p.id, p));
 
   // ---- 执行 ----
-  async function handleExecute(caseId: string) {
+  async function handleExecute(caseId: string, title?: string) {
     setExecutingId(caseId);
     try {
       const res = await executionApi.runSavedCase(caseId);
       const status = res.data.status;
       setLastResults(prev => ({ ...prev, [caseId]: status }));
+      setSingleResult({
+        visible: true,
+        title: title || cases.find(c => c.id === caseId)?.title || '执行结果',
+        result: res.data,
+      });
       if (status === 'passed') message.success('执行通过');
       else if (status === 'failed') message.warning('断言未通过');
       else message.error('执行出错');
@@ -565,7 +579,7 @@ export default function TestCasesPage() {
         <Space wrap>
           <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />}
             loading={executingId === record.id}
-            onClick={() => handleExecute(record.id)} data-testid="run-btn">
+            onClick={() => handleExecute(record.id, record.title)} data-testid="run-btn">
             执行
           </Button>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} data-testid="edit-btn">编辑</Button>
@@ -1120,6 +1134,29 @@ export default function TestCasesPage() {
             ...projects.map(p => ({ value: p.id, label: p.name })),
           ]}
         />
+      </Modal>
+
+      {/* 单次执行结果 Modal */}
+      <Modal
+        title={`执行结果 · ${singleResult?.title || ''}`}
+        open={singleResult?.visible || false}
+        onCancel={() =>
+          setSingleResult(prev => (prev ? { ...prev, visible: false } : null))
+        }
+        footer={
+          <Button
+            type="primary"
+            onClick={() =>
+              setSingleResult(prev => (prev ? { ...prev, visible: false } : null))
+            }
+          >
+            关闭
+          </Button>
+        }
+        width={920}
+        destroyOnHidden
+      >
+        {singleResult && <ExecutionResultView result={singleResult.result} />}
       </Modal>
 
       {/* 批量执行结果 Modal */}
