@@ -8,6 +8,8 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
+  Popconfirm,
   Result,
   Row,
   Segmented,
@@ -24,6 +26,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  FolderOpenOutlined,
   LinkOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -32,6 +35,7 @@ import {
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
 import { serverConsoleApi } from '../../services/api';
+import type { ServerSavedRequest } from '../../types';
 
 interface ConnectionForm {
   host: string;
@@ -130,6 +134,10 @@ function toRecord(rows: KeyValueRow[] | undefined): Record<string, string> {
   return result;
 }
 
+function toRows(record: Record<string, string> | undefined): KeyValueRow[] {
+  return Object.entries(record ?? {}).map(([key, value]) => ({ key, value }));
+}
+
 function tryPrettyJson(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return '';
@@ -163,6 +171,99 @@ export default function ServerConsolePage() {
   const [testBanner, setTestBanner] = useState<string | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savedList, setSavedList] = useState<ServerSavedRequest[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const refreshSaved = async () => {
+    try {
+      const response = await serverConsoleApi.listSaved();
+      setSavedList(response.data);
+    } catch {
+      // 列表加载失败不阻塞执行
+    }
+  };
+
+  useEffect(() => {
+    void refreshSaved();
+  }, []);
+
+  const applySaved = (item: ServerSavedRequest) => {
+    setSelectedId(item.id);
+    setMethod(item.method);
+    requestForm.setFieldsValue({
+      method: item.method,
+      url: item.url,
+      params: toRows(item.params),
+      headers: toRows(item.headers),
+      body: item.body ?? '',
+    });
+    setRequest({
+      method: item.method,
+      url: item.url,
+      params: toRows(item.params),
+      headers: toRows(item.headers),
+      body: item.body ?? '',
+    });
+  };
+
+  const openSaveModal = () => {
+    const current = savedList.find((item) => item.id === selectedId);
+    setSaveName(current?.name ?? requestForm.getFieldValue('url') ?? '');
+    setSaveModalOpen(true);
+  };
+
+  const persistRequest = async () => {
+    const name = saveName.trim();
+    if (!name) {
+      message.warning('请输入接口名称');
+      return;
+    }
+    const values = readRequest();
+    if (!values.url) {
+      message.warning('请先填写接口地址');
+      return;
+    }
+    const payload = {
+      name,
+      method: values.method,
+      url: values.url,
+      params: toRecord(values.params),
+      headers: toRecord(values.headers),
+      body:
+        values.method === 'GET' || values.method === 'HEAD'
+          ? null
+          : values.body || null,
+    };
+    setSaving(true);
+    try {
+      const response = selectedId
+        ? await serverConsoleApi.updateSaved(selectedId, payload)
+        : await serverConsoleApi.createSaved(payload);
+      setSelectedId(response.data.id);
+      setSaveModalOpen(false);
+      await refreshSaved();
+      message.success(selectedId ? '接口已更新' : '接口已保存');
+    } catch (exc) {
+      message.error(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeSaved = async () => {
+    if (!selectedId) return;
+    try {
+      await serverConsoleApi.deleteSaved(selectedId);
+      setSelectedId(null);
+      await refreshSaved();
+      message.success('已删除');
+    } catch (exc) {
+      message.error(exc instanceof Error ? exc.message : String(exc));
+    }
+  };
 
   useEffect(() => {
     requestForm.setFieldsValue(request);
@@ -212,9 +313,8 @@ export default function ServerConsolePage() {
   };
 
   const saveRequest = () => {
-    const next = readRequest();
-    localStorage.setItem(REQUEST_STORAGE_KEY, JSON.stringify(next));
-    message.success('已保存接口和参数');
+    readRequest();
+    openSaveModal();
   };
 
   const testConnection = async () => {
@@ -415,6 +515,34 @@ export default function ServerConsolePage() {
               </Tooltip>
             }
           >
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Select
+                style={{ minWidth: 260 }}
+                placeholder="选择已保存的接口"
+                value={selectedId ?? undefined}
+                onChange={(value) => {
+                  const item = savedList.find((row) => row.id === value);
+                  if (item) applySaved(item);
+                }}
+                options={savedList.map((item) => ({
+                  value: item.id,
+                  label: `${item.method}  ${item.name}`,
+                }))}
+                suffixIcon={<FolderOpenOutlined />}
+              />
+              <Button icon={<SaveOutlined />} onClick={saveRequest}>
+                {selectedId ? '更新接口' : '保存接口'}
+              </Button>
+              <Popconfirm
+                title="删除这个已保存的接口？"
+                onConfirm={removeSaved}
+                disabled={!selectedId}
+              >
+                <Button danger icon={<DeleteOutlined />} disabled={!selectedId}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
             <Form form={requestForm} layout="vertical" initialValues={request}>
               <Row gutter={12}>
                 <Col xs={24} md={5}>
@@ -603,6 +731,25 @@ export default function ServerConsolePage() {
           </details>
         </Card>
       ) : null}
+
+      <Modal
+        title={selectedId ? '更新接口' : '保存接口'}
+        open={saveModalOpen}
+        onCancel={() => setSaveModalOpen(false)}
+        onOk={persistRequest}
+        confirmLoading={saving}
+        okText={selectedId ? '更新' : '保存'}
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Input
+          value={saveName}
+          onChange={(event) => setSaveName(event.target.value)}
+          placeholder="接口名称，例如：查询订单列表"
+          onPressEnter={persistRequest}
+          autoFocus
+        />
+      </Modal>
     </ToolPage>
   );
 }

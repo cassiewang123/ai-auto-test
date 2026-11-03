@@ -20,11 +20,17 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import paramiko
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.exceptions import ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
+from app.database import get_db
+from app.models.server_saved_request import ServerSavedRequest
+from app.models.user import User
+from app.services.auth_service import get_current_user
 from app.services.security.url_policy import URLPolicy
 
 router = APIRouter()
@@ -70,6 +76,31 @@ class SSHCurlRequest(SSHConnection):
         if method not in ALLOWED_METHODS:
             raise ValueError(f"不允许的 HTTP 方法: {value}")
         return method
+
+
+class ServerSavedRequestInput(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    method: str = Field("GET")
+    url: str = Field(..., min_length=1, max_length=4096)
+    params: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str | None = Field(None, max_length=1_000_000)
+
+    @field_validator("method")
+    @classmethod
+    def _validate_method(cls, value: str) -> str:
+        method = value.strip().upper()
+        if method not in ALLOWED_METHODS:
+            raise ValueError(f"不允许的 HTTP 方法: {value}")
+        return method
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        url = value.strip()
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise ValueError("接口地址必须以 http:// 或 https:// 开头")
+        return url
 
 
 def _build_url_policy(allow_private: bool | None = None) -> URLPolicy:
@@ -230,3 +261,105 @@ def execute_request(req: SSHCurlRequest) -> dict[str, Any]:
         raise ValidationError(f"SSH 执行失败: {exc}") from exc
     finally:
         client.close()
+
+
+# ---------- 保存的接口 ----------
+
+def _serialize(item: ServerSavedRequest) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "method": item.method,
+        "url": item.url,
+        "params": item.params or {},
+        "headers": item.headers or {},
+        "body": item.body,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+    }
+
+
+def _get_owned_or_404(
+    db: Session, request_id: str, current_user: User
+) -> ServerSavedRequest:
+    item = db.get(ServerSavedRequest, request_id)
+    if not item:
+        raise NotFoundError("保存的接口", request_id)
+    if item.created_by != current_user.id and not current_user.is_superuser:
+        raise NotFoundError("保存的接口", request_id)
+    return item
+
+
+@router.get("/saved-requests", response_model=dict[str, Any])
+def list_saved_requests(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """列出当前用户保存的接口."""
+    items = (
+        db.execute(
+            select(ServerSavedRequest)
+            .where(ServerSavedRequest.created_by == current_user.id)
+            .order_by(ServerSavedRequest.updated_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return {"code": 0, "message": "ok", "data": [_serialize(item) for item in items]}
+
+
+@router.post("/saved-requests", response_model=dict[str, Any])
+def create_saved_request(
+    payload: ServerSavedRequestInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """保存一条接口请求（不含服务器密码）."""
+    _validate_headers(payload.headers)
+    item = ServerSavedRequest(
+        name=payload.name.strip(),
+        method=payload.method,
+        url=payload.url,
+        params=payload.params,
+        headers=payload.headers,
+        body=payload.body,
+        created_by=current_user.id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"code": 0, "message": "已保存", "data": _serialize(item)}
+
+
+@router.put("/saved-requests/{request_id}", response_model=dict[str, Any])
+def update_saved_request(
+    request_id: str,
+    payload: ServerSavedRequestInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """更新已保存的接口."""
+    item = _get_owned_or_404(db, request_id, current_user)
+    _validate_headers(payload.headers)
+    item.name = payload.name.strip()
+    item.method = payload.method
+    item.url = payload.url
+    item.params = payload.params
+    item.headers = payload.headers
+    item.body = payload.body
+    db.commit()
+    db.refresh(item)
+    return {"code": 0, "message": "已更新", "data": _serialize(item)}
+
+
+@router.delete("/saved-requests/{request_id}", response_model=dict[str, Any])
+def delete_saved_request(
+    request_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """删除已保存的接口."""
+    item = _get_owned_or_404(db, request_id, current_user)
+    db.delete(item)
+    db.commit()
+    return {"code": 0, "message": "已删除", "data": {"id": request_id}}

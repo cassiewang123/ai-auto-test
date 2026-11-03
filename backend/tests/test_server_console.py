@@ -168,3 +168,61 @@ def test_connection_test_endpoint(client, fake_ssh):
     data = response.json()["data"]
     assert data["ok"] is True
     assert data["server_banner"] == "SSH-2.0-Fake"
+
+
+def _saved_payload(**overrides) -> dict:
+    payload = {
+        "name": "查询订单",
+        "method": "POST",
+        "url": "https://api.example.com/v1/orders",
+        "params": {"page": "1"},
+        "headers": {"Content-Type": "application/json"},
+        "body": '{"id": 1}',
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_saved_request_crud(client):
+    created = client.post("/api/v1/tools/saved-requests", json=_saved_payload())
+    assert created.status_code == 200
+    item = created.json()["data"]
+    assert item["name"] == "查询订单"
+    assert item["params"] == {"page": "1"}
+    request_id = item["id"]
+
+    listed = client.get("/api/v1/tools/saved-requests")
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()["data"]] == [request_id]
+
+    updated = client.put(
+        f"/api/v1/tools/saved-requests/{request_id}",
+        json=_saved_payload(name="查询订单-新", method="GET", body=None),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["name"] == "查询订单-新"
+    assert updated.json()["data"]["method"] == "GET"
+
+    deleted = client.delete(f"/api/v1/tools/saved-requests/{request_id}")
+    assert deleted.status_code == 200
+    assert client.get("/api/v1/tools/saved-requests").json()["data"] == []
+
+
+def test_saved_request_rejects_bad_method_and_url(client):
+    bad_method = client.post(
+        "/api/v1/tools/saved-requests", json=_saved_payload(method="TRACE")
+    )
+    assert bad_method.status_code == 422
+
+    bad_url = client.post(
+        "/api/v1/tools/saved-requests", json=_saved_payload(url="file:///etc/passwd")
+    )
+    assert bad_url.status_code == 422
+
+
+def test_saved_request_rejects_header_injection(client):
+    response = client.post(
+        "/api/v1/tools/saved-requests",
+        json=_saved_payload(headers={"X-Test": "a\r\nB: c"}),
+    )
+    assert response.status_code in (400, 422)

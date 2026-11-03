@@ -490,3 +490,20 @@ export interface ServerHttpRequestInput extends ServerConnectionInput {
   headers?: Record<string, string>;
   body?: string | null;
 }
+
+export interface ServerSavedRequest {
+  id: string;
+  name: string;
+  method: string;
+  url: string;
+  params: Record<string, string>;
+  headers: Record<string, string>;
+  body: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type ServerSavedRequestInput = Omit<
+  ServerSavedRequest,
+  'id' | 'created_at' | 'updated_at'
+>;

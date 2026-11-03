@@ -30,6 +30,8 @@ import type {
   ServerConnectionTestResult,
   ServerCurlResult,
   ServerHttpRequestInput,
+  ServerSavedRequest,
+  ServerSavedRequestInput,
 } from '../types';
 
 // 批量操作结果类型
@@ -859,6 +861,22 @@ export const serverConsoleApi = {
       // 请求在远程服务器上执行，允许比普通请求更长的超时
       timeout: 130000,
     }),
+  listSaved: () =>
+    api.get<unknown, ApiResponse<ServerSavedRequest[]>>('/tools/saved-requests'),
+  createSaved: (data: ServerSavedRequestInput) =>
+    api.post<unknown, ApiResponse<ServerSavedRequest>>(
+      '/tools/saved-requests',
+      data
+    ),
+  updateSaved: (id: string, data: ServerSavedRequestInput) =>
+    api.put<unknown, ApiResponse<ServerSavedRequest>>(
+      `/tools/saved-requests/${id}`,
+      data
+    ),
+  deleteSaved: (id: string) =>
+    api.delete<unknown, ApiResponse<{ id: string }>>(
+      `/tools/saved-requests/${id}`
+    ),
 };
 
 // ========== 认证快捷配置工具函数 ==========
