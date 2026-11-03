@@ -1,5 +1,6 @@
 import {
   BgColorsOutlined,
+  CloudServerOutlined,
   CodeOutlined,
   DatabaseOutlined,
   DiffOutlined,
@@ -22,7 +23,8 @@ export type ToolIconKey =
   | 'word'
   | 'time'
   | 'data'
-  | 'log';
+  | 'log'
+  | 'server';
 
 export interface ToolDefinition {
   id: string;
@@ -103,6 +105,13 @@ export const toolDefinitions: ToolDefinition[] = [
     description: '解析日志级别和时间，统计错误率并按条件过滤。',
     icon: 'log',
   },
+  {
+    id: 'server-console',
+    path: '/tools/server-console',
+    name: '服务器连接',
+    description: 'SSH 连接远程服务器，执行 curl 并下载返回数据。',
+    icon: 'server',
+  },
 ];
 
 export const toolIcons: Record<ToolIconKey, ReactNode> = {
@@ -116,6 +125,7 @@ export const toolIcons: Record<ToolIconKey, ReactNode> = {
   time: <FieldTimeOutlined />,
   data: <FileTextOutlined />,
   log: <FileSearchOutlined />,
+  server: <CloudServerOutlined />,
 };
 
 export const toolNavChildren = toolDefinitions.map((tool) => ({

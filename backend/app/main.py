@@ -181,6 +181,8 @@ def _register_routers(app: FastAPI) -> None:
         ("app.api.v1.test_data", "router", "/test-data"),
         ("app.api.v1.notifications", "router", "/notifications"),
         ("app.api.v1.variables", "router", "/variables"),
+        # 工具集：服务器连接（SSH）执行受限 curl
+        ("app.api.v1.server_console", "router", "/tools"),
         # 统一任务中心：HTTP 端点自带 JWT 鉴权，WebSocket 在端点内验证 token
         ("app.api.v1.jobs", "router", "/jobs"),
         # Phase 4：DAG 工作流 / 契约测试 / 质量门禁（均需 JWT 鉴权）

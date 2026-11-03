@@ -457,3 +457,28 @@ export interface JobStreamDoneMessage {
 }
 
 export type JobStreamMessage = JobStreamEvent | JobStreamDoneMessage;
+
+// 工具集：服务器连接（SSH）
+export interface ServerConnectionInput {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  timeout?: number;
+  allow_private?: boolean;
+}
+
+export interface ServerConnectionTestResult {
+  ok: boolean;
+  message: string;
+  server_banner?: string | null;
+}
+
+export interface ServerCurlResult {
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  duration: number;
+  truncated: boolean;
+  command: string;
+}

@@ -53,6 +53,7 @@ const WordCountPage = lazy(() => import('./pages/tools/WordCountPage'));
 const TimestampPage = lazy(() => import('./pages/tools/TimestampPage'));
 const DataGeneratorPage = lazy(() => import('./pages/tools/DataGeneratorPage'));
 const LogAnalysisPage = lazy(() => import('./pages/tools/LogAnalysisPage'));
+const ServerConsolePage = lazy(() => import('./pages/tools/ServerConsolePage'));
 
 /**
  * 路由表单独导出，供 <Routes> 与标签页保活容器共用：
@@ -77,6 +78,7 @@ export const routeObjects: RouteObject[] = [
       { path: '/tools/timestamp', element: <TimestampPage /> },
       { path: '/tools/data-generator', element: <DataGeneratorPage /> },
       { path: '/tools/log-analysis', element: <LogAnalysisPage /> },
+      { path: '/tools/server-console', element: <ServerConsolePage /> },
       { path: '/json-compare', element: <Navigate to="/tools/json-compare" replace /> },
       { path: '/api-list', element: <ApiListPage /> },
       { path: '/projects', element: <ProjectsPage /> },

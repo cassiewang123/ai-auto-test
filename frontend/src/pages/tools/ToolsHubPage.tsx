@@ -14,7 +14,7 @@ export default function ToolsHubPage() {
     <ToolPage
       icon={<ToolOutlined />}
       title="工具集"
-      description="测试工作常用工具，全部在浏览器本地处理，数据不会上传。"
+      description="测试工作常用工具；服务器连接会通过后端 SSH 连接到目标服务器。"
     >
       <div className="tools-hub-grid">
         {toolDefinitions.map((tool) => (

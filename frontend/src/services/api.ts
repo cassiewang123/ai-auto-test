@@ -26,6 +26,9 @@ import type {
   JobCreateInput,
   JobEvent,
   JobListParams,
+  ServerConnectionInput,
+  ServerConnectionTestResult,
+  ServerCurlResult,
 } from '../types';
 
 // 批量操作结果类型
@@ -841,6 +844,20 @@ export const globalVariableApi = {
     api.put<unknown, ApiResponse<GlobalVariable>>(`/variables/${id}`, data),
   delete: (id: string) =>
     api.delete<unknown, ApiResponse<GlobalVariable>>(`/variables/${id}`),
+};
+
+// ========== 工具集：服务器连接（SSH） ==========
+export const serverConsoleApi = {
+  test: (data: ServerConnectionInput) =>
+    api.post<unknown, ApiResponse<ServerConnectionTestResult>>(
+      '/tools/ssh/test',
+      data
+    ),
+  execute: (data: ServerConnectionInput & { command: string }) =>
+    api.post<unknown, ApiResponse<ServerCurlResult>>('/tools/ssh/execute', data, {
+      // curl 在远程服务器上执行，允许比普通请求更长的超时
+      timeout: 130000,
+    }),
 };
 
 // ========== 认证快捷配置工具函数 ==========

@@ -98,6 +98,7 @@ describe('lite navigation', () => {
       '/tools/timestamp',
       '/tools/data-generator',
       '/tools/log-analysis',
+      '/tools/server-console',
       '/quality-gates',
       '/defects',
       '/scheduled-tasks',
