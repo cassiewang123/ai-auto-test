@@ -298,6 +298,41 @@
   margin-top: 12px;
 }
 
+.server-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.server-kv-row {
+  display: flex;
+  width: 100%;
+}
+
+.server-console-command {
+  margin-top: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.server-console-command summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.server-console-command pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .server-console-output {
   max-height: 460px;
   margin: 12px 0 0;

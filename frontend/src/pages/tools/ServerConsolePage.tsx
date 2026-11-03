@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
+  Col,
   Descriptions,
   Form,
   Input,
   InputNumber,
   Result,
+  Row,
   Segmented,
+  Select,
   Space,
   Statistic,
   Switch,
@@ -17,15 +20,17 @@ import {
   message,
 } from 'antd';
 import {
-  ApiOutlined,
   CloudServerOutlined,
   CopyOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   LinkOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
-} from '@ant-design/icons';import ToolPage from '../../components/ToolPage';
+} from '@ant-design/icons';
+import ToolPage from '../../components/ToolPage';
 import { serverConsoleApi } from '../../services/api';
 
 interface ConnectionForm {
@@ -34,6 +39,19 @@ interface ConnectionForm {
   username: string;
   password: string;
   allowPrivate: boolean;
+}
+
+interface KeyValueRow {
+  key?: string;
+  value?: string;
+}
+
+interface RequestForm {
+  method: string;
+  url: string;
+  params: KeyValueRow[];
+  headers: KeyValueRow[];
+  body: string;
 }
 
 interface RunResult {
@@ -53,11 +71,16 @@ const DEFAULT_CONNECTION: ConnectionForm = {
   allowPrivate: true,
 };
 
-const DEFAULT_COMMAND = `curl -sS -X POST 'https://snowflow.cloud/api/example' \\
-  -H 'Content-Type: application/json' \\
-  -d '{"key":"value"}'`;
+const DEFAULT_REQUEST: RequestForm = {
+  method: 'POST',
+  url: '',
+  params: [],
+  headers: [{ key: 'Content-Type', value: 'application/json' }],
+  body: '',
+};
 
 const CONNECTION_STORAGE_KEY = 'airetest.server-console.connection';
+const REQUEST_STORAGE_KEY = 'airetest.server-console.request';
 
 function loadSavedConnection(): ConnectionForm {
   try {
@@ -80,20 +103,31 @@ function loadSavedConnection(): ConnectionForm {
   }
 }
 
-function formatOutput(result: RunResult | null): string {
-  if (!result) return '';
-  const parts: string[] = [];
-  if (result.stdout) parts.push(result.stdout);
-  if (result.stderr) parts.push(`[stderr]\n${result.stderr}`);
-  return parts.join('\n\n');
+function loadSavedRequest(): RequestForm {
+  try {
+    const raw = localStorage.getItem(REQUEST_STORAGE_KEY);
+    if (!raw) return DEFAULT_REQUEST;
+    const parsed = JSON.parse(raw) as Partial<RequestForm>;
+    return {
+      method: parsed.method === 'GET' ? 'GET' : 'POST',
+      url: typeof parsed.url === 'string' ? parsed.url : '',
+      params: Array.isArray(parsed.params) ? parsed.params : [],
+      headers: Array.isArray(parsed.headers) ? parsed.headers : DEFAULT_REQUEST.headers,
+      body: typeof parsed.body === 'string' ? parsed.body : '',
+    };
+  } catch {
+    return DEFAULT_REQUEST;
+  }
 }
 
-function guessFileName(result: RunResult): string {
-  const trimmed = result.stdout.trim();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    return `server-response-${Date.now()}.json`;
+function toRecord(rows: KeyValueRow[] | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const row of rows ?? []) {
+    const key = row.key?.trim();
+    if (!key) continue;
+    result[key] = row.value ?? '';
   }
-  return `server-response-${Date.now()}.txt`;
+  return result;
 }
 
 function tryPrettyJson(text: string): string {
@@ -107,12 +141,22 @@ function tryPrettyJson(text: string): string {
   }
 }
 
+function guessFileName(result: RunResult): string {
+  const trimmed = result.stdout.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return `server-response-${Date.now()}.json`;
+  }
+  return `server-response-${Date.now()}.txt`;
+}
+
 export default function ServerConsolePage() {
-  const [form] = Form.useForm<ConnectionForm>();
+  const [connectionForm] = Form.useForm<ConnectionForm>();
+  const [requestForm] = Form.useForm<RequestForm>();
   const [connection, setConnection] = useState<ConnectionForm>(
     loadSavedConnection
   );
-  const [command, setCommand] = useState(DEFAULT_COMMAND);
+  const [request, setRequest] = useState<RequestForm>(loadSavedRequest);
+  const [method, setMethod] = useState<string>(() => loadSavedRequest().method);
   const [viewMode, setViewMode] = useState<'raw' | 'pretty'>('pretty');
   const [testing, setTesting] = useState(false);
   const [running, setRunning] = useState(false);
@@ -120,8 +164,14 @@ export default function ServerConsolePage() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const applyForm = (): ConnectionForm => {
-    const values = form.getFieldsValue();
+  useEffect(() => {
+    requestForm.setFieldsValue(request);
+    // 只在首次挂载时恢复已保存的请求
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const readConnection = (): ConnectionForm => {
+    const values = connectionForm.getFieldsValue();
     const next: ConnectionForm = {
       host: values.host?.trim() ?? '',
       port: Number(values.port ?? 22),
@@ -134,20 +184,41 @@ export default function ServerConsolePage() {
   };
 
   const saveConnection = () => {
-    const next = applyForm();
+    const next = readConnection();
     // 密码仅在本次会话内存中使用，不写入 localStorage
-    const safe = {
-      host: next.host,
-      port: next.port,
-      username: next.username,
-      allowPrivate: next.allowPrivate,
-    };
-    localStorage.setItem(CONNECTION_STORAGE_KEY, JSON.stringify(safe));
+    localStorage.setItem(
+      CONNECTION_STORAGE_KEY,
+      JSON.stringify({
+        host: next.host,
+        port: next.port,
+        username: next.username,
+        allowPrivate: next.allowPrivate,
+      })
+    );
     message.success('已保存服务器地址和账号，密码不会保存');
   };
 
+  const readRequest = (): RequestForm => {
+    const values = requestForm.getFieldsValue();
+    const next: RequestForm = {
+      method,
+      url: values.url?.trim() ?? '',
+      params: values.params ?? [],
+      headers: values.headers ?? [],
+      body: values.body ?? '',
+    };
+    setRequest(next);
+    return next;
+  };
+
+  const saveRequest = () => {
+    const next = readRequest();
+    localStorage.setItem(REQUEST_STORAGE_KEY, JSON.stringify(next));
+    message.success('已保存接口和参数');
+  };
+
   const testConnection = async () => {
-    const next = applyForm();
+    const next = readConnection();
     if (!next.host || !next.username || !next.password) {
       message.warning('请先填写服务器地址、账号和密码');
       return;
@@ -174,25 +245,33 @@ export default function ServerConsolePage() {
   };
 
   const execute = async () => {
-    const next = applyForm();
-    if (!next.host || !next.username || !next.password) {
+    const connectionValues = readConnection();
+    const requestValues = readRequest();
+    if (!connectionValues.host || !connectionValues.username || !connectionValues.password) {
       message.warning('请先填写服务器地址、账号和密码');
       return;
     }
-    if (!command.trim()) {
-      message.warning('请输入 curl 命令');
+    if (!requestValues.url) {
+      message.warning('请输入接口地址');
       return;
     }
     setRunning(true);
     setError(null);
     try {
-      const response = await serverConsoleApi.execute({
-        host: next.host,
-        port: next.port,
-        username: next.username,
-        password: next.password,
-        allow_private: next.allowPrivate,
-        command,
+      const response = await serverConsoleApi.request({
+        host: connectionValues.host,
+        port: connectionValues.port,
+        username: connectionValues.username,
+        password: connectionValues.password,
+        allow_private: connectionValues.allowPrivate,
+        method: requestValues.method,
+        url: requestValues.url,
+        params: toRecord(requestValues.params),
+        headers: toRecord(requestValues.headers),
+        body:
+          requestValues.method === 'GET' || requestValues.method === 'HEAD'
+            ? null
+            : requestValues.body || null,
         timeout: 120,
       });
       const data = response.data;
@@ -212,17 +291,17 @@ export default function ServerConsolePage() {
     }
   };
 
-  const outputText = formatOutput(result);
+  const outputText = result
+    ? [result.stdout, result.stderr ? `[stderr]\n${result.stderr}` : '']
+        .filter(Boolean)
+        .join('\n\n')
+    : '';
   const displayedOutput =
     viewMode === 'pretty' && result ? tryPrettyJson(result.stdout) : outputText;
 
   const download = () => {
     if (!result) return;
-    const content =
-      result.stderr && result.stdout
-        ? `${result.stdout}\n\n[stderr]\n${result.stderr}`
-        : result.stdout || result.stderr;
-    const blob = new Blob([content], {
+    const blob = new Blob([outputText], {
       type: 'application/octet-stream;charset=utf-8',
     });
     const url = URL.createObjectURL(blob);
@@ -243,133 +322,216 @@ export default function ServerConsolePage() {
     }
   };
 
+  const bodyEnabled = method !== 'GET' && method !== 'HEAD';
+
   return (
     <ToolPage
       icon={<CloudServerOutlined />}
       title="服务器连接"
-      description="通过 SSH 登录服务器，执行 curl 命令并下载返回数据。"
+      description="通过 SSH 在远程服务器上请求 POST/GET 接口，查看并下载返回数据。"
     >
       <Alert
         type="warning"
         showIcon
         message="安全说明"
-        description="密码仅用于本次连接，不写入数据库。后端只允许执行单条 curl 命令，并拒绝管道、重定向、命令串联和文件协议。"
+        description="密码仅用于本次连接，不写入数据库。请求由后端生成 curl 在服务器上执行，不接受任意 shell 命令。"
       />
 
-      <div className="server-console-layout">
-        <Card size="small" title="服务器连接" className="server-console-card">
-          <Form
-            form={form}
-            layout="vertical"
-            initialValues={connection}
-            onValuesChange={() => setTestBanner(null)}
+      <Row gutter={[16, 16]} align="top">
+        <Col xs={24} xl={8}>
+          <Card size="small" title="服务器连接" className="server-console-card">
+            <Form
+              form={connectionForm}
+              layout="vertical"
+              initialValues={connection}
+              onValuesChange={() => setTestBanner(null)}
+            >
+              <Form.Item
+                name="host"
+                label="服务器地址"
+                rules={[{ required: true, message: '请输入服务器地址' }]}
+              >
+                <Input prefix={<LinkOutlined />} placeholder="snowflow.cloud" autoComplete="off" />
+              </Form.Item>
+              <Space.Compact style={{ width: '100%' }}>
+                <Form.Item
+                  name="port"
+                  label="端口"
+                  style={{ flex: '0 0 110px', marginBottom: 16 }}
+                >
+                  <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item
+                  name="username"
+                  label="账号"
+                  style={{ flex: 1, marginBottom: 16, marginLeft: 8 }}
+                  rules={[{ required: true, message: '请输入账号' }]}
+                >
+                  <Input placeholder="yhztd" autoComplete="username" />
+                </Form.Item>
+              </Space.Compact>
+              <Form.Item
+                name="password"
+                label="密码"
+                rules={[{ required: true, message: '请输入 SSH 密码' }]}
+              >
+                <Input.Password placeholder="仅用于本次连接" autoComplete="current-password" />
+              </Form.Item>
+              <Form.Item
+                name="allowPrivate"
+                label="允许访问内网地址"
+                valuePropName="checked"
+                tooltip="开启后可以请求服务器所在内网的 http(s) 地址"
+                style={{ marginBottom: 16 }}
+              >
+                <Switch size="small" />
+              </Form.Item>
+            </Form>
+            <Space wrap>
+              <Button icon={<ReloadOutlined />} loading={testing} onClick={testConnection}>
+                测试连接
+              </Button>
+              <Button icon={<SaveOutlined />} onClick={saveConnection}>
+                保存地址
+              </Button>
+            </Space>
+            {testBanner ? (
+              <div className="server-console-banner">
+                <Tag color="green">已连接</Tag>
+                <span>{testBanner}</span>
+              </div>
+            ) : null}
+          </Card>
+        </Col>
+
+        <Col xs={24} xl={16}>
+          <Card
+            size="small"
+            title="接口请求"
+            className="server-console-card"
+            extra={
+              <Tooltip title="请求会在远程服务器上执行">
+                <Tag icon={<CloudServerOutlined />}>远程执行</Tag>
+              </Tooltip>
+            }
           >
-            <Form.Item
-              name="host"
-              label="服务器地址"
-              rules={[{ required: true, message: '请输入服务器地址' }]}
-            >
-              <Input
-                prefix={<LinkOutlined />}
-                placeholder="snowflow.cloud"
-                autoComplete="off"
-              />
-            </Form.Item>
-            <Space.Compact style={{ width: '100%' }}>
-              <Form.Item
-                name="port"
-                label="端口"
-                style={{ flex: '0 0 110px', marginBottom: 16 }}
-              >
-                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            <Form form={requestForm} layout="vertical" initialValues={request}>
+              <Row gutter={12}>
+                <Col xs={24} md={5}>
+                  <Form.Item label="方法" required>
+                    <Select
+                      value={method}
+                      onChange={(value) => setMethod(value)}
+                      options={[
+                        { value: 'GET', label: 'GET' },
+                        { value: 'POST', label: 'POST' },
+                        { value: 'PUT', label: 'PUT' },
+                        { value: 'PATCH', label: 'PATCH' },
+                        { value: 'DELETE', label: 'DELETE' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={19}>
+                  <Form.Item
+                    name="url"
+                    label="接口地址"
+                    rules={[{ required: true, message: '请输入接口地址' }]}
+                  >
+                    <Input placeholder="https://api.example.com/v1/orders" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item label="URL 参数（查询字符串）" style={{ marginBottom: 12 }}>
+                <Form.List name="params">
+                  {(fields, { add, remove }) => (
+                    <div className="server-kv-list">
+                      {fields.map((field) => (
+                        <Space.Compact key={field.key} className="server-kv-row">
+                          <Form.Item name={[field.name, 'key']} style={{ marginBottom: 0, flex: 2 }}>
+                            <Input placeholder="参数名" />
+                          </Form.Item>
+                          <Form.Item name={[field.name, 'value']} style={{ marginBottom: 0, flex: 3 }}>
+                            <Input placeholder="参数值" />
+                          </Form.Item>
+                          <Button
+                            icon={<DeleteOutlined />}
+                            aria-label="删除参数"
+                            onClick={() => remove(field.name)}
+                          />
+                        </Space.Compact>
+                      ))}
+                      <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})}>
+                        添加参数
+                      </Button>
+                    </div>
+                  )}
+                </Form.List>
               </Form.Item>
-              <Form.Item
-                name="username"
-                label="账号"
-                style={{ flex: 1, marginBottom: 16, marginLeft: 8 }}
-                rules={[{ required: true, message: '请输入账号' }]}
-              >
-                <Input placeholder="yhztd" autoComplete="username" />
+
+              <Form.Item label="请求头" style={{ marginBottom: 12 }}>
+                <Form.List name="headers">
+                  {(fields, { add, remove }) => (
+                    <div className="server-kv-list">
+                      {fields.map((field) => (
+                        <Space.Compact key={field.key} className="server-kv-row">
+                          <Form.Item name={[field.name, 'key']} style={{ marginBottom: 0, flex: 2 }}>
+                            <Input placeholder="Header 名称" />
+                          </Form.Item>
+                          <Form.Item name={[field.name, 'value']} style={{ marginBottom: 0, flex: 3 }}>
+                            <Input placeholder="Header 值" />
+                          </Form.Item>
+                          <Button
+                            icon={<DeleteOutlined />}
+                            aria-label="删除请求头"
+                            onClick={() => remove(field.name)}
+                          />
+                        </Space.Compact>
+                      ))}
+                      <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})}>
+                        添加请求头
+                      </Button>
+                    </div>
+                  )}
+                </Form.List>
               </Form.Item>
-            </Space.Compact>
-            <Form.Item
-              name="password"
-              label="密码"
-              rules={[{ required: true, message: '请输入 SSH 密码' }]}
-            >
-              <Input.Password
-                placeholder="仅用于本次连接"
-                autoComplete="current-password"
-              />
-            </Form.Item>
-            <Form.Item
-              name="allowPrivate"
-              label="允许访问内网地址"
-              valuePropName="checked"
-              tooltip="开启后 curl 可以访问服务器所在内网的 http(s) 地址"
-              style={{ marginBottom: 16 }}
-            >
-              <Switch size="small" />
-            </Form.Item>
-          </Form>
 
-          <Space wrap>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={testing}
-              onClick={testConnection}
-            >
-              测试连接
-            </Button>
-            <Button icon={<SaveOutlined />} onClick={saveConnection}>
-              保存地址
-            </Button>
-          </Space>
+              {bodyEnabled ? (
+                <Form.Item
+                  name="body"
+                  label="请求体"
+                  tooltip="JSON 请直接在下方粘贴，例如 {&quot;key&quot;:&quot;value&quot;}"
+                >
+                  <Input.TextArea
+                    autoSize={{ minRows: 5, maxRows: 14 }}
+                    spellCheck={false}
+                    className="server-console-editor"
+                    placeholder='{"key":"value"}'
+                  />
+                </Form.Item>
+              ) : null}
+            </Form>
 
-          {testBanner ? (
-            <div className="server-console-banner">
-              <Tag color="green">已连接</Tag>
-              <span>{testBanner}</span>
-            </div>
-          ) : null}
-        </Card>
-
-        <Card
-          size="small"
-          title="执行 curl"
-          className="server-console-card"
-          extra={
-            <Tooltip title="只支持单条 curl 命令">
-              <Tag icon={<ApiOutlined />}>HTTP</Tag>
-            </Tooltip>
-          }
-        >
-          <Input.TextArea
-            value={command}
-            onChange={(event) => setCommand(event.target.value)}
-            autoSize={{ minRows: 7, maxRows: 16 }}
-            spellCheck={false}
-            className="server-console-editor"
-          />
-          <div className="server-console-actions">
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              loading={running}
-              onClick={execute}
-            >
-              执行并获取数据
-            </Button>
-            <Button
-              icon={<DownloadOutlined />}
-              disabled={!result}
-              onClick={download}
-            >
-              下载返回数据
-            </Button>
-          </div>
-        </Card>
-      </div>
+            <Space wrap>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={running}
+                onClick={execute}
+              >
+                执行并获取数据
+              </Button>
+              <Button icon={<SaveOutlined />} onClick={saveRequest}>
+                保存参数
+              </Button>
+              <Button icon={<DownloadOutlined />} disabled={!result} onClick={download}>
+                下载返回数据
+              </Button>
+            </Space>
+          </Card>
+        </Col>
+      </Row>
 
       {error ? (
         <Alert
@@ -397,18 +559,10 @@ export default function ServerConsolePage() {
                   { label: '原始', value: 'raw' },
                 ]}
               />
-              <Button
-                size="small"
-                icon={<CopyOutlined />}
-                onClick={copyOutput}
-              >
+              <Button size="small" icon={<CopyOutlined />} onClick={copyOutput}>
                 复制
               </Button>
-              <Button
-                size="small"
-                icon={<DownloadOutlined />}
-                onClick={download}
-              >
+              <Button size="small" icon={<DownloadOutlined />} onClick={download}>
                 下载
               </Button>
             </Space>
@@ -441,8 +595,12 @@ export default function ServerConsolePage() {
           {displayedOutput ? (
             <pre className="server-console-output">{displayedOutput}</pre>
           ) : (
-            <Result status="success" title="命令执行完成，无输出" />
+            <Result status="success" title="请求完成，无输出" />
           )}
+          <details className="server-console-command">
+            <summary>查看生成的 curl 命令</summary>
+            <pre>{result.command}</pre>
+          </details>
         </Card>
       ) : null}
     </ToolPage>

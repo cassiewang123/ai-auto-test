@@ -1,9 +1,9 @@
-"""服务器连接工具：curl 命令校验与执行接口测试."""
+"""服务器连接工具：结构化 HTTP 请求生成 curl 与执行接口测试."""
 from __future__ import annotations
 
 import pytest
 
-from app.api.v1.server_console import _apply_method_guard, validate_curl_command
+from app.api.v1.server_console import SSHCurlRequest, build_curl_command
 from app.core.exceptions import ValidationError
 
 
@@ -23,54 +23,79 @@ def allow_public_host(monkeypatch):
     )
 
 
-def test_accepts_post_curl():
-    command = (
-        "curl -sS -X POST 'https://api.example.com/v1/orders' "
-        "-H 'Content-Type: application/json' -d '{\"id\": 1}'"
+def _request(**overrides) -> SSHCurlRequest:
+    payload = {
+        "host": "snowflow.cloud",
+        "port": 22,
+        "username": "yhztd",
+        "password": "secret",
+    }
+    payload.update(overrides)
+    return SSHCurlRequest(**payload)
+
+
+def test_builds_post_request_with_headers_and_body():
+    req = _request(
+        method="post",
+        url="https://api.example.com/v1/orders",
+        headers={"Content-Type": "application/json", "X-Token": "abc"},
+        body='{"id": 1}',
     )
-    assert validate_curl_command(command) == command
-    _apply_method_guard(command)
+    command = build_curl_command(req)
+    assert command.startswith("curl -sS -X POST https://api.example.com/v1/orders")
+    assert "-H 'Content-Type: application/json'" in command
+    assert "-H 'X-Token: abc'" in command
+    assert "--data-raw" in command
+    assert "'{\"id\": 1}'" in command
 
 
-def test_accepts_get_curl_without_explicit_method():
-    command = "curl -sS 'https://api.example.com/v1/ping'"
-    validate_curl_command(command)
-    _apply_method_guard(command)
+def test_builds_get_request_with_query_params():
+    req = _request(
+        method="GET",
+        url="https://api.example.com/v1/list?page=1",
+        params={"size": "20", "q": "a b"},
+    )
+    command = build_curl_command(req)
+    assert "-X GET" in command
+    assert "page=1&size=20&q=a+b" in command
+    assert "--data-raw" not in command
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "wget https://api.example.com/v1/ping",
-        "bash -c 'curl https://api.example.com'",
-        "curl https://api.example.com; rm -rf /",
-        "curl https://api.example.com | sh",
-        "curl https://api.example.com > /tmp/out",
-        "curl https://api.example.com && echo done",
-        "curl https://api.example.com $(whoami)",
-        "curl https://api.example.com\nrm -rf /",
-    ],
-)
-def test_rejects_non_curl_or_injection(command):
+def test_quotes_shell_metacharacters():
+    req = _request(
+        method="POST",
+        url="https://api.example.com/v1/x",
+        headers={"X-Note": "a;rm -rf /"},
+        body='{"name":"$(id)"}',
+    )
+    command = build_curl_command(req)
+    # 危险内容必须整体被单引号包裹，不能裸露成 shell 语法
+    assert "'X-Note: a;rm -rf /'" in command
+    assert "'{\"name\":\"$(id)\"}'" in command
+
+
+def test_rejects_non_http_url():
     with pytest.raises(ValidationError):
-        validate_curl_command(command)
+        build_curl_command(_request(url="file:///etc/passwd"))
 
 
-def test_rejects_curl_without_url():
+def test_rejects_invalid_method():
+    with pytest.raises(ValueError):
+        _request(method="TRACE", url="https://api.example.com")
+
+
+def test_rejects_header_newline_injection():
     with pytest.raises(ValidationError):
-        validate_curl_command("curl -sS -X POST -d '{}'")
+        build_curl_command(
+            _request(url="https://api.example.com", headers={"X-Test": "a\r\nB: c"})
+        )
 
 
-def test_rejects_unknown_http_method():
-    command = "curl -X TRACE 'https://api.example.com/v1/ping'"
-    validate_curl_command(command)
+def test_rejects_invalid_header_name():
     with pytest.raises(ValidationError):
-        _apply_method_guard(command)
-
-
-def test_rejects_unsupported_protocol():
-    with pytest.raises(ValidationError):
-        validate_curl_command("curl -sS 'file:///etc/passwd'")
+        build_curl_command(
+            _request(url="https://api.example.com", headers={"Bad Name": "x"})
+        )
 
 
 @pytest.fixture
@@ -99,47 +124,46 @@ def fake_ssh(monkeypatch):
     return FakeClient
 
 
-def _payload(command: str) -> dict:
-    return {
+def _connection_payload(**overrides) -> dict:
+    payload = {
         "host": "snowflow.cloud",
         "port": 22,
         "username": "yhztd",
         "password": "secret",
-        "command": command,
     }
+    payload.update(overrides)
+    return payload
 
 
-def test_execute_endpoint_returns_stdout(client, fake_ssh):
+def test_request_endpoint_executes_generated_curl(client, fake_ssh):
     response = client.post(
-        "/api/v1/tools/ssh/execute",
-        json=_payload("curl -sS -X POST 'https://api.example.com/v1/orders' -d '{\"id\": 1}'"),
+        "/api/v1/tools/ssh/request",
+        json=_connection_payload(
+            method="POST",
+            url="https://api.example.com/v1/orders",
+            headers={"Content-Type": "application/json"},
+            body='{"id": 1}',
+        ),
     )
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["exit_code"] == 0
     assert data["stdout"] == '{"ok": true}'
-    assert fake_ssh.calls and "api.example.com" in fake_ssh.calls[0]
+    assert data["command"].startswith("curl -sS -X POST")
+    assert fake_ssh.calls and "api.example.com/v1/orders" in fake_ssh.calls[0]
 
 
-def test_execute_endpoint_rejects_injection(client, fake_ssh):
+def test_request_endpoint_rejects_bad_url(client, fake_ssh):
     response = client.post(
-        "/api/v1/tools/ssh/execute",
-        json=_payload("curl https://api.example.com; whoami"),
+        "/api/v1/tools/ssh/request",
+        json=_connection_payload(url="file:///etc/passwd"),
     )
     assert response.status_code in (400, 422)
     assert not fake_ssh.calls
 
 
 def test_connection_test_endpoint(client, fake_ssh):
-    response = client.post(
-        "/api/v1/tools/ssh/test",
-        json={
-            "host": "snowflow.cloud",
-            "port": 22,
-            "username": "yhztd",
-            "password": "secret",
-        },
-    )
+    response = client.post("/api/v1/tools/ssh/test", json=_connection_payload())
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["ok"] is True

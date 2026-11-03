@@ -1,9 +1,12 @@
-"""服务器连接工具：通过 SSH 在远程服务器执行受限 curl 命令.
+"""服务器连接工具：通过 SSH 在远程服务器上请求 HTTP 接口.
+
+页面只提供结构化输入（方法、URL、参数、请求头、请求体），由后端安全地拼成
+curl 命令后执行，不接受任意 shell 命令。
 
 安全边界：
-    1. 只允许 `curl` / `curl.exe` 开头的命令，拒绝管道、重定向、命令串联和命令替换；
-    2. 只允许 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS 等 HTTP 方法；
-    3. 对命令中出现的 http(s) URL 做 SSRF 校验（复用 URLPolicy，默认拒绝私有地址）；
+    1. 只允许 GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS；
+    2. URL 必须是 http(s)，并通过 URLPolicy 做 SSRF 校验；
+    3. 所有参数经 shlex.quote 转义，请求头拒绝换行注入；
     4. 连接凭据只用于当前请求，不落库；单次执行有超时和输出大小上限。
 
 工具集页面需要远程调试内网/公网接口时使用，属于受 JWT 保护的管理能力。
@@ -14,10 +17,11 @@ import re
 import shlex
 import time
 from typing import Any
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import paramiko
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.core.exceptions import ValidationError
@@ -25,8 +29,7 @@ from app.services.security.url_policy import URLPolicy
 
 router = APIRouter()
 
-_ALLOWED_BINARIES = {"curl", "curl.exe"}
-_ALLOWED_METHODS = {
+ALLOWED_METHODS = {
     "GET",
     "HEAD",
     "POST",
@@ -35,9 +38,8 @@ _ALLOWED_METHODS = {
     "DELETE",
     "OPTIONS",
 }
-# 禁止管道、重定向、命令串联/替换、后台执行、子 shell
-_FORBIDDEN_SHELL = re.compile(r"[|;&>`$]|\$\(|&&|\|\||\$\{")
-_URL_PATTERN = re.compile(r"https?://[^\s'\"]+", re.IGNORECASE)
+_HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
+_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 
 
 class SSHConnection(BaseModel):
@@ -45,7 +47,7 @@ class SSHConnection(BaseModel):
     port: int = Field(22, ge=1, le=65535)
     username: str = Field(..., min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
     password: str = Field(..., min_length=1, max_length=512)
-    # 是否允许 curl 访问私有/内网地址；默认沿用系统 URL_ALLOW_PRIVATE 配置
+    # 是否允许访问私有/内网地址；默认沿用系统 URL_ALLOW_PRIVATE 配置
     allow_private: bool | None = None
 
 
@@ -53,24 +55,21 @@ class SSHTestRequest(SSHConnection):
     timeout: int = Field(20, ge=5, le=120)
 
 
-class SSHRunRequest(SSHConnection):
-    command: str = Field(..., min_length=1, max_length=20_000)
+class SSHCurlRequest(SSHConnection):
+    method: str = Field("GET")
+    url: str = Field(..., min_length=1, max_length=4096)
+    params: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str | None = Field(None, max_length=1_000_000)
     timeout: int = Field(60, ge=5, le=300)
 
-
-class SSHTestResponse(BaseModel):
-    ok: bool
-    message: str
-    server_banner: str | None = None
-
-
-class SSHRunResponse(BaseModel):
-    exit_code: int | None
-    stdout: str
-    stderr: str
-    duration: float
-    truncated: bool
-    command: str
+    @field_validator("method")
+    @classmethod
+    def _validate_method(cls, value: str) -> str:
+        method = value.strip().upper()
+        if method not in ALLOWED_METHODS:
+            raise ValueError(f"不允许的 HTTP 方法: {value}")
+        return method
 
 
 def _build_url_policy(allow_private: bool | None = None) -> URLPolicy:
@@ -92,59 +91,45 @@ def _build_url_policy(allow_private: bool | None = None) -> URLPolicy:
     )
 
 
-def validate_curl_command(
-    command: str, allow_private: bool | None = None
-) -> str:
-    """校验远程命令，只允许单条 curl 且不包含 shell 注入语法."""
-    normalized = command.strip()
-    if not normalized:
-        raise ValidationError("命令不能为空")
-    if "\n" in normalized or "\r" in normalized:
-        raise ValidationError("命令不能包含多行")
-    if _FORBIDDEN_SHELL.search(normalized):
-        raise ValidationError("不允许管道、重定向、命令串联或变量展开")
-    try:
-        tokens = shlex.split(normalized, posix=True)
-    except ValueError as exc:
-        raise ValidationError(f"命令无法解析: {exc}") from exc
-    if not tokens:
-        raise ValidationError("命令不能为空")
-    binary = tokens[0].rsplit("/", 1)[-1].lower()
-    if binary not in _ALLOWED_BINARIES:
-        raise ValidationError("只允许执行 curl 命令")
-
-    policy = _build_url_policy(allow_private)
-    urls = _URL_PATTERN.findall(normalized)
-    if not urls:
-        raise ValidationError("命令中必须包含 http(s) URL")
-    for url in urls:
-        allowed, reason = policy.validate(url.rstrip(",;"))
-        if not allowed:
-            raise ValidationError(f"目标地址不被允许: {reason}")
-    return normalized
+def _append_query(url: str, params: dict[str, str]) -> str:
+    if not params:
+        return url
+    parts = urlsplit(url)
+    extra = urlencode(list(params.items()))
+    query = f"{parts.query}&{extra}" if parts.query else extra
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
-def _apply_method_guard(command: str) -> None:
-    """解析 curl 的 -X/--request 参数，校验 HTTP 方法."""
-    try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError as exc:
-        raise ValidationError(f"命令无法解析: {exc}") from exc
-    method = "GET"
-    index = 1
-    while index < len(tokens):
-        token = tokens[index]
-        if token in ("-X", "--request") and index + 1 < len(tokens):
-            method = tokens[index + 1].upper()
-            index += 2
-            continue
-        if token.startswith("--request="):
-            method = token.split("=", 1)[1].upper()
-        elif token.startswith("-X") and len(token) > 2:
-            method = token[2:].upper()
-        index += 1
-    if method not in _ALLOWED_METHODS:
-        raise ValidationError(f"不允许的 HTTP 方法: {method}")
+def _validate_headers(headers: dict[str, str]) -> None:
+    for name, value in headers.items():
+        if not name or not _HEADER_NAME.fullmatch(name):
+            raise ValidationError(f"非法的请求头名称: {name!r}")
+        if "\r" in value or "\n" in value:
+            raise ValidationError(f"请求头 {name} 的值不能包含换行")
+
+
+def build_curl_command(req: SSHCurlRequest) -> str:
+    """把结构化请求拼成一条安全的 curl 命令（所有片段均做 shell 转义）."""
+    url = req.url.strip()
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise ValidationError("接口地址必须以 http:// 或 https:// 开头")
+    if not parts.hostname:
+        raise ValidationError("接口地址无效")
+
+    allowed, reason = _build_url_policy(req.allow_private).validate(url)
+    if not allowed:
+        raise ValidationError(f"目标地址不被允许: {reason}")
+
+    _validate_headers(req.headers)
+
+    target = _append_query(url, req.params)
+    args = ["curl", "-sS", "-X", req.method, shlex.quote(target)]
+    for name, value in req.headers.items():
+        args.extend(["-H", shlex.quote(f"{name}: {value}")])
+    if req.body:
+        args.extend(["--data-raw", shlex.quote(req.body)])
+    return " ".join(args)
 
 
 def _read_limited(channel: paramiko.ChannelFile, limit: int) -> tuple[bytes, bool]:
@@ -182,7 +167,7 @@ class _SSHClient:
         return transport.get_banner() if transport else None
 
     def run(self, command: str, max_output: int) -> tuple[int | None, str, str, bool]:
-        stdin, stdout, stderr = self.client.exec_command(command, timeout=self.timeout)
+        _stdin, stdout, stderr = self.client.exec_command(command, timeout=self.timeout)
         stdout_data, stdout_truncated = _read_limited(stdout, max_output)
         stderr_data, stderr_truncated = _read_limited(stderr, max_output - len(stdout_data))
         exit_code = stdout.channel.recv_exit_status()
@@ -217,19 +202,16 @@ def test_ssh_connection(req: SSHTestRequest) -> dict[str, Any]:
         client.close()
 
 
-@router.post("/ssh/execute", response_model=dict[str, Any])
-def execute_curl(req: SSHRunRequest) -> dict[str, Any]:
-    """通过 SSH 执行一条 curl 命令并返回标准输出/错误输出."""
-    command = validate_curl_command(req.command, req.allow_private)
-    _apply_method_guard(command)
+@router.post("/ssh/request", response_model=dict[str, Any])
+def execute_request(req: SSHCurlRequest) -> dict[str, Any]:
+    """通过 SSH 在远程服务器执行一条由结构化参数生成的 curl 请求."""
+    command = build_curl_command(req)
 
     started = time.perf_counter()
     client = _SSHClient(req, req.timeout)
     try:
         client.connect()
-        exit_code, stdout, stderr, truncated = client.run(
-            command, min(get_settings().URL_MAX_RESPONSE_SIZE, 2 * 1024 * 1024)
-        )
+        exit_code, stdout, stderr, truncated = client.run(command, _MAX_OUTPUT_BYTES)
         return {
             "code": 0,
             "message": "执行完成",

@@ -482,3 +482,11 @@ export interface ServerCurlResult {
   truncated: boolean;
   command: string;
 }
+
+export interface ServerHttpRequestInput extends ServerConnectionInput {
+  method: string;
+  url: string;
+  params?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: string | null;
+}

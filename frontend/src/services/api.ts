@@ -29,6 +29,7 @@ import type {
   ServerConnectionInput,
   ServerConnectionTestResult,
   ServerCurlResult,
+  ServerHttpRequestInput,
 } from '../types';
 
 // 批量操作结果类型
@@ -853,9 +854,9 @@ export const serverConsoleApi = {
       '/tools/ssh/test',
       data
     ),
-  execute: (data: ServerConnectionInput & { command: string }) =>
-    api.post<unknown, ApiResponse<ServerCurlResult>>('/tools/ssh/execute', data, {
-      // curl 在远程服务器上执行，允许比普通请求更长的超时
+  request: (data: ServerHttpRequestInput) =>
+    api.post<unknown, ApiResponse<ServerCurlResult>>('/tools/ssh/request', data, {
+      // 请求在远程服务器上执行，允许比普通请求更长的超时
       timeout: 130000,
     }),
 };
