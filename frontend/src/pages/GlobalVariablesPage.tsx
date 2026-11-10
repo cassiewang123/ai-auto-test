@@ -11,6 +11,8 @@ import {
   Tag,
   Card,
   Select,
+  Switch,
+  Tooltip,
 } from 'antd';
 import {
   PlusOutlined,
@@ -97,6 +99,7 @@ export default function GlobalVariablesPage() {
       var_type: 'string',
       scope: 'global',
       value: '',
+      is_active: true,
     });
     setModalOpen(true);
   }
@@ -110,6 +113,7 @@ export default function GlobalVariablesPage() {
       description: record.description,
       scope: record.scope,
       project_id: record.project_id,
+      is_active: record.is_active !== false,
     });
     setModalOpen(true);
   }
@@ -138,6 +142,7 @@ export default function GlobalVariablesPage() {
         description: values.description,
         scope: values.scope,
         project_id: values.scope === 'workspace' ? values.project_id : undefined,
+        is_active: values.is_active !== false,
       };
       if (editing) {
         await globalVariableApi.update(editing.id, payload);
@@ -160,6 +165,16 @@ export default function GlobalVariablesPage() {
     try {
       await globalVariableApi.delete(id);
       message.success('删除成功');
+      loadData();
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
+
+  async function handleToggleActive(record: GlobalVariable, active: boolean) {
+    try {
+      await globalVariableApi.update(record.id, { is_active: active });
+      message.success(active ? '已启用' : '已禁用，执行时不再使用该变量');
       loadData();
     } catch (e: any) {
       message.error(e.message);
@@ -274,7 +289,30 @@ export default function GlobalVariablesPage() {
               title: '描述',
               dataIndex: 'description',
               ellipsis: true,
+              responsive: ['xxl'],
               render: (v: string) => v || '-',
+            },
+            {
+              title: '状态',
+              dataIndex: 'is_active',
+              width: 110,
+              render: (v: boolean, record) => {
+                const active = v !== false;
+                return (
+                  <Space size={6}>
+                    <Tooltip title={active ? '点击禁用' : '点击启用'}>
+                      <Switch
+                        size="small"
+                        checked={active}
+                        onChange={(checked) => handleToggleActive(record, checked)}
+                      />
+                    </Tooltip>
+                    <span style={{ color: active ? '#16a34a' : '#9ca3af', fontSize: 12 }}>
+                      {active ? '启用' : '禁用'}
+                    </span>
+                  </Space>
+                );
+              },
             },
             {
               title: '更新时间',
@@ -375,6 +413,14 @@ export default function GlobalVariablesPage() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <TextArea rows={2} placeholder="变量说明（可选）" />
+          </Form.Item>
+          <Form.Item
+            name="is_active"
+            label="启用该变量"
+            valuePropName="checked"
+            tooltip="禁用后变量仍保留在列表中，但执行时不会参与变量合并"
+          >
+            <Switch size="small" />
           </Form.Item>
           <div style={{ color: '#9ca3af', fontSize: 12 }}>
             变量在执行时通过 <code>{'{{变量名}}'}</code> 占位符引用，可写在 URL、请求头、查询参数和请求体中。

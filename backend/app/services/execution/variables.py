@@ -38,7 +38,7 @@ def load_global_variables(
     """加载全局变量与指定项目的工作空间变量，返回变量字典."""
     from app.models import GlobalVariable
 
-    query = db.query(GlobalVariable)
+    query = db.query(GlobalVariable).filter(GlobalVariable.is_active.is_(True))
     if project_id:
         from sqlalchemy import or_
 

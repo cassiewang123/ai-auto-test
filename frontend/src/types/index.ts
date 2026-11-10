@@ -160,6 +160,7 @@ export interface GlobalVariable {
   description?: string;
   scope: 'global' | 'workspace';
   project_id?: string;
+  is_active?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -171,6 +172,7 @@ export interface GlobalVariableCreate {
   description?: string;
   scope: 'global' | 'workspace';
   project_id?: string;
+  is_active?: boolean;
 }
 
 // 测试计划

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -16,6 +15,7 @@ class GlobalVariableBase(BaseModel):
     description: str | None = Field(default=None, description="描述")
     scope: str = Field(default="global", description="作用域：global/workspace")
     project_id: str | None = Field(default=None, description="工作空间作用域时绑定的项目 ID")
+    is_active: bool = Field(default=True, description="是否启用；禁用后执行时不参与变量合并")
 
 
 class GlobalVariableCreate(GlobalVariableBase):
@@ -33,6 +33,7 @@ class GlobalVariableUpdate(BaseModel):
     description: str | None = None
     scope: str | None = None
     project_id: str | None = None
+    is_active: bool | None = None
 
 
 class GlobalVariableResponse(GlobalVariableBase):

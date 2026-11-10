@@ -36,6 +36,8 @@ class GlobalVariable(Base):
     project_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # 禁用后不参与执行时的变量合并，但保留配置便于恢复
+    is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()
     )
