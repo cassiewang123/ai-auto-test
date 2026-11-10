@@ -42,7 +42,7 @@ import {
   MoreOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   testCaseApi,
   executionApi,
@@ -93,6 +93,26 @@ const statusLabel: Record<string, string> = {
 };
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+const SIDEBAR_WIDTH_KEY = 'airetest.api-list.sidebar-width';
+const SIDEBAR_DEFAULT_WIDTH = 300;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 720;
+/** 右侧详情区至少保留的宽度，拖拽时据此限制目录宽度 */
+const DETAIL_MIN_WIDTH = 420;
+
+function clampSidebarWidth(width: number, maxWidth: number): number {
+  return Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), Math.max(maxWidth, SIDEBAR_MIN_WIDTH));
+}
+
+function readStoredSidebarWidth(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : SIDEBAR_DEFAULT_WIDTH;
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
 
 interface TestCaseAssertionFormValue {
   assertion_type: string;
@@ -187,6 +207,20 @@ export default function ApiListPage() {
   const [viewMode, setViewMode] = useState<'table' | 'tree'>('tree');
   const [methodFilter, setMethodFilter] = useState<string>('');
   const [groupFilter, setGroupFilter] = useState<string>('');
+  // 左侧目录宽度：可拖拽调整，并记住上次的宽度
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const stopSidebarResizeRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      // 隐私模式等场景无法写入时，仅本次会话生效
+    }
+  }, [sidebarWidth]);
   // 树形视图选中的分组路径
   const [selectedGroupPath, setSelectedGroupPath] = useState<string>('');
   const [selectedCaseId, setSelectedCaseId] = useState<string>(
@@ -500,6 +534,90 @@ export default function ApiListPage() {
   }
 
   const groupTreeData = buildGroupTree(filtered);
+
+  // 记录工作区实际宽度，用于限制目录最大宽度，避免把右侧详情挤没
+  useEffect(() => {
+    const element = workspaceRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? element.clientWidth;
+      if (width > 0) setWorkspaceWidth(width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [viewMode, groupTreeData.length]);
+
+  const sidebarMaxWidth =
+    workspaceWidth > 0
+      ? Math.max(
+          SIDEBAR_MIN_WIDTH,
+          Math.min(SIDEBAR_MAX_WIDTH, workspaceWidth - DETAIL_MIN_WIDTH)
+        )
+      : SIDEBAR_MAX_WIDTH;
+  const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarMaxWidth);
+
+  function resizeSidebarTo(nextWidth: number) {
+    setSidebarWidth(clampSidebarWidth(nextWidth, sidebarMaxWidth));
+  }
+
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    stopSidebarResizeRef.current?.();
+    setSidebarDragging(true);
+
+    const startX = event.clientX;
+    const startWidth = effectiveSidebarWidth;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(
+        clampSidebarWidth(startWidth + moveEvent.clientX - startX, sidebarMaxWidth)
+      );
+    };
+    const stop = () => {
+      setSidebarDragging(false);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', stop);
+      document.removeEventListener('pointercancel', stop);
+      stopSidebarResizeRef.current = null;
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', stop);
+    document.addEventListener('pointercancel', stop);
+    stopSidebarResizeRef.current = stop;
+  }
+
+  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 64 : 16;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      resizeSidebarTo(effectiveSidebarWidth - step);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      resizeSidebarTo(effectiveSidebarWidth + step);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      resizeSidebarTo(SIDEBAR_MIN_WIDTH);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      resizeSidebarTo(sidebarMaxWidth);
+    }
+  }
+
+  // 组件卸载时如果仍在拖拽，清理监听和页面光标
+  useEffect(
+    () => () => {
+      stopSidebarResizeRef.current?.();
+    },
+    []
+  );
 
   // 右键菜单：移动到分组
   async function handleMoveGroup(sourcePath: string, targetPath: string) {
@@ -1202,8 +1320,12 @@ export default function ApiListPage() {
               </Space>
             </Empty>
           ) : (
-            <div className="api-workspace">
-              <aside className="api-workspace-sidebar">
+            <div
+              ref={workspaceRef}
+              className={`api-workspace${sidebarDragging ? ' api-workspace--resizing' : ''}`}
+              style={{ '--api-sidebar-width': `${effectiveSidebarWidth}px` } as CSSProperties}
+            >
+              <aside id="api-asset-sidebar" className="api-workspace-sidebar">
                 <div className="api-workspace-sidebar-header">
                   <div>
                     <div className="api-workspace-sidebar-title">
@@ -1297,6 +1419,23 @@ export default function ApiListPage() {
                   }}
                 />
               </aside>
+
+              <Tooltip title="拖动调整目录宽度，双击恢复默认">
+                <div
+                  className={`api-workspace-resizer${sidebarDragging ? ' is-dragging' : ''}`}
+                  role="separator"
+                  aria-label="调整接口目录宽度"
+                  aria-orientation="vertical"
+                  aria-controls="api-asset-sidebar"
+                  aria-valuemin={SIDEBAR_MIN_WIDTH}
+                  aria-valuemax={Math.round(sidebarMaxWidth)}
+                  aria-valuenow={Math.round(effectiveSidebarWidth)}
+                  tabIndex={0}
+                  onPointerDown={handleSidebarResizeStart}
+                  onDoubleClick={() => resizeSidebarTo(SIDEBAR_DEFAULT_WIDTH)}
+                  onKeyDown={handleSidebarResizeKeyDown}
+                />
+              </Tooltip>
 
               <main className="api-workspace-detail">
                 {selectedCase ? (

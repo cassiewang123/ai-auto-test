@@ -4,7 +4,7 @@
 
 .api-workspace {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  grid-template-columns: var(--api-sidebar-width, 300px) 8px minmax(0, 1fr);
   min-height: 560px;
   overflow: hidden;
   border: 1px solid #e5e7eb;
@@ -15,8 +15,47 @@
 .api-workspace-sidebar {
   min-width: 0;
   overflow: auto;
-  border-right: 1px solid #e5e7eb;
   background: #f8fafc;
+}
+
+.api-workspace-resizer {
+  position: relative;
+  z-index: 3;
+  min-height: 100%;
+  background: #fff;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.api-workspace-resizer::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: #e5e7eb;
+  content: '';
+  transform: translateX(-50%);
+  transition: width 0.15s ease, background 0.15s ease;
+}
+
+.api-workspace-resizer:hover::before,
+.api-workspace-resizer:focus-visible::before,
+.api-workspace-resizer.is-dragging::before {
+  width: 2px;
+  background: #2563eb;
+}
+
+.api-workspace-resizer:focus-visible {
+  outline: 2px solid #bfdbfe;
+  outline-offset: -2px;
+}
+
+.api-workspace--resizing,
+.api-workspace--resizing * {
+  cursor: col-resize !important;
 }
 
 .api-workspace-sidebar-header {
@@ -236,10 +275,6 @@
 }
 
 @media (max-width: 991px) {
-  .api-workspace {
-    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-  }
-
   .api-detail-header {
     flex-direction: column;
   }
@@ -295,6 +330,10 @@
     max-height: 300px;
     border-right: 0;
     border-bottom: 1px solid #e5e7eb;
+  }
+
+  .api-workspace-resizer {
+    display: none;
   }
 
   .api-workspace-detail {
