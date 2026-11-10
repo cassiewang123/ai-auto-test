@@ -34,6 +34,7 @@ export interface Environment {
   db_config?: DbConfig | null;
   cookies?: Array<{ name: string; value: string; domain?: string; path?: string }>;
   is_active: boolean;
+  allow_private?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +46,7 @@ export interface EnvironmentCreate {
   variables?: Record<string, any>;
   db_config?: DbConfig | null;
   cookies?: Array<{ name: string; value: string; domain?: string; path?: string }>;
+  allow_private?: boolean;
 }
 
 // 项目

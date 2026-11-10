@@ -1,9 +1,20 @@
 """URLPolicy 单元测试：SSRF 防护出站策略校验."""
 from __future__ import annotations
 
-import pytest
+from app.services.security.url_policy import URLPolicy, resolve_allow_private
 
-from app.services.security.url_policy import URLPolicy
+
+class TestResolveAllowPrivate:
+    def test_environment_flag_opens_private_targets(self):
+        assert resolve_allow_private(True, False) is True
+
+    def test_global_default_still_applies(self):
+        assert resolve_allow_private(False, True) is True
+        assert resolve_allow_private(None, True) is True
+
+    def test_both_off_stays_closed(self):
+        assert resolve_allow_private(False, False) is False
+        assert resolve_allow_private(None, False) is False
 
 
 # ---------------------------------------------------------------------------

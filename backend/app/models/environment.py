@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -29,6 +29,8 @@ class Environment(Base):
     # 会话 Cookie 列表：[{"name": "session", "value": "xxx", "domain": "api.example.com", "path": "/"}]
     cookies: Mapped[list] = mapped_column(JSONText, default=list)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # 允许该环境访问内网/环回地址（SSRF 默认拒绝，按环境单点放行）
+    allow_private: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()
     )
@@ -36,6 +38,6 @@ class Environment(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    test_cases: Mapped[list["TestCase"]] = relationship(  # noqa: F821
+    test_cases: Mapped[list[TestCase]] = relationship(  # noqa: F821
         back_populates="environment"
     )

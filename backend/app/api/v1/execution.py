@@ -33,33 +33,49 @@ from app.schemas.execution import (
 from app.services.auth_service import get_current_user
 from app.services.project_access import ensure_project_role
 from app.services.security.data_redaction import redact_sensitive_data
-from app.services.security.url_policy import URLPolicy
+from app.services.security.url_policy import URLPolicy, resolve_allow_private
 
 router = APIRouter()
 
 
-def _build_url_policy() -> URLPolicy:
-    """从应用配置构建 URLPolicy 实例（SSRF 防护）."""
+def _build_url_policy(allow_private: bool = False) -> URLPolicy:
+    """从应用配置构建 URLPolicy 实例（SSRF 防护）.
+
+    环境勾选“允许内网”时对该环境的请求放行私有地址；
+    ``URL_ALLOW_PRIVATE`` 作为全局兜底开关。
+    """
     settings = get_settings()
     allowed = [d.strip() for d in settings.URL_ALLOWED_DOMAINS.split(",") if d.strip()]
     blocked = [d.strip() for d in settings.URL_BLOCKED_DOMAINS.split(",") if d.strip()]
     return URLPolicy(
-        allow_private=settings.URL_ALLOW_PRIVATE,
+        allow_private=resolve_allow_private(allow_private, settings.URL_ALLOW_PRIVATE),
         allowed_domains=allowed,
         blocked_domains=blocked,
     )
 
 
 _settings = get_settings()
-_url_policy = _build_url_policy()
 _max_response_size = _settings.URL_MAX_RESPONSE_SIZE
 
+# 默认策略（全局开关）执行器；环境未放行内网时直接复用
 _executor = TestCaseExecutor(
     request_builder=RequestBuilder(
-        url_policy=_url_policy,
+        url_policy=_build_url_policy(),
         max_response_size=_max_response_size,
     )
 )
+
+
+def _make_executor(allow_private: bool = False) -> TestCaseExecutor:
+    """按环境的内网放行设置构建执行器."""
+    if not allow_private:
+        return _executor
+    return TestCaseExecutor(
+        request_builder=RequestBuilder(
+            url_policy=_build_url_policy(True),
+            max_response_size=_max_response_size,
+        )
+    )
 
 
 # ---------- 辅助函数 ----------
@@ -108,6 +124,7 @@ def _serialize_result(result: ExecutionResult) -> dict:
 def _run_pre_requests(
     pre_requests: list[PreRequest],
     variables: dict[str, Any],
+    allow_private: bool = False,
 ) -> tuple[dict[str, Any], list[dict]]:
     """执行前置请求链，提取变量合并到变量池.
 
@@ -116,7 +133,7 @@ def _run_pre_requests(
     pool = dict(variables)
     extractor = VariableExtractor()
     builder = RequestBuilder(
-        url_policy=_url_policy,
+        url_policy=_build_url_policy(allow_private),
         max_response_size=_max_response_size,
     )
     pre_results: list[dict] = []
@@ -327,7 +344,7 @@ def _load_direct_execution_context(
     environment_id: str | None,
     request_variables: dict[str, Any],
     request_cookies: list[dict],
-) -> tuple[dict[str, Any], list[dict], str | None]:
+) -> tuple[dict[str, Any], list[dict], str | None, bool]:
     """Load project variables and the selected environment for a quick test."""
     if project_id:
         ensure_project_role(db, current_user, project_id, "tester")
@@ -335,6 +352,7 @@ def _load_direct_execution_context(
     variables = _load_global_variables(db, project_id)
     cookies: list[dict] = []
     base_url: str | None = None
+    allow_private = False
 
     if environment_id:
         from app.models.environment import Environment
@@ -348,6 +366,7 @@ def _load_direct_execution_context(
             raise NotFoundError("Environment", environment_id)
         variables.update(environment.variables or {})
         base_url = environment.base_url
+        allow_private = bool(getattr(environment, "allow_private", False))
         try:
             cookies = decrypt_cookies(environment.cookies)
         except (SecretCryptoError, TypeError) as exc:
@@ -359,7 +378,7 @@ def _load_direct_execution_context(
 
     variables.update(request_variables)
     cookies = _merge_cookies(cookies, request_cookies)
-    return variables, cookies, base_url
+    return variables, cookies, base_url, allow_private
 
 
 def _resolve_pre_request_urls(
@@ -398,7 +417,7 @@ def run_test(
 
     from app.api.v1.history import save_history
 
-    context_variables, request_cookies, base_url = (
+    context_variables, request_cookies, base_url, env_allow_private = (
         _load_direct_execution_context(
             db,
             current_user,
@@ -415,6 +434,7 @@ def run_test(
     merged_vars, pre_results = _run_pre_requests(
         resolved_pre_requests,
         context_variables,
+        allow_private=env_allow_private,
     )
 
     # 2. 前置脚本
@@ -440,7 +460,7 @@ def run_test(
         request_def.headers,
     )
     result, attempts = _execute_with_retry(
-        executor=_executor,
+        executor=_make_executor(env_allow_private),
         request_def=request_def,
         assertions=req.assertions,
         variables=merged_vars,
@@ -547,7 +567,7 @@ async def run_test_multipart(
     parsed_pre = [PreRequest(**p) for p in json.loads(pre_requests)] if pre_requests else []
     parsed_cookies = json.loads(cookies) if cookies else []
 
-    context_variables, request_cookies, base_url = (
+    context_variables, request_cookies, base_url, env_allow_private = (
         _load_direct_execution_context(
             db,
             current_user,
@@ -574,7 +594,9 @@ async def run_test_multipart(
         )
 
     # 前置条件
-    merged_vars, pre_results = _run_pre_requests(parsed_pre, context_variables)
+    merged_vars, pre_results = _run_pre_requests(
+        parsed_pre, context_variables, allow_private=env_allow_private
+    )
 
     # 前置脚本
     pre_script_result = None
@@ -606,7 +628,7 @@ async def run_test_multipart(
         timeout=timeout,
     )
     result, attempts = _execute_with_retry(
-        executor=_executor,
+        executor=_make_executor(env_allow_private),
         request_def=request_def,
         assertions=parsed_assertions,
         variables=merged_vars,
@@ -695,6 +717,7 @@ def run_saved_case(
     variables: dict[str, Any] = _load_global_variables(db, case.project_id)
 
     env_cookies: list[dict] = []
+    env_allow_private = False
     if case.environment_id:
         from app.models.environment import Environment
 
@@ -707,6 +730,7 @@ def run_saved_case(
 
             # 环境变量覆盖全局变量（优先级：环境 > 全局）
             variables.update(env.variables or {})
+            env_allow_private = bool(getattr(env, "allow_private", False))
             try:
                 env_cookies = decrypt_cookies(env.cookies)
             except (SecretCryptoError, TypeError) as exc:
@@ -769,7 +793,7 @@ def run_saved_case(
 
     # 4. 执行（含失败重试）
     result, attempts = _execute_with_retry(
-        executor=_executor,
+        executor=_make_executor(env_allow_private),
         request_def=request_def,
         assertions=assertions,
         variables=variables,

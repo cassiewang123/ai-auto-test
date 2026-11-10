@@ -15,6 +15,18 @@ import socket
 from urllib.parse import urlparse
 
 
+def resolve_allow_private(
+    environment_allow_private: bool | None,
+    default: bool = False,
+) -> bool:
+    """合并全局开关与环境级开关.
+
+    环境勾选“允许内网”即可放行该环境的私有地址；全局
+    ``URL_ALLOW_PRIVATE`` 仍可作为临时总开关（用于没有选择环境的临时调试）。
+    """
+    return bool(default or environment_allow_private)
+
+
 class URLPolicy:
     """URL 出站安全策略校验器."""
 

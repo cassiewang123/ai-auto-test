@@ -16,6 +16,10 @@ class EnvironmentBase(BaseModel):
     description: str | None = Field(default=None, description="描述")
     db_config: dict[str, Any] | None = Field(default=None, description="数据库连接配置")
     cookies: list[dict[str, Any]] = Field(default_factory=list, description="会话 Cookie 列表")
+    allow_private: bool = Field(
+        default=False,
+        description="允许该环境访问内网/环回地址，仅用于内网测试环境",
+    )
 
 
 class EnvironmentCreate(EnvironmentBase):
@@ -34,6 +38,7 @@ class EnvironmentUpdate(BaseModel):
     db_config: dict[str, Any] | None = None
     cookies: list[dict[str, Any]] | None = None
     is_active: bool | None = None
+    allow_private: bool | None = None
 
 
 class EnvironmentResponse(BaseModel):
@@ -54,6 +59,7 @@ class EnvironmentResponse(BaseModel):
     db_config: dict[str, Any] | None = None
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     is_active: bool = True
+    allow_private: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

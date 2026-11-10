@@ -54,6 +54,19 @@ class TestCreateEnvironment:
         data = resp.json()["data"]
         assert data["variables"] == {}
         assert data["description"] is None
+        # 默认不放行内网地址
+        assert data["allow_private"] is False
+
+    def test_create_with_private_access(self, client):
+        env = _create_env(
+            client,
+            name="内网网关",
+            base_url="http://192.168.120.82:9002",
+            allow_private=True,
+        )
+        assert env["allow_private"] is True
+        listed = client.get(BASE).json()["data"]
+        assert listed[0]["allow_private"] is True
 
 
 # ---------------------------------------------------------------------------

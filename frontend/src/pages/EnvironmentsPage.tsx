@@ -12,6 +12,7 @@ import {
   message,
   Popconfirm,
   Tag,
+  Switch,
 } from 'antd';
 import {
   PlusOutlined,
@@ -77,6 +78,7 @@ export default function EnvironmentsPage() {
     form.resetFields();
     form.setFieldsValue({
       is_active: true,
+      allow_private: false,
       variables: '{}',
       db_type: 'mysql',
       db_host: '',
@@ -136,6 +138,7 @@ export default function EnvironmentsPage() {
         variables,
         db_config,
         cookies: cookies && cookies.length > 0 ? cookies : undefined,
+        allow_private: Boolean(values.allow_private),
       };
       if (editing) {
         await environmentApi.update(editing.id, payload);
@@ -253,6 +256,13 @@ export default function EnvironmentsPage() {
           { title: 'Base URL', dataIndex: 'base_url', ellipsis: true },
           { title: '描述', dataIndex: 'description', ellipsis: true },
           {
+            title: '内网',
+            dataIndex: 'allow_private',
+            width: 90,
+            render: (v: boolean) =>
+              v ? <Tag color="orange">已放行</Tag> : <Tag>拒绝</Tag>,
+          },
+          {
             title: '状态',
             dataIndex: 'is_active',
             width: 80,
@@ -327,6 +337,15 @@ export default function EnvironmentsPage() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input placeholder="环境描述（可选）" />
+          </Form.Item>
+          <Form.Item
+            name="allow_private"
+            label="允许访问内网地址"
+            valuePropName="checked"
+            tooltip="开启后，使用该环境执行的接口可以请求 192.168.x.x、10.x.x.x 等内网地址"
+            extra="仅对使用本环境的用例生效；不勾选则遵循全局 SSRF 策略"
+          >
+            <Switch size="small" />
           </Form.Item>
           <Form.Item
             name="variables"

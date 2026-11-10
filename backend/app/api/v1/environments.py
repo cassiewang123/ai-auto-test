@@ -43,6 +43,7 @@ def _to_env_response(env) -> dict:
         "db_config": sanitize_db_config(env.db_config),
         "cookies": sanitize_cookies(env.cookies),
         "is_active": env.is_active,
+        "allow_private": bool(env.allow_private),
         "created_at": env.created_at,
         "updated_at": env.updated_at,
     }

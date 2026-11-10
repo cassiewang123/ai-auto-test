@@ -585,7 +585,7 @@ class JobService:
         from app.models.test_case import TestCase
         from app.schemas.execution import RequestDefinition
         from app.services.security.secret_crypto import decrypt_cookies
-        from app.services.security.url_policy import URLPolicy
+        from app.services.security.url_policy import URLPolicy, resolve_allow_private
 
         if not job.resource_id:
             raise ValueError("api_case 任务缺少 resource_id")
@@ -598,6 +598,7 @@ class JobService:
         url = case.url
         variables: dict[str, Any] = {}
         environment_cookies: list[dict] = []
+        environment_allow_private = False
         if case.environment_id:
             from app.models.environment import Environment
 
@@ -605,12 +606,15 @@ class JobService:
             if env:
                 variables = dict(env.variables or {})
                 environment_cookies = decrypt_cookies(env.cookies)
+                environment_allow_private = bool(getattr(env, "allow_private", False))
             if env and env.base_url and not url.startswith("http"):
                 url = f"{env.base_url.rstrip('/')}/{url.lstrip('/')}"
 
         settings = get_settings()
         url_policy = URLPolicy(
-            allow_private=settings.URL_ALLOW_PRIVATE,
+            allow_private=resolve_allow_private(
+                environment_allow_private, settings.URL_ALLOW_PRIVATE
+            ),
             allowed_domains=[d.strip() for d in settings.URL_ALLOWED_DOMAINS.split(",") if d.strip()],
             blocked_domains=[d.strip() for d in settings.URL_BLOCKED_DOMAINS.split(",") if d.strip()],
         )

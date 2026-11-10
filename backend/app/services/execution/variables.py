@@ -76,15 +76,15 @@ def load_case_variables(
 
 def load_environment_context(
     db: Session, case
-) -> tuple[dict[str, Any], list[dict], str | None]:
-    """加载用例的环境变量、Cookie 与 base_url.
+) -> tuple[dict[str, Any], list[dict], str | None, bool]:
+    """加载用例的环境变量、Cookie、base_url 与内网放行开关.
 
     Returns:
-        (环境变量, 环境 Cookie, base_url)
+        (环境变量, 环境 Cookie, base_url, 是否允许内网)
     """
     environment_id = getattr(case, "environment_id", None)
     if not environment_id:
-        return {}, [], None
+        return {}, [], None, False
 
     from app.models.environment import Environment
     from app.services.security.secret_crypto import (
@@ -94,9 +94,14 @@ def load_environment_context(
 
     env = db.get(Environment, environment_id)
     if not env:
-        return {}, [], None
+        return {}, [], None, False
     try:
         cookies = decrypt_cookies(env.cookies)
     except (SecretCryptoError, TypeError):
         cookies = []
-    return dict(env.variables or {}), cookies, env.base_url
+    return (
+        dict(env.variables or {}),
+        cookies,
+        env.base_url,
+        bool(getattr(env, "allow_private", False)),
+    )

@@ -241,16 +241,18 @@ def batch_execute(
     from app.api.v1.history import save_history
     from app.config import get_settings
     from app.services.execution.variables import load_environment_context
-    from app.services.security.url_policy import URLPolicy
+    from app.services.security.url_policy import URLPolicy, resolve_allow_private
 
     settings = get_settings()
 
-    def _make_executor() -> TestCaseExecutor:
+    def _make_executor(allow_private: bool = False) -> TestCaseExecutor:
         """每个执行线程使用独立的执行器与 HTTP 客户端."""
         return TestCaseExecutor(
             request_builder=RequestBuilder(
                 url_policy=URLPolicy(
-                    allow_private=settings.URL_ALLOW_PRIVATE,
+                    allow_private=resolve_allow_private(
+                        allow_private, settings.URL_ALLOW_PRIVATE
+                    ),
                     allowed_domains=[
                         d.strip()
                         for d in settings.URL_ALLOWED_DOMAINS.split(",")
@@ -281,7 +283,7 @@ def batch_execute(
     prepared = []
     for case in cases:
         variables = load_case_variables(db, case)
-        env_vars, env_cookies, base_url = load_environment_context(db, case)
+        env_vars, env_cookies, base_url, env_allow_private = load_environment_context(db, case)
         variables.update(env_vars)
         request_def = _build_request_def_from_case(
             case, timeout=settings.BATCH_EXECUTE_REQUEST_TIMEOUT
@@ -302,6 +304,7 @@ def batch_execute(
                 "request_def": request_def,
                 "variables": variables,
                 "assertions": [a.__dict__ for a in case.assertions],
+                "allow_private": env_allow_private,
             }
         )
 
@@ -311,7 +314,7 @@ def batch_execute(
     def _run_prepared(item: dict) -> dict:
         case = item["case"]
         try:
-            result = _make_executor().execute(
+            result = _make_executor(item["allow_private"]).execute(
                 request_def=item["request_def"],
                 assertions=item["assertions"],
                 variables=item["variables"],
