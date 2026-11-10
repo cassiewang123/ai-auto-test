@@ -5,7 +5,9 @@
 .api-workspace {
   display: grid;
   grid-template-columns: var(--api-sidebar-width, 300px) 8px minmax(0, 1fr);
-  min-height: 560px;
+  height: calc(100vh - 388px);
+  height: calc(100dvh - 388px);
+  min-height: 280px;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
@@ -15,7 +17,33 @@
 .api-workspace-sidebar {
   min-width: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: #f8fafc;
+}
+
+.api-workspace-sidebar::-webkit-scrollbar,
+.api-workspace-detail::-webkit-scrollbar {
+  width: 10px;
+}
+
+.api-workspace-sidebar::-webkit-scrollbar-thumb,
+.api-workspace-detail::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #cbd5e1;
+  background-clip: padding-box;
+}
+
+.api-workspace-sidebar::-webkit-scrollbar-thumb:hover,
+.api-workspace-detail::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: padding-box;
+}
+
+.api-workspace-sidebar::-webkit-scrollbar-track,
+.api-workspace-detail::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .api-workspace-resizer {
@@ -323,6 +351,7 @@
 
   .api-workspace {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
     min-height: 0;
   }
 

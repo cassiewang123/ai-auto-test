@@ -212,6 +212,7 @@ export default function ApiListPage() {
   const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [workspaceHeight, setWorkspaceHeight] = useState<number>();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const stopSidebarResizeRef = useRef<(() => void) | null>(null);
 
@@ -547,6 +548,24 @@ export default function ApiListPage() {
     observer.observe(element);
     return () => observer.disconnect();
   }, [viewMode, groupTreeData.length]);
+
+  // 让左右两栏贴合当前视口高度，各自内部滚动，页面本身不随目录展开
+  useEffect(() => {
+    function updateWorkspaceHeight() {
+      const element = workspaceRef.current;
+      if (!element) return;
+      if (window.innerWidth <= 767) {
+        setWorkspaceHeight(undefined);
+        return;
+      }
+      const top = element.getBoundingClientRect().top;
+      setWorkspaceHeight(Math.max(280, Math.round(window.innerHeight - top - 76)));
+    }
+
+    updateWorkspaceHeight();
+    window.addEventListener('resize', updateWorkspaceHeight);
+    return () => window.removeEventListener('resize', updateWorkspaceHeight);
+  }, [viewMode, cases.length, groupTreeData.length]);
 
   const sidebarMaxWidth =
     workspaceWidth > 0
@@ -1324,7 +1343,10 @@ export default function ApiListPage() {
             <div
               ref={workspaceRef}
               className={`api-workspace${sidebarDragging ? ' api-workspace--resizing' : ''}`}
-              style={{ '--api-sidebar-width': `${effectiveSidebarWidth}px` } as CSSProperties}
+              style={{
+                '--api-sidebar-width': `${effectiveSidebarWidth}px`,
+                height: workspaceHeight ? `${workspaceHeight}px` : undefined,
+              } as CSSProperties}
             >
               <aside id="api-asset-sidebar" className="api-workspace-sidebar">
                 <div className="api-workspace-sidebar-header">
