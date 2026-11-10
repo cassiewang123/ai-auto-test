@@ -54,24 +54,22 @@ class URLPolicy:
         # 5. DNS 解析后检查 IP
         try:
             ips = socket.getaddrinfo(hostname, None)
-            for family, _, _, _, sockaddr in ips:
+            for _family, _, _, _, sockaddr in ips:
                 ip = ipaddress.ip_address(sockaddr[0])
                 # 6. 默认拒绝 loopback/link-local/multicast/私有地址
-                if not self.allow_private:
-                    if (
-                        ip.is_loopback
-                        or ip.is_link_local
-                        or ip.is_multicast
-                        or ip.is_private
-                    ):
-                        # 允许 127.0.0.1 仅在开发模式
-                        if ip.is_loopback and self.allow_private:
-                            continue
-                        return (
-                            False,
-                            f"不允许的目标地址: {ip} "
-                            f"(私有/环回/链路本地/组播)",
-                        )
+                if not self.allow_private and (
+                    ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_private
+                ):
+                    return (
+                        False,
+                        f"不允许的目标地址: {ip} "
+                        f"(私有/环回/链路本地/组播)。"
+                        f"如需调试内网接口，请在 .env 设置 "
+                        f"URL_ALLOW_PRIVATE=true 并重启后端",
+                    )
                 # 7. 拒绝云元数据地址 169.254.169.254
                 if str(ip) == self._CLOUD_METADATA_IP:
                     return False, "不允许访问云元数据地址"
