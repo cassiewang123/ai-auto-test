@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     INFLUXDB_BUCKET: str = "metrics"
 
     # SSRF 防护
-    URL_ALLOW_PRIVATE: bool = True  # 开发环境允许访问私有地址
+    URL_ALLOW_PRIVATE: bool = True  # 默认允许内网/本机地址；生产环境强制关闭
     URL_ALLOWED_DOMAINS: str = ""  # 逗号分隔的域名白名单
     URL_BLOCKED_DOMAINS: str = ""  # 逗号分隔的域名黑名单
     # 出站响应体大小上限（字节），默认 10MB
