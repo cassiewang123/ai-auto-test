@@ -75,14 +75,16 @@ def load_case_variables(
 
 
 def load_environment_context(
-    db: Session, case
+    db: Session, case, environment_override_id: str | None = None
 ) -> tuple[dict[str, Any], list[dict], str | None, bool]:
     """加载用例的环境变量、Cookie、base_url 与内网放行开关.
+
+    ``environment_override_id`` 优先于用例自身绑定环境（如列表页顶部选中的环境）。
 
     Returns:
         (环境变量, 环境 Cookie, base_url, 是否允许内网)
     """
-    environment_id = getattr(case, "environment_id", None)
+    environment_id = environment_override_id or getattr(case, "environment_id", None)
     if not environment_id:
         return {}, [], None, False
 

@@ -55,6 +55,7 @@ import {
   defaultStatusCodeAssertion,
 } from '../utils/assertions';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const methodColor: Record<string, string> = {
   GET: 'green', POST: 'orange', PUT: 'blue', PATCH: 'purple', DELETE: 'red',
@@ -68,6 +69,7 @@ const statusLabel: Record<string, string> = {
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
 export default function TestCasesPage() {
+  const { selectedEnvironmentId } = useWorkspace();
   const [cases, setCases] = useState<TestCase[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
@@ -174,7 +176,7 @@ export default function TestCasesPage() {
   async function handleExecute(caseId: string, title?: string) {
     setExecutingId(caseId);
     try {
-      const res = await executionApi.runSavedCase(caseId);
+      const res = await executionApi.runSavedCase(caseId, selectedEnvironmentId || undefined);
       const status = res.data.status;
       setLastResults(prev => ({ ...prev, [caseId]: status }));
       setSingleResult({
@@ -197,7 +199,7 @@ export default function TestCasesPage() {
     if (ids.length === 0) { message.warning('请先勾选用例'); return; }
     setBatchExecuting(true);
     try {
-      const res = await testCaseApi.batchExecute(ids);
+      const res = await testCaseApi.batchExecute(ids, selectedEnvironmentId || undefined);
       const d = res.data;
       setLastResults(prev => {
         const next = { ...prev };

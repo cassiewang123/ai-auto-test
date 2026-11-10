@@ -8,6 +8,18 @@ from app.models.global_variable import GlobalVariable
 from app.models.test_case import TestCase as ApiTestCase
 
 
+@pytest.fixture(autouse=True)
+def allow_private_for_batch_execute(monkeypatch):
+    """URL_ALLOW_PRIVATE 默认改为 False；本组用例验证变量渲染，需显式放行私网.
+
+    用例使用 192.168.x.x 的 mock 地址，与「默认拒绝私网、单次显式放行」的
+    产品语义一致：这里只在测试进程内显式放行，不改变 .env / config.py 默认值。
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "URL_ALLOW_PRIVATE", True)
+
+
 @pytest.fixture
 def workspace_case(db_session):
     project_id = "11111111-1111-1111-1111-111111111111"
@@ -217,3 +229,91 @@ def test_history_source_filter(client, monkeypatch, workspace_case, db_session):
     everything = client.get("/api/v1/history", params={"page": 1, "page_size": 10})
     assert everything.status_code == 200
     assert everything.json()["total"] == 2
+
+
+def test_batch_execute_uses_environment_override(client, monkeypatch, db_session):
+    """批量执行传入 environment_id 时，未绑定环境的用例也应按该环境解析 base_url."""
+    from app.models.environment import Environment
+
+    env = Environment(
+        id="33333333-3333-3333-3333-333333333333",
+        name="override-env",
+        base_url="http://192.168.120.82:9002",
+        variables={},
+        allow_private=True,
+    )
+    case = ApiTestCase(
+        title="override-case",
+        method="GET",
+        url="/v1/ping",
+        headers={},
+        params={},
+        body=None,
+    )
+    db_session.add_all([env, case])
+    db_session.commit()
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"ok": True})
+
+    real_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(handler))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", patched_client)
+
+    response = client.post(
+        "/api/v1/test-cases/batch-execute",
+        json={"case_ids": [case.id], "environment_id": env.id},
+    )
+    assert response.status_code == 200
+    assert captured["url"] == "http://192.168.120.82:9002/v1/ping"
+
+
+def test_run_saved_case_uses_environment_override(client, monkeypatch, db_session):
+    """单次执行传入 environment_id 时，应覆盖用例未绑定环境的情况."""
+    from app.models.environment import Environment
+
+    env = Environment(
+        id="44444444-4444-4444-4444-444444444444",
+        name="saved-override-env",
+        base_url="http://192.168.120.82:9002",
+        variables={"savedVar": "from-env"},
+        allow_private=True,
+    )
+    case = ApiTestCase(
+        title="saved-override-case",
+        method="GET",
+        url="/v1/saved",
+        headers={},
+        params={},
+        body=None,
+    )
+    db_session.add_all([env, case])
+    db_session.commit()
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"ok": True})
+
+    real_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(handler))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", patched_client)
+
+    response = client.post(
+        f"/api/v1/execution/run/{case.id}",
+        params={"environment_id": env.id},
+    )
+    assert response.status_code == 200
+    assert captured["url"] == "http://192.168.120.82:9002/v1/saved"

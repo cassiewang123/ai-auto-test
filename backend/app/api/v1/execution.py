@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 from test_engine.executor import TestCaseExecutor
 from test_engine.request_builder import RequestBuilder
@@ -697,6 +697,7 @@ async def run_test_multipart(
 @router.post("/run/{case_id}", response_model=DataResponse[dict])
 def run_saved_case(
     case_id: str,
+    environment_id: str | None = Query(None, description="执行时覆盖用例绑定环境"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -704,6 +705,7 @@ def run_saved_case(
 
     变量合并优先级：临时（运行参数）> 环境变量 > 全局变量。
     同时支持用例上配置的前置/后置脚本、失败重试与 Cookie 会话。
+    ``environment_id`` 可覆盖用例绑定环境（例如列表页顶部选中的环境）。
     """
     _ensure_sync_execution_allowed()
 
@@ -713,15 +715,17 @@ def run_saved_case(
     if not case:
         raise NotFoundError("TestCase", case_id)
 
+    effective_environment_id = environment_id or case.environment_id
+
     # 1. 加载全局变量（优先级最低）
     variables: dict[str, Any] = _load_global_variables(db, case.project_id)
 
     env_cookies: list[dict] = []
     env_allow_private = False
-    if case.environment_id:
+    if effective_environment_id:
         from app.models.environment import Environment
 
-        env = db.query(Environment).filter(Environment.id == case.environment_id).first()
+        env = db.query(Environment).filter(Environment.id == effective_environment_id).first()
         if env:
             from app.services.security.secret_crypto import (
                 SecretCryptoError,
@@ -744,6 +748,8 @@ def run_saved_case(
             else:
                 case_url = case.url
         else:
+            if environment_id:
+                raise NotFoundError("Environment", environment_id)
             case_url = case.url
     else:
         case_url = case.url

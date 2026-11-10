@@ -79,8 +79,9 @@ class URLPolicy:
                         False,
                         f"不允许的目标地址: {ip} "
                         f"(私有/环回/链路本地/组播)。"
-                        f"如需调试内网接口，请在 .env 设置 "
-                        f"URL_ALLOW_PRIVATE=true 并重启后端",
+                        f"请在「环境管理」中开启该环境的「允许访问内网地址」，"
+                        f"并在执行时选中该环境；临时全局放行可在 .env 设置 "
+                        f"URL_ALLOW_PRIVATE=true 后重启后端",
                     )
                 # 7. 拒绝云元数据地址 169.254.169.254
                 if str(ip) == self._CLOUD_METADATA_IP:

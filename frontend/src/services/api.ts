@@ -95,8 +95,8 @@ export const testCaseApi = {
     api.delete<unknown, ApiResponse<TestCase>>(`/test-cases/${id}`),
   copy: (id: string) =>
     api.post<unknown, ApiResponse<TestCase>>(`/test-cases/${id}/copy`),
-  batchExecute: (caseIds: string[]) =>
-    api.post<unknown, ApiResponse<BatchExecuteResult>>('/test-cases/batch-execute', { case_ids: caseIds }, { timeout: 900000 }),
+  batchExecute: (caseIds: string[], environmentId?: string) =>
+    api.post<unknown, ApiResponse<BatchExecuteResult>>('/test-cases/batch-execute', { case_ids: caseIds, environment_id: environmentId }, { timeout: 900000 }),
   batchDelete: (caseIds: string[]) =>
     api.post<unknown, ApiResponse<BatchDeleteResult>>('/test-cases/batch-delete', { case_ids: caseIds }),
   batchMove: (caseIds: string[], projectId: string | null) =>
@@ -349,9 +349,11 @@ export const executionApi = {
       { headers: { 'Content-Type': 'multipart/form-data' } }
     );
   },
-  runSavedCase: (caseId: string) =>
+  runSavedCase: (caseId: string, environmentId?: string) =>
     api.post<unknown, ApiResponse<ExecutionResultData>>(
-      `/execution/run/${caseId}`
+      `/execution/run/${caseId}`,
+      undefined,
+      { params: environmentId ? { environment_id: environmentId } : undefined }
     ),
 };
 

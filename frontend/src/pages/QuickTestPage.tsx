@@ -384,7 +384,10 @@ export default function QuickTestPage() {
           setResult(null);
           consoleRef.current?.clear();
           setSelectedProjectId(testCase.project_id ?? null);
-          setSelectedEnvironmentId(testCase.environment_id ?? null);
+          // 用例未绑定环境时保留顶部已选环境，避免打开用例后内网放行失效
+          if (testCase.environment_id) {
+            setSelectedEnvironmentId(testCase.environment_id);
+          }
         })
         .catch((error: any) => {
           if (active) {

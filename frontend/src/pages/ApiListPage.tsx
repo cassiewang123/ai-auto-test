@@ -158,6 +158,7 @@ export default function ApiListPage() {
     projects: workspaceProjects,
     selectedProjectId: workspaceProjectId,
     setSelectedProjectId: setWorkspaceProjectId,
+    selectedEnvironmentId,
   } = useWorkspace();
   const [cases, setCases] = useState<TestCase[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -650,7 +651,7 @@ export default function ApiListPage() {
   async function handleQuickExecute(caseId: string, title?: string) {
     setExecutingId(caseId);
     try {
-      const res = await executionApi.runSavedCase(caseId);
+      const res = await executionApi.runSavedCase(caseId, selectedEnvironmentId || undefined);
       const status = res.data.status;
       setLastResults((prev) => ({ ...prev, [caseId]: status }));
       setSingleResult({
@@ -677,7 +678,7 @@ export default function ApiListPage() {
     }
     setBatchExecuting(true);
     try {
-      const res = await testCaseApi.batchExecute(selectedRowKeys);
+      const res = await testCaseApi.batchExecute(selectedRowKeys, selectedEnvironmentId || undefined);
       const d = res.data;
       setLastResults((prev) => {
         const next = { ...prev };

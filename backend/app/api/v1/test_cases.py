@@ -191,6 +191,7 @@ def create_test_case(
 
 class BatchExecuteRequest(BaseModel):
     case_ids: list[str]
+    environment_id: str | None = None
 
 
 class BatchDeleteRequest(BaseModel):
@@ -283,7 +284,9 @@ def batch_execute(
     prepared = []
     for case in cases:
         variables = load_case_variables(db, case)
-        env_vars, env_cookies, base_url, env_allow_private = load_environment_context(db, case)
+        env_vars, env_cookies, base_url, env_allow_private = load_environment_context(
+            db, case, req.environment_id
+        )
         variables.update(env_vars)
         request_def = _build_request_def_from_case(
             case, timeout=settings.BATCH_EXECUTE_REQUEST_TIMEOUT
