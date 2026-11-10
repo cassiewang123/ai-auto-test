@@ -289,6 +289,21 @@ export default function QuickTestPage() {
   const selectedEnvironment = environments.find(
     (environment) => environment.id === selectedEnvironmentId,
   );
+  // 环境被删除后清理本地缓存的选择，避免执行时携带失效 ID
+  useEffect(() => {
+    if (
+      selectedEnvironmentId &&
+      environments.length > 0 &&
+      !selectedEnvironment
+    ) {
+      setSelectedEnvironmentId(null);
+    }
+  }, [
+    environments,
+    selectedEnvironment,
+    selectedEnvironmentId,
+    setSelectedEnvironmentId,
+  ]);
   const workspaceVariables = {
     ...(selectedEnvironment?.base_url ? { base_url: selectedEnvironment.base_url } : {}),
     ...(selectedEnvironment?.variables || {}),
@@ -620,7 +635,7 @@ export default function QuickTestPage() {
           retry_count: retryCount,
           retry_interval: retryInterval,
           project_id: selectedProjectId || undefined,
-          environment_id: selectedEnvironmentId || undefined,
+          environment_id: selectedEnvironment?.id || undefined,
           fileList: fileItems.map((f) => f.file),
           fileFields: fileItems.map((f) => f.field),
         });
@@ -637,7 +652,7 @@ export default function QuickTestPage() {
           retry_count: retryCount,
           retry_interval: retryInterval,
           project_id: selectedProjectId || undefined,
-          environment_id: selectedEnvironmentId || undefined,
+          environment_id: selectedEnvironment?.id || undefined,
         });
       }
       setResult(res.data);
@@ -768,7 +783,7 @@ export default function QuickTestPage() {
         body: parsedBody,
         group_path: values.group_path || undefined,
         project_id: values.project_id || selectedProjectId || undefined,
-        environment_id: selectedEnvironmentId || undefined,
+        environment_id: selectedEnvironment?.id || undefined,
         markers: ['quick_test'],
         extract_rules: extractRules,
         retry_count: retryCount,

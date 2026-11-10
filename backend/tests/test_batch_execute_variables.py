@@ -317,3 +317,32 @@ def test_run_saved_case_uses_environment_override(client, monkeypatch, db_sessio
     )
     assert response.status_code == 200
     assert captured["url"] == "http://192.168.120.82:9002/v1/saved"
+
+def test_run_with_stale_environment_id_falls_back(client, monkeypatch, db_session):
+    """已删除环境的 ID 不应阻塞执行；按未选择环境继续执行."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"ok": True})
+
+    real_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(handler))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", patched_client)
+
+    payload = {
+        "method": "GET",
+        "url": "http://192.168.120.82:9002/v1/stale",
+        "headers": {},
+        "params": {},
+        "body": None,
+        "environment_id": "deadbeef-dead-beef-dead-beefdeadbeef",
+    }
+    response = client.post("/api/v1/execution/run", json=payload)
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] in {"passed", "failed"}
+    assert captured["url"] == "http://192.168.120.82:9002/v1/stale"

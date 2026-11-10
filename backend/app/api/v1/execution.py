@@ -362,19 +362,19 @@ def _load_direct_execution_context(
         )
 
         environment = db.get(Environment, environment_id)
-        if environment is None:
-            raise NotFoundError("Environment", environment_id)
-        variables.update(environment.variables or {})
-        base_url = environment.base_url
-        allow_private = bool(getattr(environment, "allow_private", False))
-        try:
-            cookies = decrypt_cookies(environment.cookies)
-        except (SecretCryptoError, TypeError) as exc:
-            raise AppException(
-                status_code=422,
-                message="环境 Cookie 解密失败",
-                detail=str(exc),
-            ) from exc
+        # 环境可能已在其他页面删除；失效环境按未选择处理，继续执行请求
+        if environment is not None:
+            variables.update(environment.variables or {})
+            base_url = environment.base_url
+            allow_private = bool(getattr(environment, "allow_private", False))
+            try:
+                cookies = decrypt_cookies(environment.cookies)
+            except (SecretCryptoError, TypeError) as exc:
+                raise AppException(
+                    status_code=422,
+                    message="环境 Cookie 解密失败",
+                    detail=str(exc),
+                ) from exc
 
     variables.update(request_variables)
     cookies = _merge_cookies(cookies, request_cookies)
@@ -726,6 +726,9 @@ def run_saved_case(
         from app.models.environment import Environment
 
         env = db.query(Environment).filter(Environment.id == effective_environment_id).first()
+        # 顶部环境可能已在别处删除，回退到用例自身绑定环境而不是直接报错
+        if not env and environment_id and case.environment_id:
+            env = db.query(Environment).filter(Environment.id == case.environment_id).first()
         if env:
             from app.services.security.secret_crypto import (
                 SecretCryptoError,
@@ -748,8 +751,6 @@ def run_saved_case(
             else:
                 case_url = case.url
         else:
-            if environment_id:
-                raise NotFoundError("Environment", environment_id)
             case_url = case.url
     else:
         case_url = case.url
