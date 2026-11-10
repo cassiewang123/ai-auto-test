@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     CELERY_TASK_ACKS_LATE: bool = True
     CELERY_WORKER_PREFETCH_MULTIPLIER: int = 1
     CELERY_TERMINATE_SIGNAL: str = "SIGTERM"
+    CELERY_TASK_TRACK_STARTED: bool = True
+    CELERY_TASK_SEND_SENT_EVENT: bool = True
+    CELERY_WORKER_SEND_TASK_EVENTS: bool = True
+    CELERY_WORKER_MAX_TASKS_PER_CHILD: int = 1000
+    CELERY_WORKER_MAX_MEMORY_PER_CHILD: int = 0
+    CELERY_RESULT_EXPIRES_SECONDS: int = 86400
+    CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP: bool = True
 
     # JWT
     SECRET_KEY: str = DEV_JWT_SECRET_KEY
@@ -69,8 +76,10 @@ class Settings(BaseSettings):
     SECRET_ENCRYPTION_KEY_VERSION: str = "v1"
 
     # LLM（可选）
+    # 总闸：默认关闭外部 LLM 调用；即使误填 OPENAI_API_KEY 也不会外发数据。
+    LLM_EXTERNAL_ENABLED: bool = False
     OPENAI_API_KEY: str = ""
-    LLM_MODEL: str = "gpt-4"
+    LLM_MODEL: str = "gpt-4"  # 未启用外部 LLM 时的占位模型名
     LLM_BASE_URL: str = ""
 
     # InfluxDB（可选）
@@ -80,13 +89,15 @@ class Settings(BaseSettings):
     INFLUXDB_BUCKET: str = "metrics"
 
     # SSRF 防护
-    URL_ALLOW_PRIVATE: bool = True  # 开发环境允许访问私有地址
+    URL_ALLOW_PRIVATE: bool = True  # 默认允许内网/本机地址（生产环境强制关闭）
     URL_ALLOWED_DOMAINS: str = ""  # 逗号分隔的域名白名单
     URL_BLOCKED_DOMAINS: str = ""  # 逗号分隔的域名黑名单
     # 出站响应体大小上限（字节），默认 10MB
     URL_MAX_RESPONSE_SIZE: int = 10 * 1024 * 1024
 
     # 执行安全
+    # SSH 控制台启用开关：默认关闭，需在 .env 显式开启并重启后端才生效。
+    SSH_CONSOLE_ENABLED: bool = False
     ALLOW_SYNC_EXECUTION: bool = True  # 生产环境应设为 False
     SCRIPT_EXECUTION_TIMEOUT: int = 30  # 脚本执行超时（秒）
     # 批量执行的并发线程数（受限于被调用方的承载能力，默认保守值）
@@ -113,6 +124,24 @@ class Settings(BaseSettings):
         )
 
         errors: list[str] = []
+        if self.DEBUG:
+            errors.append("Production requires DEBUG=false")
+        if self.URL_ALLOW_PRIVATE:
+            errors.append("Production requires URL_ALLOW_PRIVATE=false")
+
+        cors_origins = [
+            origin.strip()
+            for origin in self.CORS_ORIGINS.split(",")
+            if origin.strip()
+        ]
+        if not cors_origins or "*" in cors_origins:
+            errors.append(
+                "Production requires an explicit non-wildcard CORS_ORIGINS"
+            )
+
+        if self.DATABASE_URL.startswith("sqlite"):
+            errors.append("Production requires a non-SQLite DATABASE_URL")
+
         if not self.SECRET_KEY or self.SECRET_KEY == DEV_JWT_SECRET_KEY:
             errors.append("Production requires an explicit SECRET_KEY")
         if (
@@ -143,6 +172,19 @@ class Settings(BaseSettings):
             errors.append(
                 "Production requires TASK_FALLBACK_MODE=disabled"
             )
+        if self.TASK_EAGER_IN_TESTS:
+            errors.append(
+                "Production requires TASK_EAGER_IN_TESTS=false"
+            )
+        if self.TASK_DISPATCH_MODE in {"auto", "celery"}:
+            if not self.CELERY_BROKER_URL:
+                errors.append(
+                    "Production Celery mode requires CELERY_BROKER_URL"
+                )
+            if not self.CELERY_RESULT_BACKEND:
+                errors.append(
+                    "Production Celery mode requires CELERY_RESULT_BACKEND"
+                )
 
         if errors:
             raise ValueError(
