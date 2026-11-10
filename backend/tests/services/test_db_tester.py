@@ -48,6 +48,9 @@ class TestDatabaseConfig:
         with pytest.raises(ValidationError):
             DatabaseConfig(db_type="unsupported")
 
+    def test_legacy_postgres_alias_is_normalized(self):
+        assert DatabaseConfig(db_type="postgres").db_type == "postgresql"
+
 
 # ---------------------------------------------------------------------------
 # URL 构建（多数据库）
@@ -85,6 +88,22 @@ class TestBuildUrl:
         url = self.tester.build_url(config)
         assert "postgresql+psycopg2" in url
         assert "h:5432" in url
+
+    def test_dm_url_uses_default_port_and_escapes_password(self):
+        config = DatabaseConfig(
+            db_type="dm",
+            host="dm-host", username="SYSDBA", password="p@ss", database="APP",
+        )
+        url = self.tester.build_url(config)
+        assert url == "dm+dmPython://SYSDBA:p%40ss@dm-host:5236"
+
+    def test_dm_url_keeps_custom_port(self):
+        config = DatabaseConfig(
+            db_type="dm",
+            host="10.0.0.8", port=6236, username="SYSDBA", password="p",
+        )
+        url = self.tester.build_url(config)
+        assert url == "dm+dmPython://SYSDBA:p@10.0.0.8:6236"
 
     def test_mongodb_url(self):
         config = DatabaseConfig(

@@ -15,7 +15,7 @@ export interface PageResponse<T = any> extends ApiResponse<T[]> {
 
 // 数据库连接配置（与后端 Environment.db_config 对齐）
 export interface DbConfig {
-  db_type?: 'mysql' | 'sqlite' | 'postgres';
+  db_type?: 'mysql' | 'sqlite' | 'postgres' | 'postgresql' | 'dm';
   host?: string;
   port?: number;
   database?: string;

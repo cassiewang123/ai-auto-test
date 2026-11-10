@@ -21,7 +21,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { environmentApi } from '../services/api';
-import type { Environment, EnvironmentCreate } from '../types';
+import type { DbConfig, Environment, EnvironmentCreate } from '../types';
 import JsonEditor from '../components/JsonEditor';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
 
@@ -38,6 +38,27 @@ function isValidIpUrl(url: string): boolean {
   });
 }
 
+const DB_TYPE_OPTIONS = [
+  { label: 'MySQL', value: 'mysql' },
+  { label: '达梦数据库 (DM)', value: 'dm' },
+  { label: 'SQLite', value: 'sqlite' },
+  { label: 'PostgreSQL', value: 'postgresql' },
+];
+
+const DB_DEFAULT_PORTS: Record<string, number | undefined> = {
+  mysql: 3306,
+  dm: 5236,
+  oracle: 1521,
+  postgresql: 5432,
+  sqlite: undefined,
+};
+
+/** 兼容旧数据中的 postgres 写法 */
+function normalizeDbType(dbType?: string): NonNullable<DbConfig['db_type']> {
+  if (dbType === 'postgres') return 'postgresql';
+  return (dbType || 'mysql') as NonNullable<DbConfig['db_type']>;
+}
+
 export default function EnvironmentsPage() {
   const [data, setData] = useState<Environment[]>([]);
   const [total, setTotal] = useState(0);
@@ -48,6 +69,7 @@ export default function EnvironmentsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Environment | null>(null);
   const [form] = Form.useForm();
+  const dbType = Form.useWatch('db_type', form) as string | undefined;
 
   // Cookie 管理
   const [cookies, setCookies] = useState<Environment['cookies']>([]);
@@ -94,12 +116,13 @@ export default function EnvironmentsPage() {
   function openEdit(record: Environment) {
     setEditing(record);
     const cfg = record.db_config || {};
+    const storedDbType = normalizeDbType(cfg.db_type);
     form.setFieldsValue({
       ...record,
       variables: JSON.stringify(record.variables || {}, null, 2),
-      db_type: cfg.db_type || 'mysql',
+      db_type: storedDbType,
       db_host: cfg.host || '',
-      db_port: cfg.port ?? 3306,
+      db_port: cfg.port ?? DB_DEFAULT_PORTS[storedDbType] ?? 3306,
       db_database: cfg.database || '',
       db_user: cfg.user || '',
       db_password: cfg.password || '',
@@ -123,7 +146,7 @@ export default function EnvironmentsPage() {
       let db_config: EnvironmentCreate['db_config'] = null;
       if (values.db_database || values.db_host) {
         db_config = {
-          db_type: values.db_type || 'mysql',
+          db_type: normalizeDbType(values.db_type),
           host: values.db_host || undefined,
           port: values.db_port ?? undefined,
           database: values.db_database || undefined,
@@ -364,23 +387,46 @@ export default function EnvironmentsPage() {
           </Divider>
           <Form.Item name="db_type" label="数据库类型">
             <Select
-              options={[
-                { label: 'MySQL', value: 'mysql' },
-                { label: 'SQLite', value: 'sqlite' },
-                { label: 'PostgreSQL', value: 'postgres' },
-              ]}
+              data-testid="db-type-select"
+              options={DB_TYPE_OPTIONS}
+              onChange={(value: string) => {
+                // 切换类型时带出该数据库的默认端口，仍可手动修改
+                form.setFieldValue('db_port', DB_DEFAULT_PORTS[value]);
+              }}
             />
           </Form.Item>
+          {dbType === 'dm' && (
+            <div style={{ marginTop: -16, marginBottom: 16, color: '#64748b', fontSize: 12 }}>
+              达梦默认端口 5236；实例内通常只有一个库，模式名一般与登录用户一致。
+            </div>
+          )}
           <Space style={{ width: '100%' }} size="middle">
             <Form.Item name="db_host" label="主机地址" style={{ flex: 1, minWidth: 240 }}>
-              <Input placeholder="如 127.0.0.1（SQLite 可留空）" />
+              <Input
+                data-testid="db-host-input"
+                placeholder={
+                  dbType === 'dm' ? '如 127.0.0.1' : '如 127.0.0.1（SQLite 可留空）'
+                }
+              />
             </Form.Item>
             <Form.Item name="db_port" label="端口" style={{ width: 120 }}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} placeholder="3306" />
+              <InputNumber
+                data-testid="db-port-input"
+                min={1}
+                max={65535}
+                style={{ width: '100%' }}
+                placeholder={String(DB_DEFAULT_PORTS[dbType || 'mysql'] ?? '端口')}
+              />
             </Form.Item>
           </Space>
           <Form.Item name="db_database" label="数据库名">
-            <Input placeholder="如 app_db（SQLite 可填文件路径）" />
+            <Input
+              placeholder={
+                dbType === 'dm'
+                  ? '可选（模式名通常与登录用户一致）'
+                  : '如 app_db（SQLite 可填文件路径）'
+              }
+            />
           </Form.Item>
           <Space style={{ width: '100%' }} size="middle">
             <Form.Item name="db_user" label="用户名" style={{ flex: 1, minWidth: 200 }}>

@@ -1,8 +1,8 @@
 """数据库测试服务.
 
 支持 Oracle(python-oracledb) / MySQL(PyMySQL) / PostgreSQL(psycopg2) /
-SQLite(内置) / MongoDB(pymongo)。
-- Oracle/MySQL/PG/SQLite 走 SQLAlchemy create_engine
+SQLite(内置) / MongoDB(pymongo) / 达梦 DM(dmPython)。
+- Oracle/MySQL/PG/SQLite/DM 走 SQLAlchemy create_engine
 - MongoDB 走 pymongo（延迟导入）
 - 写操作通过 execute_isolated 实现事务回滚隔离：begin → 执行 → rollback
 """
@@ -11,20 +11,28 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote, quote_plus
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import create_engine, text
 
 
 class DatabaseConfig(BaseModel):
     """数据库连接配置."""
 
-    db_type: Literal["oracle", "mysql", "postgresql", "sqlite", "mongodb"] = "sqlite"
+    db_type: Literal[
+        "oracle", "mysql", "postgresql", "sqlite", "mongodb", "dm"
+    ] = "sqlite"
     host: str = "localhost"
     port: int | None = None
     username: str = ""
     password: str = ""
     database: str = ""
     driver: str = ""
+
+    @field_validator("db_type", mode="before")
+    @classmethod
+    def normalize_db_type(cls, value: Any) -> Any:
+        """兼容早期前端保存的 ``postgres`` 写法."""
+        return "postgresql" if value == "postgres" else value
 
 
 class DatabaseTester:
@@ -63,6 +71,10 @@ class DatabaseTester:
         if config.db_type == "postgresql":
             port = config.port or 5432
             return f"postgresql+psycopg2://{auth}{config.host}:{port}/{config.database}"
+        if config.db_type == "dm":
+            # 达梦一个实例对应一个库，模式名通常与用户名一致，URL 不接受库名路径
+            port = config.port or 5236
+            return f"dm+dmPython://{auth}{config.host}:{port}"
         if config.db_type == "mongodb":
             port = config.port or 27017
             return f"mongodb://{auth}{config.host}:{port}/{config.database}"
