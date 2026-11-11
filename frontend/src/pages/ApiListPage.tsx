@@ -105,6 +105,12 @@ function clampSidebarWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), Math.max(maxWidth, SIDEBAR_MIN_WIDTH));
 }
 
+function splitGroupPath(path: string): { leaf: string; prefix: string } {
+  const segments = path.split('/').filter(Boolean);
+  const leaf = segments.pop() || path;
+  return { leaf, prefix: segments.join('/') };
+}
+
 function readStoredSidebarWidth(): number {
   try {
     const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -1173,6 +1179,26 @@ export default function ApiListPage() {
               onChange={setGroupFilter}
               style={{ width: 180 }}
               suffixIcon={<FilterOutlined />}
+              popupMatchSelectWidth={420}
+              labelRender={({ value }) => {
+                const path = String(value ?? '');
+                return path ? (
+                  <span title={path}>{splitGroupPath(path).leaf}</span>
+                ) : (
+                  <span>全部分组</span>
+                );
+              }}
+              optionRender={(option) => {
+                const path = String(option.value ?? '');
+                if (!path) return <span>全部分组</span>;
+                const { leaf, prefix } = splitGroupPath(path);
+                return (
+                  <div className="api-group-option" title={path}>
+                    <span className="api-group-option-leaf">{leaf}</span>
+                    {prefix && <span className="api-group-option-path">{prefix}</span>}
+                  </div>
+                );
+              }}
               options={[
                 { value: '', label: '全部分组' },
                 ...groupOptions.map((group) => ({ value: group, label: group })),
