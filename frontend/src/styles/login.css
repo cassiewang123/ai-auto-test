@@ -1,0 +1,119 @@
+.login-page {
+  position: relative;
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 32px 16px;
+  background: #06101c url('/login-bg.webp') center / cover no-repeat;
+}
+
+.login-page::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(3, 9, 16, 0.86) 0%,
+    rgba(3, 10, 18, 0.4) 46%,
+    rgba(3, 9, 16, 0.72) 100%
+  );
+  content: '';
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: min(420px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+.login-card::before {
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, #22d3ee, #2563eb 58%, #f59e0b);
+  content: '';
+}
+
+.login-card .ant-card-body {
+  padding: 34px 36px 28px;
+}
+
+.login-heading {
+  margin-bottom: 26px;
+  text-align: center;
+}
+
+.login-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  place-items: center;
+  border-radius: 8px;
+  background: #0b2438;
+  box-shadow: 0 10px 24px rgba(8, 47, 73, 0.35);
+  color: #67e8f9;
+  font-size: 24px;
+}
+
+.login-title {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.login-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.login-card .ant-form-item-label > label {
+  color: #334155;
+  font-weight: 500;
+}
+
+.login-card .ant-input-affix-wrapper {
+  min-height: 44px;
+  border-radius: 8px;
+}
+
+.login-card .ant-input-affix-wrapper-focused {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.login-card .ant-btn-primary {
+  height: 44px;
+  border-radius: 8px;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.28);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.login-card .ant-divider {
+  border-color: #e8edf4;
+}
+
+@media (max-width: 480px) {
+  .login-page {
+    padding: 16px;
+    background-position: 62% center;
+  }
+
+  .login-card .ant-card-body {
+    padding: 28px 22px 22px;
+  }
+
+  .login-title {
+    font-size: 23px;
+  }
+}

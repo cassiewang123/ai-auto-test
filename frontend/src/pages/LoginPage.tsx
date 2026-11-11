@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { Card, Form, Input, Button, message, ConfigProvider, Divider } from 'antd';
-import { LockOutlined, UserOutlined, MailOutlined } from '@ant-design/icons';
+import {
+  ExperimentOutlined,
+  LockOutlined,
+  MailOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, authApi } from '../contexts/AuthContext';
+import '../styles/login.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -49,33 +55,19 @@ export default function LoginPage() {
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: '#4f46e5',
+          colorPrimary: '#2563eb',
           borderRadius: 8,
         },
       }}
     >
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-        }}
-      >
-        <Card
-          style={{
-            width: 400,
-            borderRadius: 12,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-          }}
-          styles={{ body: { padding: 32 } }}
-        >
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <h1 style={{ color: '#4f46e5', marginBottom: 4, fontSize: 24 }}>
-              AI 测试平台
-            </h1>
-            <p style={{ color: '#6b7280', margin: 0 }}>
+      <div className="login-page">
+        <Card className="login-card">
+          <div className="login-heading">
+            <div className="login-mark" aria-hidden="true">
+              <ExperimentOutlined />
+            </div>
+            <h1 className="login-title">AI 测试平台</h1>
+            <p className="login-subtitle">
               {mode === 'login' ? '登录以继续' : '创建首个管理员账号'}
             </p>
           </div>
