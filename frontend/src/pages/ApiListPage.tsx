@@ -182,6 +182,7 @@ export default function ApiListPage() {
 
   // 行选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchExecuting, setBatchExecuting] = useState(false);
   const [batchResults, setBatchResults] = useState<{
     visible: boolean;
@@ -722,6 +723,7 @@ export default function ApiListPage() {
       });
       await loadRecentResults();
       message.success(`批量执行完成: ${d.passed} 通过, ${d.failed} 失败, ${d.error} 错误`);
+      setBatchModalOpen(false);
     } catch (e: any) {
       message.error(e.message);
     } finally {
@@ -1132,6 +1134,13 @@ export default function ApiListPage() {
               新建项目
             </Button>
             <Button onClick={() => navigate('/import')}>导入</Button>
+            <Button
+              icon={<ThunderboltOutlined />}
+              disabled={filtered.length === 0}
+              onClick={() => setBatchModalOpen(true)}
+            >
+              批量执行
+            </Button>
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -2007,6 +2016,77 @@ export default function ApiListPage() {
         destroyOnHidden
       >
         {singleResult && <ExecutionResultView result={singleResult.result} />}
+      </Modal>
+
+      {/* 批量执行选择 Modal */}
+      <Modal
+        title="批量执行接口"
+        open={batchModalOpen}
+        onCancel={() => setBatchModalOpen(false)}
+        width={760}
+        destroyOnHidden
+        footer={[
+          <Button key="cancel" onClick={() => setBatchModalOpen(false)}>
+            取消
+          </Button>,
+          <Button
+            key="run"
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={batchExecuting}
+            disabled={selectedRowKeys.length === 0}
+            onClick={handleBatchExecute}
+          >
+            执行 {selectedRowKeys.length} 个接口
+          </Button>,
+        ]}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ color: '#64748b', fontSize: 13 }}>
+            当前筛选 {filtered.length} 个接口，已选 {selectedRowKeys.length} 个
+          </span>
+          <Space size={8}>
+            <Button
+              size="small"
+              onClick={() => setSelectedRowKeys(filtered.map((item) => item.id))}
+            >
+              全选当前筛选
+            </Button>
+            <Button size="small" onClick={() => setSelectedRowKeys([])}>
+              清空
+            </Button>
+          </Space>
+        </div>
+        <Table<TestCase>
+          rowKey="id"
+          size="small"
+          dataSource={filtered}
+          pagination={false}
+          scroll={{ y: 320 }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as string[]),
+          }}
+          columns={[
+            { title: '方法', dataIndex: 'method', width: 76 },
+            { title: '接口名称', dataIndex: 'title', ellipsis: true },
+            {
+              title: '分组',
+              dataIndex: 'group_path',
+              width: 220,
+              ellipsis: true,
+              render: (value: string) => (value ? splitGroupPath(value).leaf : '-'),
+            },
+          ]}
+        />
       </Modal>
 
       {/* 批量执行结果 Modal */}
