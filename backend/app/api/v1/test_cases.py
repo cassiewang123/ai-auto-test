@@ -345,6 +345,7 @@ def batch_execute(
                 "title": case.title,
                 "status": "error",
                 "error": str(outcome["error"]),
+                "history_id": None,
             })
             continue
 
@@ -368,8 +369,9 @@ def batch_execute(
             "error": result.error_message,
         })
         # 批量执行同样写入调用历史，便于在历史记录中排查
+        history_id = None
         try:
-            save_history(
+            history_record = save_history(
                 db,
                 method=case.method,
                 url=result.request.url if result.request else case.url,
@@ -407,8 +409,10 @@ def batch_execute(
                 project_id=case.project_id,
                 created_by=current_user.id,
             )
+            history_id = getattr(history_record, "id", None)
         except Exception as history_exc:  # noqa: BLE001 - 历史写入失败不应影响批量执行
             logger.warning("批量执行历史写入失败: %s", history_exc)
+        results[-1]["history_id"] = history_id
 
     # 创建批次汇总记录并更新已有 TestResult 的 run_id
     run_id = str(_uuid.uuid4())

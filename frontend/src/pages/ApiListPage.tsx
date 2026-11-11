@@ -111,6 +111,42 @@ function splitGroupPath(path: string): { leaf: string; prefix: string } {
   return { leaf, prefix: segments.join('/') };
 }
 
+function historyToExecutionResult(record: CallHistoryRecord): ExecutionResultData {
+  const responseText =
+    record.response_text ||
+    (typeof record.response_body === 'string'
+      ? record.response_body
+      : record.response_body != null
+        ? JSON.stringify(record.response_body, null, 2)
+        : '');
+  return {
+    test_case_id: record.test_case_id || '',
+    status: record.status,
+    duration: record.duration,
+    request: {
+      method: record.method,
+      url: record.url,
+      headers: record.headers || {},
+      params: record.params || {},
+      body: record.body,
+    },
+    response:
+      record.status_code != null
+        ? {
+            status_code: record.status_code,
+            headers: record.response_headers || {},
+            body: record.response_body ?? responseText,
+            elapsed: record.duration,
+            text: responseText,
+          }
+        : null,
+    assertion_results: record.assertion_results || [],
+    extracted_variables: [],
+    error_message: record.error_message,
+    executed_at: record.executed_at,
+  };
+}
+
 function readStoredSidebarWidth(): number {
   try {
     const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -191,6 +227,11 @@ export default function ApiListPage() {
     failed: number;
     error: number;
     results: any[];
+  } | null>(null);
+  const [batchDetail, setBatchDetail] = useState<{
+    title: string;
+    loading: boolean;
+    result: ExecutionResultData | null;
   } | null>(null);
 
   // 单次执行结果
@@ -728,6 +769,26 @@ export default function ApiListPage() {
       message.error(e.message);
     } finally {
       setBatchExecuting(false);
+    }
+  }
+
+  // ---- 查看批量执行单条详情 ----
+  async function openBatchDetail(record: any) {
+    if (!record?.history_id) {
+      message.info('该接口未生成可查看的执行详情');
+      return;
+    }
+    setBatchDetail({ title: record.title || '执行详情', loading: true, result: null });
+    try {
+      const res = await historyApi.get(record.history_id);
+      setBatchDetail({
+        title: record.title || '执行详情',
+        loading: false,
+        result: historyToExecutionResult(res.data),
+      });
+    } catch (e: any) {
+      setBatchDetail(null);
+      message.error(e.message);
     }
   }
 
@@ -2095,7 +2156,7 @@ export default function ApiListPage() {
         open={batchResults?.visible || false}
         onCancel={() => setBatchResults(null)}
         footer={<Button type="primary" onClick={() => setBatchResults(null)}>关闭</Button>}
-        width={720}
+        width={860}
       >
         {batchResults && (
           <div>
@@ -2158,9 +2219,45 @@ export default function ApiListPage() {
                   ellipsis: true,
                   render: (e: string) => e ? <span style={{ color: '#ff4d4f' }}>{e}</span> : '-',
                 },
+                {
+                  title: '操作',
+                  width: 80,
+                  render: (_: unknown, record: any) => (
+                    <Button
+                      type="link"
+                      size="small"
+                      disabled={!record.history_id}
+                      onClick={() => openBatchDetail(record)}
+                    >
+                      详情
+                    </Button>
+                  ),
+                },
               ]}
             />
           </div>
+        )}
+      </Modal>
+
+      {/* 批量执行单条详情 Modal */}
+      <Modal
+        title={batchDetail ? `执行详情 · ${batchDetail.title}` : '执行详情'}
+        open={batchDetail != null}
+        onCancel={() => setBatchDetail(null)}
+        footer={
+          <Button type="primary" onClick={() => setBatchDetail(null)}>
+            关闭
+          </Button>
+        }
+        width={920}
+        destroyOnHidden
+      >
+        {batchDetail?.loading ? (
+          <div style={{ textAlign: 'center', padding: 48 }}>
+            <Spin />
+          </div>
+        ) : (
+          batchDetail?.result && <ExecutionResultView result={batchDetail.result} />
         )}
       </Modal>
 

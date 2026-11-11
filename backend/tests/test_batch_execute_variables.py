@@ -156,6 +156,8 @@ def test_batch_execute_writes_call_history(client, monkeypatch, workspace_case, 
     )
     assert len(records) == 1
     record = records[0]
+    # 批量结果需带 history_id，前端据此按需拉取单条执行详情
+    assert response.json()["data"]["results"][0]["history_id"] == record.id
     assert record.url == (
         "http://192.168.120.82:9002/swgdimapgateway/swgd-imap-content/v1/apiService/queryPage"
     )
