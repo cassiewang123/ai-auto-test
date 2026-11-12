@@ -128,6 +128,13 @@ class RequestBuilder:
         # 文件上传：multipart，body 作为表单字段
         if request_def.files:
             kwargs["files"] = self._convert_files(request_def.files)
+            # 交给 httpx 生成带 boundary 的 multipart Content-Type，
+            # 避免用例里残留的 application/json 导致服务端无法解析文件。
+            headers = kwargs.get("headers")
+            if isinstance(headers, dict):
+                for key in list(headers):
+                    if key.lower() == "content-type":
+                        headers.pop(key)
             if isinstance(request_def.body, dict):
                 kwargs["data"] = self._render_mapping(request_def.body, variables)
             return
@@ -155,6 +162,12 @@ class RequestBuilder:
                 continue
             filename = f.get("filename", "file")
             content = f.get("content", "")
+            encoded = f.get("content_base64")
+            if encoded:
+                try:
+                    content = base64.b64decode(encoded)
+                except (ValueError, TypeError):
+                    content = ""
             content_type = f.get("content_type")
             if content_type:
                 converted.append((field, (filename, content, content_type)))

@@ -31,6 +31,10 @@ import {
   FolderOutlined,
   SearchOutlined,
   PlusOutlined,
+  UploadOutlined,
+  PaperClipOutlined,
+  FileOutlined,
+  CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   DragOutlined,
@@ -165,6 +169,29 @@ interface TestCaseAssertionFormValue {
   order?: number;
 }
 
+interface CaseFileItem {
+  field: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  content_base64: string;
+  content?: string;
+}
+
+const MAX_CASE_FILE_BYTES = 10 * 1024 * 1024;
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
 interface TestCaseFormValues {
   title: string;
   method: string;
@@ -246,6 +273,7 @@ export default function ApiListPage() {
   const [creatingCase, setCreatingCase] = useState(false);
   const [editingCase, setEditingCase] = useState<TestCase | null>(null);
   const [caseForm] = Form.useForm<TestCaseFormValues>();
+  const [caseFiles, setCaseFiles] = useState<CaseFileItem[]>([]);
 
   // 移动到项目
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -888,6 +916,7 @@ export default function ApiListPage() {
 
   function openCreateCase() {
     setEditingCase(null);
+    setCaseFiles([]);
     caseForm.resetFields();
     caseForm.setFieldsValue({
       method: 'GET',
@@ -901,6 +930,16 @@ export default function ApiListPage() {
 
   function openEditCase(record: TestCase) {
     setEditingCase(record);
+    setCaseFiles(
+      (record.files || []).map((file: any) => ({
+        field: file.field || file.name || 'file',
+        filename: file.filename || 'file',
+        content_type: file.content_type || 'application/octet-stream',
+        size: Number(file.size || 0),
+        content_base64: file.content_base64 || '',
+        content: file.content,
+      })),
+    );
     const existing = record.assertions || [];
     caseForm.setFieldsValue({
       title: record.title,
@@ -918,6 +957,39 @@ export default function ApiListPage() {
           ],
     });
     setCaseModalOpen(true);
+  }
+
+  async function addCaseFiles(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const added: CaseFileItem[] = [];
+    for (const file of Array.from(fileList)) {
+      if (file.size > MAX_CASE_FILE_BYTES) {
+        message.error(`${file.name} 超过 10 MB，未添加`);
+        continue;
+      }
+      try {
+        added.push({
+          field: 'file',
+          filename: file.name,
+          content_type: file.type || 'application/octet-stream',
+          size: file.size,
+          content_base64: await readFileAsBase64(file),
+        });
+      } catch {
+        message.error(`${file.name} 读取失败`);
+      }
+    }
+    if (added.length) setCaseFiles((prev) => [...prev, ...added]);
+  }
+
+  function updateCaseFileField(index: number, field: string) {
+    setCaseFiles((prev) =>
+      prev.map((item, itemIndex) => (itemIndex === index ? { ...item, field } : item)),
+    );
+  }
+
+  function removeCaseFile(index: number) {
+    setCaseFiles((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }
 
   // ---- 新建/编辑用例 ----
@@ -946,6 +1018,7 @@ export default function ApiListPage() {
             : null,
           group_path: values.group_path || null,
           project_id: values.project_id ?? null,
+          files: caseFiles,
           assertions,
         };
         res = await testCaseApi.update(editingCase.id, updatePayload);
@@ -957,6 +1030,7 @@ export default function ApiListPage() {
             : undefined,
           group_path: values.group_path || '',
           project_id: values.project_id || selectedProjectId || undefined,
+          files: caseFiles,
           markers: [],
           assertions: assertions.length
             ? assertions
@@ -1801,6 +1875,7 @@ export default function ApiListPage() {
         }}
         width={760}
         destroyOnHidden
+        styles={{ body: { maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' } }}
       >
         <Form form={caseForm} layout="vertical" initialValues={{ method: 'GET' }}>
           <Form.Item
@@ -1860,6 +1935,60 @@ export default function ApiListPage() {
             rules={[{ validator: jsonFormValidator('Body') }]}
           >
             <JsonEditor rows={4} placeholder='{"name": "test"}' />
+          </Form.Item>
+
+          <Form.Item
+            label="导入文件（multipart）"
+            extra="接口需要上传文件时在此添加；字段名对应后端接收的参数名"
+          >
+            <div className="api-case-files">
+              <div className="api-case-files-toolbar">
+                <label className="api-case-file-picker">
+                  <UploadOutlined />
+                  <span>选择文件</span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      void addCaseFiles(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+                <span className="api-case-files-hint">
+                  {caseFiles.length
+                    ? `已添加 ${caseFiles.length} 个文件`
+                    : '未添加文件，单个文件不超过 10 MB'}
+                </span>
+              </div>
+              {caseFiles.map((file, index) => (
+                <div className="api-case-file-row" key={`${file.filename}-${index}`}>
+                  <FileOutlined className="api-case-file-icon" />
+                  <div className="api-case-file-meta">
+                    <span className="api-case-file-name" title={file.filename}>
+                      {file.filename}
+                    </span>
+                    <span className="api-case-file-size">
+                      {(file.size / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+                  <Input
+                    className="api-case-file-field"
+                    value={file.field}
+                    prefix={<PaperClipOutlined />}
+                    placeholder="表单字段名"
+                    onChange={(event) => updateCaseFileField(index, event.target.value)}
+                  />
+                  <Button
+                    type="text"
+                    danger
+                    icon={<CloseOutlined />}
+                    aria-label={`移除 ${file.filename}`}
+                    onClick={() => removeCaseFile(index)}
+                  />
+                </div>
+              ))}
+            </div>
           </Form.Item>
 
           <Divider style={{ margin: '8px 0 12px' }}>响应断言</Divider>

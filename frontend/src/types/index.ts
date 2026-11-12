@@ -117,6 +117,7 @@ export interface TestCaseCreate {
   params?: Record<string, any>;
   body?: any;
   graphql_query?: string;
+  files?: any[];
   extract_rules?: any[];
   assertions?: Omit<AssertionRule, 'id' | 'test_case_id'>[];
   environment_id?: string;

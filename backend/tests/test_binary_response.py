@@ -71,3 +71,56 @@ def test_binary_filename_is_inferred_from_workbook_content():
 
     assert response.body["filename"] == "exportExecl.xlsx"
     assert response.body["content_type"].endswith("spreadsheetml.sheet")
+
+
+def test_saved_case_base64_file_is_decoded_for_multipart():
+    payload = b"PK\x03\x04saved-workbook"
+
+    converted = RequestBuilder._convert_files(
+        [
+            {
+                "field": "upload",
+                "filename": "report.xlsx",
+                "content_type": (
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet"
+                ),
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+            }
+        ]
+    )
+
+    assert converted[0][0] == "upload"
+    assert converted[0][1][1] == payload
+
+
+def test_saved_file_is_sent_as_real_multipart_upload():
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content_type"] = request.headers.get("content-type", "")
+        captured["body"] = request.content
+        return httpx.Response(200, json={"ok": True})
+
+    payload = b"PK\x03\x04uploaded-workbook"
+    builder = RequestBuilder(transport=httpx.MockTransport(handler))
+    builder.send(
+        RequestDefinition(
+            method="POST",
+            url="https://example.com/import",
+            headers={"Content-Type": "application/json"},
+            files=[
+                {
+                    "field": "file",
+                    "filename": "report.xlsx",
+                    "content_type": "application/octet-stream",
+                    "content_base64": base64.b64encode(payload).decode("ascii"),
+                }
+            ],
+        ),
+        {},
+    )
+
+    assert str(captured["content_type"]).startswith("multipart/form-data; boundary=")
+    assert b'name="file"; filename="report.xlsx"' in captured["body"]
+    assert payload in captured["body"]
