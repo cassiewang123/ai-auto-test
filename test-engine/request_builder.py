@@ -15,10 +15,11 @@
 """
 from __future__ import annotations
 
+import base64
 import re
 import time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 
@@ -169,19 +170,99 @@ class RequestBuilder:
         return False
 
     # ---------------- 响应构建 ----------------
+    _TEXT_CONTENT_TYPES = (
+        "application/json",
+        "application/xml",
+        "application/javascript",
+        "application/x-www-form-urlencoded",
+        "application/graphql",
+        "application/yaml",
+        "application/x-yaml",
+    )
+
+    @classmethod
+    def _is_textual_response(cls, resp: httpx.Response) -> bool:
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if content_type.startswith("text/"):
+            return True
+        if any(hint in content_type for hint in cls._TEXT_CONTENT_TYPES):
+            return True
+        if content_type.endswith(("+json", "+xml", "+yaml")):
+            return True
+        if not content_type:
+            try:
+                resp.content.decode("utf-8")
+            except UnicodeDecodeError:
+                return False
+            return True
+        return False
+
     @staticmethod
-    def _build_response(resp: httpx.Response, elapsed: float) -> ResponseData:
-        # 优先按 JSON 解析 body，失败则保留原始文本
-        try:
-            body: Any = resp.json()
-        except (ValueError, Exception):
-            body = resp.text
+    def _response_filename(resp: httpx.Response) -> str:
+        disposition = resp.headers.get("content-disposition") or ""
+        match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.IGNORECASE)
+        if match:
+            return unquote(match.group(1).strip().strip('"'))
+        match = re.search(r'filename="?([^";]+)"?', disposition, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return "response.bin"
+
+    @staticmethod
+    def _infer_binary_metadata(
+        resp: httpx.Response, content: bytes
+    ) -> tuple[str, str]:
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+        filename = RequestBuilder._response_filename(resp)
+        extension = ""
+        sniff = content[:65536]
+        if b"xl/workbook.xml" in sniff:
+            extension, inferred_type = ".xlsx", (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        elif b"word/document.xml" in sniff:
+            extension, inferred_type = ".docx", (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+        elif sniff.startswith(b"%PDF"):
+            extension, inferred_type = ".pdf", "application/pdf"
+        elif sniff.startswith(b"PK\x03\x04"):
+            extension, inferred_type = ".zip", "application/zip"
+        else:
+            inferred_type = ""
+        if extension and filename == "response.bin":
+            path_name = urlsplit(str(resp.request.url)).path.rstrip("/").split("/")[-1]
+            filename = f"{unquote(path_name) or 'response'}{extension}"
+        if not content_type or content_type == "application/octet-stream":
+            content_type = inferred_type or content_type or "application/octet-stream"
+        return filename, content_type
+
+    @classmethod
+    def _build_response(cls, resp: httpx.Response, elapsed: float) -> ResponseData:
+        if not cls._is_textual_response(resp):
+            content = resp.content
+            filename, content_type = cls._infer_binary_metadata(resp, content)
+            body: Any = {
+                "__binary__": True,
+                "content_type": content_type,
+                "filename": filename,
+                "size": len(content),
+                "base64": base64.b64encode(content).decode("ascii"),
+            }
+            text = ""
+        else:
+            # 优先按 JSON 解析 body，失败则保留原始文本
+            try:
+                body = resp.json()
+            except (ValueError, Exception):
+                body = resp.text
+            text = resp.text
         return ResponseData(
             status_code=resp.status_code,
             headers=dict(resp.headers),
             body=body,
             elapsed=elapsed,
-            text=resp.text,
+            text=text,
         )
 
     # ---------------- 模板渲染 ----------------

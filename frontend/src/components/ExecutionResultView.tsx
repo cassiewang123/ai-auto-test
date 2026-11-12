@@ -1,6 +1,7 @@
 /** 单次执行的完整结果视图：状态、响应、断言、提取变量、重试与脚本输出。 */
 import { useState } from 'react';
-import { Card, Space, Tag, Table, Tabs, Typography } from 'antd';
+import { Button, Card, Space, Tag, Table, Tabs, Typography } from 'antd';
+import { DownloadOutlined, FileOutlined } from '@ant-design/icons';
 import type { ExecutionResultData } from '../services/api';
 
 const statusColor: Record<string, string> = {
@@ -19,6 +20,52 @@ const STATUS_LABEL: Record<string, string> = {
 
 interface ExecutionResultViewProps {
   result: ExecutionResultData;
+}
+
+interface BinaryPayload {
+  filename: string;
+  content_type: string;
+  size: number;
+  base64: string;
+}
+
+function getBinaryPayload(body: unknown): BinaryPayload | null {
+  if (
+    body &&
+    typeof body === 'object' &&
+    (body as Record<string, unknown>).__binary__ === true &&
+    typeof (body as Record<string, unknown>).base64 === 'string'
+  ) {
+    const value = body as Record<string, unknown>;
+    return {
+      filename: String(value.filename || 'response.bin'),
+      content_type: String(value.content_type || 'application/octet-stream'),
+      size: Number(value.size || 0),
+      base64: String(value.base64),
+    };
+  }
+  return null;
+}
+
+function formatBytes(size: number): string {
+  if (!size) return '0 B';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function downloadBinary(payload: BinaryPayload) {
+  const binary = window.atob(payload.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: payload.content_type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = payload.filename.replace(/[\\/]/g, '_');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function pretty(value: unknown): string {
@@ -61,6 +108,7 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
   const assertions = result.assertion_results || [];
   const extracted = result.extracted_variables || [];
   const attempts = result.retry_attempts || [];
+  const binaryBody = getBinaryPayload(response?.body);
 
   return (
     <div>
@@ -170,7 +218,39 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
               {
                 key: 'body',
                 label: '响应体',
-                children: (
+                children: binaryBody ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 16,
+                      padding: '18px 16px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 6,
+                      background: '#f8fafc',
+                    }}
+                  >
+                    <Space align="center" size={12}>
+                      <FileOutlined style={{ color: '#2563eb', fontSize: 24 }} />
+                      <div>
+                        <div style={{ color: '#0f172a', fontWeight: 600 }}>
+                          {binaryBody.filename}
+                        </div>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {binaryBody.content_type} · {formatBytes(binaryBody.size)}
+                        </Typography.Text>
+                      </div>
+                    </Space>
+                    <Button
+                      type="primary"
+                      icon={<DownloadOutlined />}
+                      onClick={() => downloadBinary(binaryBody)}
+                    >
+                      下载文件
+                    </Button>
+                  </div>
+                ) : (
                   <CodeBlock>
                     {typeof response.body === 'object' && response.body !== null
                       ? pretty(response.body)
