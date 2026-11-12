@@ -211,14 +211,30 @@ class RequestBuilder:
         return False
 
     @staticmethod
+    def _clean_filename(raw: str) -> str:
+        """解码并清理文件名，避免把 URL 编码或路径直接展示给用户."""
+        name = unquote(raw.strip().strip('"')).replace("\\", "/").rsplit("/", 1)[-1]
+        name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
+        if not name:
+            return "response.bin"
+        if len(name) > 180:
+            stem, dot, extension = name.rpartition(".")
+            name = (
+                f"{stem[:150]}...{dot}{extension}"
+                if dot and len(extension) <= 12
+                else f"{name[:177]}..."
+            )
+        return name
+
+    @staticmethod
     def _response_filename(resp: httpx.Response) -> str:
         disposition = resp.headers.get("content-disposition") or ""
         match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.IGNORECASE)
         if match:
-            return unquote(match.group(1).strip().strip('"'))
+            return RequestBuilder._clean_filename(match.group(1))
         match = re.search(r'filename="?([^";]+)"?', disposition, re.IGNORECASE)
         if match:
-            return match.group(1).strip()
+            return RequestBuilder._clean_filename(match.group(1))
         return "response.bin"
 
     @staticmethod
@@ -245,7 +261,9 @@ class RequestBuilder:
             inferred_type = ""
         if extension and filename == "response.bin":
             path_name = urlsplit(str(resp.request.url)).path.rstrip("/").split("/")[-1]
-            filename = f"{unquote(path_name) or 'response'}{extension}"
+            filename = RequestBuilder._clean_filename(
+                f"{unquote(path_name) or 'response'}{extension}"
+            )
         if not content_type or content_type == "application/octet-stream":
             content_type = inferred_type or content_type or "application/octet-stream"
         return filename, content_type

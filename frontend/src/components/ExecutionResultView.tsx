@@ -47,6 +47,24 @@ function getBinaryPayload(body: unknown): BinaryPayload | null {
   return null;
 }
 
+function binaryTypeLabel(payload: BinaryPayload): string {
+  const extension = payload.filename.split('.').pop()?.toLowerCase() || '';
+  const labels: Record<string, string> = {
+    pdf: 'PDF 文档',
+    xlsx: 'Excel 工作簿',
+    xls: 'Excel 工作簿',
+    docx: 'Word 文档',
+    doc: 'Word 文档',
+    zip: 'ZIP 压缩包',
+    csv: 'CSV 文件',
+    txt: '文本文件',
+    png: 'PNG 图片',
+    jpg: 'JPG 图片',
+    jpeg: 'JPG 图片',
+  };
+  return labels[extension] || payload.content_type || '文件';
+}
+
 function formatBytes(size: number): string {
   if (!size) return '0 B';
   if (size < 1024) return `${size} B`;
@@ -234,11 +252,25 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
                     <Space align="center" size={12}>
                       <FileOutlined style={{ color: '#2563eb', fontSize: 24 }} />
                       <div>
-                        <div style={{ color: '#0f172a', fontWeight: 600 }}>
+                        <div
+                          title={binaryBody.filename}
+                          style={{
+                            maxWidth: 460,
+                            overflow: 'hidden',
+                            color: '#0f172a',
+                            fontWeight: 600,
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           {binaryBody.filename}
                         </div>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          {binaryBody.content_type} · {formatBytes(binaryBody.size)}
+                        <Typography.Text
+                          type="secondary"
+                          title={binaryBody.content_type}
+                          style={{ fontSize: 12 }}
+                        >
+                          {binaryTypeLabel(binaryBody)} · {formatBytes(binaryBody.size)}
                         </Typography.Text>
                       </div>
                     </Space>

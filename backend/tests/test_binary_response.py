@@ -124,3 +124,25 @@ def test_saved_file_is_sent_as_real_multipart_upload():
     assert str(captured["content_type"]).startswith("multipart/form-data; boundary=")
     assert b'name="file"; filename="report.xlsx"' in captured["body"]
     assert payload in captured["body"]
+
+
+def test_percent_encoded_filename_is_decoded_and_shortened_to_basename():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"%PDF-1.7",
+            headers={
+                "content-type": "application/pdf",
+                "content-disposition": (
+                    'attachment; filename="%2Fu01%2FapiService%2F'
+                    '%E6%A3%80%E6%9F%A5%E6%8A%A5%E5%91%8A.pdf"'
+                ),
+            },
+        )
+
+    response = RequestBuilder(transport=httpx.MockTransport(handler)).send(
+        RequestDefinition(method="GET", url="https://example.com/download"),
+        {},
+    )
+
+    assert response.body["filename"] == "检查报告.pdf"
