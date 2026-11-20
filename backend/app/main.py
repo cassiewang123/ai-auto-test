@@ -37,16 +37,38 @@ _PUBLIC_ROUTERS = {"app.api.v1.auth", "app.api.v1.ci_cd", "app.api.v1.jobs"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：按配置初始化本地开发数据库."""
+    """应用生命周期：初始化本地数据库并恢复被中断的本地模式任务."""
     if settings.AUTO_CREATE_SCHEMA:
         from app.database import init_db
 
         init_db()
+    if settings.TASK_DISPATCH_MODE == "local":
+        try:
+            from app.services.execution.job_service import recover_interrupted_local_jobs
+
+            stats = recover_interrupted_local_jobs()
+            if stats.get("recovered"):
+                logger.info(
+                    "启动时恢复本地模式中断任务: %s",
+                    stats,
+                )
+        except Exception:
+            logger.exception("启动时恢复本地模式中断任务失败")
     yield
 
 
 def create_app() -> FastAPI:
     """创建并配置 FastAPI 应用实例."""
+    # 轻量单机启动提示：保留 DEBUG / 同步执行的可用性，但明确风险边界。
+    logger.info(
+        "仅监听 127.0.0.1、DEBUG 开启，禁止端口转发 / 公网暴露"
+    )
+    logger.info(
+        "允许 API 进程内同步执行脚本，仅限本机可信输入"
+    )
+    logger.info(
+        "任何本机登录账号均可调用 SSH 控制台，凭据勿共享"
+    )
     app = FastAPI(
         title=settings.APP_NAME,
         version="0.1.0",
@@ -192,6 +214,10 @@ def _register_routers(app: FastAPI) -> None:
         # Phase 5：AI 运营治理 / 缺陷集成（均需 JWT 鉴权）
         ("app.api.v1.ai_ops", "router", "/ai-ops"),
         ("app.api.v1.defects", "router", "/defects"),
+        ("app.api.v1.requirements", "router", "/requirements"),
+        # 需求文档与知识库（RAG）/AI 测试用例生成（均需 JWT 鉴权）
+        ("app.api.v1.knowledge_bases", "router", "/knowledge-bases"),
+        ("app.api.v1.test_design", "router", "/test-design"),
     ]:
         try:
             mod = importlib.import_module(module_path)

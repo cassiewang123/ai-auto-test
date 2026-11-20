@@ -12,11 +12,23 @@ from playwright.sync_api import sync_playwright
 from sqlalchemy import select
 
 
+# 新增页面须同步本清单与 frontend/src/routes.tsx:70-81（工具页 12 条见下）。
 ROUTES = [
     "/dashboard",
     "/jobs",
     "/quick-test",
-    "/json-compare",
+    "/tools",
+    "/tools/json-compare",
+    "/tools/json-format",
+    "/tools/sql-format",
+    "/tools/text-compare",
+    "/tools/regex",
+    "/tools/encoding",
+    "/tools/word-count",
+    "/tools/timestamp",
+    "/tools/data-generator",
+    "/tools/log-analysis",
+    "/tools/server-console",
     "/api-list",
     "/projects",
     "/import",
@@ -26,6 +38,9 @@ ROUTES = [
     "/test-plans",
     "/reports",
     "/coverage",
+    "/requirements",
+    "/knowledge-bases",
+    "/ai-case-generation",
     "/api-docs",
     "/scheduled-tasks",
     "/mock-service",
@@ -55,6 +70,23 @@ ROUTES = [
     "/defects",
 ]
 
+# 与 frontend/src/routes.tsx:70-81 逐条对齐的 12 条 /tools* 路径。
+# 新增页面须同步本清单、前端路由与 AIRETEST使用手册.md 第 21 章。
+EXPECTED_TOOL_ROUTES = [
+    "/tools",
+    "/tools/json-compare",
+    "/tools/json-format",
+    "/tools/sql-format",
+    "/tools/text-compare",
+    "/tools/regex",
+    "/tools/encoding",
+    "/tools/word-count",
+    "/tools/timestamp",
+    "/tools/data-generator",
+    "/tools/log-analysis",
+    "/tools/server-console",
+]
+
 
 def local_token(repository: Path, username: str) -> str:
     backend_dir = repository / "backend"
@@ -76,6 +108,8 @@ def local_token(repository: Path, username: str) -> str:
 
 
 def main() -> int:
+    # 一致性断言：新增页面须同步本清单与 frontend/src/routes.tsx:70-81。
+    assert set(EXPECTED_TOOL_ROUTES) <= set(ROUTES)
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
     parser.add_argument("--token", default=os.getenv("AIRETEST_SMOKE_TOKEN", ""))

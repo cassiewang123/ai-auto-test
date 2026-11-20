@@ -14,6 +14,12 @@ from app.models.execution_job import ExecutionAttempt, ExecutionJob, JobEvent
 from app.models.global_variable import GlobalVariable
 from app.models.interface_knowledge import InterfaceKnowledge
 from app.models.job_artifact import JobArtifact
+from app.models.knowledge_base import (
+    KnowledgeBase,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    RetrievalLog,
+)
 from app.models.mock_config import MockConfig
 from app.models.notification_channel import NotificationChannel
 from app.models.notification_log import NotificationLog
@@ -24,12 +30,22 @@ from app.models.performance_test import PerformanceTest
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.quality_gate import QualityGate, QualityGateResult
+from app.models.requirement import Requirement
+from app.models.requirement_document import (
+    RequirementAnalysis,
+    RequirementDocument,
+)
 from app.models.role import Role
 from app.models.scheduled_task import ScheduledTask
 from app.models.server_saved_request import ServerSavedRequest
 from app.models.step_library import StepLibrary
 from app.models.test_case import AssertionRule, TestCase
 from app.models.test_data_set import TestDataSet
+from app.models.test_design import (
+    GeneratedCase,
+    GeneratedTestPoint,
+    TestDesignSession,
+)
 from app.models.test_plan import TestPlan, TestPlanItem
 from app.models.test_result import TestResult
 from app.models.test_run_summary import TestRunSummary
@@ -78,6 +94,16 @@ __all__ = [
     "CallHistory",
     "ServerSavedRequest",
     "InterfaceKnowledge",
+    "Requirement",
+    "RequirementDocument",
+    "RequirementAnalysis",
+    "KnowledgeBase",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    "RetrievalLog",
+    "TestDesignSession",
+    "GeneratedTestPoint",
+    "GeneratedCase",
     "ApiToken",
     "WebhookConfig",
     "TestDataSet",

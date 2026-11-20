@@ -305,10 +305,21 @@ export interface ExecutionResultData {
 }
 
 export const executionApi = {
-  run: (data: ExecuteRequest) =>
-    api.post<unknown, ApiResponse<ExecutionResultData>>('/execution/run', data),
+  /**
+   * 直接执行请求。
+   *
+   * @param data 执行入参
+   * @param options.signal 可选的中断信号（用于「取消请求」）；不传则行为与之前完全一致
+   */
+  run: (data: ExecuteRequest, options?: { signal?: AbortSignal }) =>
+    api.post<unknown, ApiResponse<ExecutionResultData>>(
+      '/execution/run',
+      data,
+      options?.signal ? { signal: options.signal } : undefined
+    ),
   runMultipart: (
-    fields: Omit<ExecuteRequest, 'files'> & { fileList: File[]; fileFields: string[] }
+    fields: Omit<ExecuteRequest, 'files'> & { fileList: File[]; fileFields: string[] },
+    options?: { signal?: AbortSignal }
   ) => {
     const formData = new FormData();
     formData.append('method', fields.method);
@@ -346,7 +357,10 @@ export const executionApi = {
     return api.post<unknown, ApiResponse<ExecutionResultData>>(
       '/execution/run-multipart',
       formData,
-      { headers: { 'Content-Type': 'multipart/form-data' } }
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        ...(options?.signal ? { signal: options.signal } : {}),
+      }
     );
   },
   runSavedCase: (caseId: string, environmentId?: string) =>
@@ -499,6 +513,39 @@ export const importApi = {
         imported_variables: number;
       }>
     >('/import/postman/import', data),
+  // Word/Excel 文档导入：上传文档并预览解析结果
+  previewDocument: (data: {
+    file: File;
+    base_url?: string;
+    path_prefix?: string;
+  }) => {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('base_url', data.base_url || '');
+    formData.append('path_prefix', data.path_prefix || '');
+    return api.post<
+      unknown,
+      ApiResponse<{
+        total: number;
+        interfaces: any[];
+        file_type: string;
+        groups: string[];
+        methods: Record<string, number>;
+        warnings: string[];
+      }>
+    >('/import/document/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  // Word/Excel 文档导入：将选中的接口批量创建为 TestCase
+  importDocument: (data: {
+    selected_interfaces: any[];
+    project_id?: string;
+  }) =>
+    api.post<
+      unknown,
+      ApiResponse<{ created_count: number; case_ids: string[] }>
+    >('/import/document/import', data),
 };
 
 // ========== 项目管理 ==========
@@ -1041,4 +1088,190 @@ export const defectApi = {
     apiClient.put<unknown, ApiResponse<any>>(`/defects/${id}`, data),
   sync: (id: string) =>
     apiClient.post<unknown, ApiResponse<any>>(`/defects/${id}/sync`),
+};
+
+// ========== 需求管理（含文档导入与 AI 分析） ==========
+export const requirementApi = {
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    project_id?: string;
+    status?: string;
+    priority?: string;
+    keyword?: string;
+  }) => api.get<unknown, PageResponse<any>>('/requirements', { params }),
+  stats: () =>
+    api.get<unknown, ApiResponse<any>>('/requirements/stats'),
+  get: (id: string) =>
+    api.get<unknown, ApiResponse<any>>(`/requirements/${id}`),
+  create: (data: any) =>
+    api.post<unknown, ApiResponse<any>>('/requirements', data),
+  update: (id: string, data: any) =>
+    api.put<unknown, ApiResponse<any>>(`/requirements/${id}`, data),
+  remove: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/requirements/${id}`),
+
+  // 需求文档：支持 PDF / DOCX / MD / TXT / 图片
+  listDocuments: (id: string) =>
+    api.get<unknown, ApiResponse<any[]>>(`/requirements/${id}/documents`),
+  uploadDocument: (id: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<unknown, ApiResponse<any>>(
+      `/requirements/${id}/documents`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+  },
+  deleteDocument: (id: string, documentId: string) =>
+    api.delete<unknown, ApiResponse<any>>(
+      `/requirements/${id}/documents/${documentId}`
+    ),
+
+  // 需求分析：功能清单 / 界面描述 / 待澄清项
+  analyze: (
+    id: string,
+    data?: { knowledge_base_id?: string | null; question?: string | null; use_documents?: boolean }
+  ) => api.post<unknown, ApiResponse<any>>(`/requirements/${id}/analyze`, data || {}),
+  listAnalyses: (id: string) =>
+    api.get<unknown, ApiResponse<any[]>>(`/requirements/${id}/analyses`),
+  getAnalysis: (analysisId: string) =>
+    api.get<unknown, ApiResponse<any>>(`/requirements/analyses/${analysisId}`),
+  continueAnalysis: (analysisId: string, message: string) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/requirements/analyses/${analysisId}/messages`,
+      { message }
+    ),
+  // 导出 Markdown 文档（由页面触发浏览器下载）
+  exportAnalysisUrl: (analysisId: string) =>
+    `/api/v1/requirements/analyses/${analysisId}/export`,
+};
+
+// ========== 知识库（RAG） ==========
+export const knowledgeBaseApi = {
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    project_id?: string;
+    keyword?: string;
+  }) => api.get<unknown, PageResponse<any>>('/knowledge-bases', { params }),
+  get: (id: string) =>
+    api.get<unknown, ApiResponse<any>>(`/knowledge-bases/${id}`),
+  create: (data: any) =>
+    api.post<unknown, ApiResponse<any>>('/knowledge-bases', data),
+  update: (id: string, data: any) =>
+    api.put<unknown, ApiResponse<any>>(`/knowledge-bases/${id}`, data),
+  remove: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/knowledge-bases/${id}`),
+
+  listDocuments: (
+    id: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    api.get<unknown, PageResponse<any>>(`/knowledge-bases/${id}/documents`, {
+      params,
+    }),
+  uploadDocument: (id: string, file: File, category?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category || '');
+    return api.post<unknown, ApiResponse<any>>(
+      `/knowledge-bases/${id}/documents`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+  },
+  deleteDocument: (id: string, documentId: string) =>
+    api.delete<unknown, ApiResponse<any>>(
+      `/knowledge-bases/${id}/documents/${documentId}`
+    ),
+  reindexDocument: (id: string, documentId: string) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/knowledge-bases/${id}/documents/${documentId}/reindex`
+    ),
+  listChunks: (
+    id: string,
+    documentId: string,
+    params?: { page?: number; page_size?: number }
+  ) =>
+    api.get<unknown, PageResponse<any>>(
+      `/knowledge-bases/${id}/documents/${documentId}/chunks`,
+      { params }
+    ),
+  rebuildIndex: (id: string) =>
+    api.post<unknown, ApiResponse<any>>(`/knowledge-bases/${id}/rebuild-index`),
+  retrieve: (
+    id: string,
+    params: { query: string; top_k?: number; min_score?: number }
+  ) =>
+    api.post<unknown, ApiResponse<any>>(`/knowledge-bases/${id}/retrieve`, null, {
+      params,
+    }),
+  previewChunks: (data: {
+    text: string;
+    chunk_strategy: string;
+    chunk_size: number;
+    chunk_overlap: number;
+  }) =>
+    api.post<unknown, ApiResponse<any>>('/knowledge-bases/chunk-preview', data),
+};
+
+// ========== AI 测试用例生成 ==========
+export const testDesignApi = {
+  listSessions: (params?: {
+    page?: number;
+    page_size?: number;
+    project_id?: string;
+    status?: string;
+  }) =>
+    api.get<unknown, PageResponse<any>>('/test-design/sessions', { params }),
+  createSession: (data: {
+    title?: string | null;
+    project_id?: string | null;
+    requirement_id?: string | null;
+    knowledge_base_id?: string | null;
+    mode: 'quick' | 'stepwise';
+    prompt?: string | null;
+    review_dimensions?: Record<string, number>;
+  }) => api.post<unknown, ApiResponse<any>>('/test-design/sessions', data),
+  getSession: (id: string) =>
+    api.get<unknown, ApiResponse<any>>(`/test-design/sessions/${id}`),
+  removeSession: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/test-design/sessions/${id}`),
+  sendMessage: (id: string, message: string) =>
+    api.post<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/messages`, {
+      message,
+    }),
+  generatePoints: (id: string) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/test-design/sessions/${id}/generate-points`
+    ),
+  updatePoints: (
+    id: string,
+    points: Array<{
+      id: string;
+      module?: string;
+      point?: string;
+      category?: string;
+      priority?: string;
+      selected?: boolean;
+    }>
+  ) =>
+    api.put<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/points`, {
+      points,
+    }),
+  generateCases: (id: string, pointIds?: string[]) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/test-design/sessions/${id}/generate-cases`,
+      { point_ids: pointIds || null }
+    ),
+  review: (id: string, dimensions?: Record<string, number>) =>
+    api.post<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/review`, {
+      dimensions: dimensions || {},
+    }),
+  importCases: (id: string, caseIds?: string[], projectId?: string | null) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/test-design/sessions/${id}/import-cases`,
+      { case_ids: caseIds || null, project_id: projectId || null }
+    ),
 };

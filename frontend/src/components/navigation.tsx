@@ -100,6 +100,20 @@ const navigationItems: NavigationItem[] = [
   { key: '/reports', icon: <BarChartOutlined />, label: '测试报告' },
   { key: '/coverage', icon: <PieChartOutlined />, label: '覆盖率看板' },
   {
+    key: 'requirement-test',
+    icon: <FileTextOutlined />,
+    label: '需求与 AI 测试设计',
+    children: [
+      { key: '/requirements', icon: <FileTextOutlined />, label: '需求管理' },
+      { key: '/knowledge-bases', icon: <BookOutlined />, label: '知识库' },
+      {
+        key: '/ai-case-generation',
+        icon: <RobotOutlined />,
+        label: 'AI 用例生成',
+      },
+    ],
+  },
+  {
     key: 'tools',
     icon: <ToolOutlined />,
     label: '工具集',
@@ -150,6 +164,7 @@ const liteRootKeys = new Set([
   'perf-test',
   '/reports',
   '/coverage',
+  'requirement-test',
   'tools',
   '/scheduled-tasks',
   '/environments',

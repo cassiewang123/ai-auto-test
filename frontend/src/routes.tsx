@@ -42,6 +42,9 @@ const InterfaceKnowledgePage = lazy(() => import('./pages/InterfaceKnowledgePage
 const JobsPage = lazy(() => import('./pages/JobsPage'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage'));
 const AiOpsPage = lazy(() => import('./pages/AiOpsPage'));
+const RequirementsPage = lazy(() => import('./pages/RequirementsPage'));
+const KnowledgeBasesPage = lazy(() => import('./pages/KnowledgeBasesPage'));
+const AiCaseGenerationPage = lazy(() => import('./pages/AiCaseGenerationPage'));
 const QualityGatesPage = lazy(() => import('./pages/QualityGatesPage'));
 const DefectsPage = lazy(() => import('./pages/DefectsPage'));
 const ToolsHubPage = lazy(() => import('./pages/tools/ToolsHubPage'));
@@ -98,6 +101,9 @@ export const routeObjects: RouteObject[] = [
       { path: '/mock-service', element: <MockServicePage /> },
       { path: '/history', element: <HistoryPage /> },
       { path: '/ai', element: <AIPage /> },
+      { path: '/requirements', element: <RequirementsPage /> },
+      { path: '/knowledge-bases', element: <KnowledgeBasesPage /> },
+      { path: '/ai-case-generation', element: <AiCaseGenerationPage /> },
       { path: '/ui-test-cases', element: <UiTestCasesPage /> },
       { path: '/ui-test-suites', element: <UiTestSuitesPage /> },
       { path: '/step-library', element: <StepLibraryPage /> },
