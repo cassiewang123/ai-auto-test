@@ -68,13 +68,15 @@ describe('lite navigation', () => {
     expect(flattenLeafKeys(fullItems)).toEqual([
       '/dashboard',
       '/jobs',
+      '/api-workbench',
       '/api-list',
       '/api-docs',
       '/quick-test',
       '/test-cases',
+      '/import',
+      '/api-assets',
       '/test-plans',
       '/test-data',
-      '/import',
       '/mock-service',
       '/ui-test-cases',
       '/ui-test-suites',
@@ -150,6 +152,6 @@ describe('lite navigation', () => {
     );
     expect(
       findByKey(liteItems, 'api-test')?.children?.[0]?.['data-testid']
-    ).toBe('menu-api-list');
+    ).toBe('menu-api-workbench');
   });
 });

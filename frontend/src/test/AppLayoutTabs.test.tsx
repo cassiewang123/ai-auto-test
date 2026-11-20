@@ -132,6 +132,7 @@ describe('AppLayout 标签页集成', () => {
     expect(tabLabels()).toEqual(['仪表盘']);
 
     expandMenu('API 测试');
+    expandMenu('接口管理');
 
     act(() => {
       menuItem('接口定义').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -186,6 +187,7 @@ describe('AppLayout 标签页集成', () => {
     renderLayout();
 
     expandMenu('API 测试');
+    expandMenu('接口管理');
     act(() => {
       menuItem('接口定义').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -210,6 +212,7 @@ describe('AppLayout 标签页集成', () => {
       dashboardTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expandMenu('API 测试');
+    expandMenu('接口管理');
     act(() => {
       menuItem('接口定义').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

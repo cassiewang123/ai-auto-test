@@ -5,6 +5,8 @@ import AppLayout from './components/AppLayout';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const QuickTestPage = lazy(() => import('./pages/QuickTestPage'));
 const ApiListPage = lazy(() => import('./pages/ApiListPage'));
+const ApiAssetsPage = lazy(() => import('./pages/ApiAssetsPage'));
+const ApiWorkbenchPage = lazy(() => import('./pages/ApiWorkbenchPage'));
 const ImportPage = lazy(() => import('./pages/ImportPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 const EnvironmentsPage = lazy(() => import('./pages/EnvironmentsPage'));
@@ -81,6 +83,8 @@ export const routeObjects: RouteObject[] = [
       { path: '/tools/server-console', element: <ServerConsolePage /> },
       { path: '/json-compare', element: <Navigate to="/tools/json-compare" replace /> },
       { path: '/api-list', element: <ApiListPage /> },
+      { path: '/api-assets', element: <ApiAssetsPage /> },
+      { path: '/api-workbench', element: <ApiWorkbenchPage /> },
       { path: '/projects', element: <ProjectsPage /> },
       { path: '/import', element: <ImportPage /> },
       { path: '/environments', element: <EnvironmentsPage /> },
