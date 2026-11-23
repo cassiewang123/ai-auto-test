@@ -15,7 +15,15 @@
 """
 from __future__ import annotations
 
+import io
+from datetime import datetime
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -179,6 +187,143 @@ def create_functional_case(
     db.refresh(item)
     _sync_requirement_cases(db, item.requirement_id)
     return DataResponse[FunctionalTestCaseResponse](data=_to_response(db, item))
+
+
+# ---------------------------------------------------------------------------
+# Excel 导出
+# ---------------------------------------------------------------------------
+@router.get("/export")
+def export_functional_cases(
+    project_id: str | None = Query(None),
+    requirement_id: str | None = Query(None),
+    module: str | None = Query(None),
+    category: str | None = Query(None),
+    priority: str | None = Query(None),
+    status: str | None = Query(None),
+    keyword: str | None = Query(None),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """按当前筛选条件导出功能测试用例为 Excel（.xlsx）.
+
+    导出列与页面一致：用例标题、模块、分类、优先级、前置条件、操作步骤、
+    预期结果、需求追溯、状态、最近执行结果。
+    """
+    query = select(FunctionalTestCase).where(
+        FunctionalTestCase.is_active.is_(True)
+    )
+    for field, value in (
+        (FunctionalTestCase.project_id, project_id),
+        (FunctionalTestCase.requirement_id, requirement_id),
+        (FunctionalTestCase.module, module),
+        (FunctionalTestCase.category, category),
+        (FunctionalTestCase.priority, priority),
+        (FunctionalTestCase.status, status),
+    ):
+        if value:
+            query = query.where(field == value)
+    if keyword:
+        query = query.where(FunctionalTestCase.title.like(f"%{keyword}%"))
+
+    items = (
+        db.execute(query.order_by(FunctionalTestCase.created_at.desc()))
+        .scalars()
+        .all()
+    )
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "功能测试用例"
+
+    headers = [
+        "序号",
+        "用例标题",
+        "模块",
+        "分类",
+        "优先级",
+        "前置条件",
+        "操作步骤",
+        "预期结果",
+        "需求追溯",
+        "状态",
+        "最近执行结果",
+    ]
+    sheet.append(headers)
+
+    # 表头样式：加粗 + 浅灰底 + 细边框
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="F0F0F0")
+    thin = Side(style="thin", color="D9D9D9")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for cell in sheet[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    status_label = {"draft": "草稿", "active": "可执行", "deprecated": "已废弃"}
+    result_label = {
+        "passed": "通过",
+        "failed": "失败",
+        "blocked": "阻塞",
+        "skipped": "跳过",
+    }
+
+    for index, item in enumerate(items, start=1):
+        latest = _latest_execution(db, item.id)
+        steps = list(item.steps or [])
+        # 步骤逐行编号，Excel 中一行内换行展示，便于直接阅读
+        steps_text = "\n".join(
+            f"{step_index}. {step}"
+            for step_index, step in enumerate(steps, start=1)
+        )
+        sheet.append(
+            [
+                index,
+                item.title,
+                item.module or "",
+                item.category,
+                item.priority,
+                item.preconditions or "",
+                steps_text,
+                item.expected or "",
+                item.trace_source or "",
+                status_label.get(item.status, item.status),
+                result_label.get(latest.result, latest.result) if latest else "",
+            ]
+        )
+
+    # 列宽与自动换行
+    widths = [6, 40, 18, 10, 10, 30, 50, 35, 28, 12, 14]
+    for col_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(col_index)].width = width
+    wrap_alignment = Alignment(wrap_text=True, vertical="top")
+    center_alignment = Alignment(horizontal="center", vertical="top")
+    for row in sheet.iter_rows(min_row=2):
+        for col_index, cell in enumerate(row, start=1):
+            cell.border = border
+            # 标题、步骤、前置条件、预期结果列自动换行
+            cell.alignment = (
+                center_alignment if col_index in {1, 4, 5, 10, 11} else wrap_alignment
+            )
+    sheet.freeze_panes = "A2"
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+
+    # 文件名含中文，使用 RFC 5987 编码避免部分浏览器乱码
+    filename = f"功能测试用例-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
+    quoted = quote(filename)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"functional-test-cases.xlsx\"; "
+                f"filename*=UTF-8''{quoted}"
+            )
+        },
+    )
 
 
 @router.get(

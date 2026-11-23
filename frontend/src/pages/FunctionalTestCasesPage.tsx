@@ -25,6 +25,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   ExperimentOutlined,
   PlusOutlined,
@@ -153,6 +154,35 @@ export default function FunctionalTestCasesPage() {
     loadStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priority, status]);
+
+  async function handleExport() {
+    // 直接下载需要携带 JWT，用 fetch 拉取 blob 后触发浏览器下载
+    const url = functionalTestCaseApi.exportUrl({
+      keyword: keyword || undefined,
+      priority,
+      status,
+    });
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        throw new Error(`导出失败（HTTP ${response.status}）`);
+      }
+      const blob = await response.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `功能测试用例-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      message.success(`已导出 ${data.length} 条用例（按当前筛选条件）`);
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
 
   function openCreate() {
     setEditing(null);
@@ -291,13 +321,6 @@ export default function FunctionalTestCasesPage() {
       render: (value: string[]) => value?.length || 0,
     },
     {
-      title: '来源',
-      dataIndex: 'source',
-      width: 90,
-      render: (value: string) =>
-        value === 'ai' ? <Tag color="geekblue">AI 生成</Tag> : <Tag>手工</Tag>,
-    },
-    {
       title: '最近执行',
       dataIndex: 'last_result',
       width: 110,
@@ -391,6 +414,9 @@ export default function FunctionalTestCasesPage() {
             />
             <Button icon={<ReloadOutlined />} onClick={() => loadData()}>
               刷新
+            </Button>
+            <Button icon={<DownloadOutlined />} onClick={handleExport}>
+              导出 Excel
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建用例

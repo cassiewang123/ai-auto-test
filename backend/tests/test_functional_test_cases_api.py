@@ -177,3 +177,96 @@ def test_requirement_case_ids_follow_functional_cases(client, db_session):
     detail = client.get(f"/api/v1/requirements/{req_id}").json()["data"]
     assert case["id"] not in detail["case_ids"]
     assert detail["coverage"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Excel 导出
+# ---------------------------------------------------------------------------
+def test_export_returns_xlsx_with_headers_and_rows(client):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    _create_case(client, title="登录成功用例", priority="P0")
+    _create_case(client, title="登录失败用例", category="异常", priority="P1")
+
+    response = client.get("/api/v1/functional-test-cases/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "attachment" in response.headers["content-disposition"]
+
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["功能测试用例"]
+    headers = [cell.value for cell in sheet[1]]
+    assert headers[:5] == ["序号", "用例标题", "模块", "分类", "优先级"]
+    assert "操作步骤" in headers
+    assert "预期结果" in headers
+    # 表头之外应有两条用例
+    assert sheet.max_row == 3
+
+
+def test_export_writes_steps_as_numbered_lines(client):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    _create_case(
+        client,
+        title="带步骤用例",
+        steps=["第一步操作", "第二步操作"],
+    )
+
+    response = client.get("/api/v1/functional-test-cases/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["功能测试用例"]
+    headers = [cell.value for cell in sheet[1]]
+    steps_col = headers.index("操作步骤") + 1
+    steps_text = sheet.cell(row=2, column=steps_col).value
+    assert "1. 第一步操作" in steps_text
+    assert "2. 第二步操作" in steps_text
+
+
+def test_export_respects_filters(client):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    _create_case(client, title="P0用例", priority="P0")
+    _create_case(client, title="P2用例", priority="P2")
+
+    response = client.get(
+        "/api/v1/functional-test-cases/export", params={"priority": "P0"}
+    )
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["功能测试用例"]
+    titles = [sheet.cell(row=r, column=2).value for r in range(2, sheet.max_row + 1)]
+    assert titles == ["P0用例"]
+
+
+def test_export_does_not_conflict_with_case_detail_route(client):
+    """导出路由不能被 /{case_id} 通配路由吃掉."""
+    created = _create_case(client, title="详情路由仍可用")
+    detail = client.get(f"/api/v1/functional-test-cases/{created['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["data"]["title"] == "详情路由仍可用"
+
+
+def test_export_includes_latest_execution_result(client):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    created = _create_case(client, title="已执行用例")
+    client.post(
+        f"/api/v1/functional-test-cases/{created['id']}/executions",
+        json={"result": "failed"},
+    )
+
+    response = client.get("/api/v1/functional-test-cases/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["功能测试用例"]
+    headers = [cell.value for cell in sheet[1]]
+    result_col = headers.index("最近执行结果") + 1
+    assert sheet.cell(row=2, column=result_col).value == "失败"

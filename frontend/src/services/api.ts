@@ -1240,6 +1240,25 @@ export const functionalTestCaseApi = {
     api.put<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`, data),
   remove: (id: string) =>
     api.delete<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`),
+  // 导出 Excel：返回后端相对路径，由页面带 token 拉取后下载
+  exportUrl: (params?: {
+    project_id?: string;
+    requirement_id?: string;
+    module?: string;
+    category?: string;
+    priority?: string;
+    status?: string;
+    keyword?: string;
+  }) => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        query.append(key, String(value));
+      }
+    });
+    const qs = query.toString();
+    return `/api/v1/functional-test-cases/export${qs ? `?${qs}` : ''}`;
+  },
   // 人工执行记录
   listExecutions: (id: string) =>
     api.get<unknown, ApiResponse<any[]>>(`/functional-test-cases/${id}/executions`),
