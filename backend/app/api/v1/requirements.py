@@ -43,10 +43,13 @@ from app.schemas.requirement import (
     RequirementUpdate,
 )
 from app.schemas.test_design import (
+    Clarification,
+    FunctionItem,
     RequirementAnalysisMessageRequest,
     RequirementAnalysisRequest,
     RequirementAnalysisResponse,
     RequirementDocumentResponse,
+    UiDescription,
 )
 from app.services.auth_service import get_current_user
 from app.services.knowledge_base_service import KnowledgeBaseService
@@ -362,9 +365,39 @@ def _analysis_response(
     db: Session, analysis: RequirementAnalysis
 ) -> RequirementAnalysisResponse:
     data = RequirementAnalysisResponse.model_validate(analysis)
-    data.function_items = list(analysis.function_items or [])
-    data.ui_descriptions = list(analysis.ui_descriptions or [])
-    data.clarifications = list(analysis.clarifications or [])
+    # 显式构造成强类型模型，避免裸 dict 触发 Pydantic 序列化告警
+    data.function_items = [
+        FunctionItem(
+            module=str(item.get("module") or ""),
+            points=[
+                str(point)
+                for point in (
+                    item.get("points")
+                    if isinstance(item.get("points"), list)
+                    else [item.get("points")]
+                )
+                if point
+            ],
+        )
+        for item in (analysis.function_items or [])
+        if isinstance(item, dict)
+    ]
+    data.ui_descriptions = [
+        UiDescription(
+            page=str(item.get("page") or ""),
+            description=str(item.get("description") or ""),
+        )
+        for item in (analysis.ui_descriptions or [])
+        if isinstance(item, dict)
+    ]
+    data.clarifications = [
+        Clarification(
+            question=str(item.get("question") or ""),
+            reason=str(item.get("reason") or ""),
+        )
+        for item in (analysis.clarifications or [])
+        if isinstance(item, dict)
+    ]
     data.messages = list(analysis.messages or [])
     return data
 

@@ -48,8 +48,9 @@ python-docx>=1.1.0
 openpyxl>=3.1.0
 python-multipart>=0.0.9
 
-# 需求文档 PDF 解析（可选：未安装时 PDF 上传会给出明确告警而非解析失败）
-# pypdf>=4.0.0
+# 需求文档 PDF 解析（二选一即可：优先 pypdf，其次 pdfplumber；都缺失时
+# PDF 上传会返回明确的安装提示，不会静默产出空正文）
+pypdf>=4.0.0
 
 # Development tools, install only when needed:
 # ruff>=0.6.0

@@ -76,10 +76,120 @@ class RequirementAnalysisResult:
         }
 
 
+# 附件标记行、「页面参照：」这类短标签、纯 URL、纯符号行都不是功能点
+_ATTACHMENT_MARKER_RE = re.compile(r"^【附件[:：].*】$")
+_URL_RE = re.compile(r"^https?://\S*$|^cid=[\w\-&=%#]+$", re.I)
+# 句子中夹杂的 URL（页内超链接被拆成多行时很常见），整段剔除
+_INLINE_URL_RE = re.compile(r"https?://\S+", re.I)
+SHORT_LABEL_MAX = 8
+# 句子最大长度：超过说明是多个句子被误拼，需要拆开
+MAX_SENTENCE_CHARS = 150
+
+
+def _is_noise_sentence(sentence: str) -> bool:
+    """判断一句是否属于不应进入功能清单的噪声片段."""
+    text = sentence.strip()
+    if not text:
+        return True
+    if _ATTACHMENT_MARKER_RE.match(text) or _URL_RE.match(text):
+        return True
+    # 纯符号/数字
+    if not re.search(r"[\u4e00-\u9fffA-Za-z]", text):
+        return True
+    # 「页面参照：」「excel模板如下：」这类只有标签没有内容的短句
+    return len(text) <= SHORT_LABEL_MAX + 2 and text.endswith(("：", ":"))
+
+
+def _strip_urls(sentence: str) -> str:
+    """剔除句中的 URL 以及由 URL 查询串拆出的残片（如 cid=...）。"""
+    text = _INLINE_URL_RE.sub(" ", sentence)
+    # 去掉形如 xxx=yyy&zzz=1 的查询串残片
+    text = re.sub(r"\b[a-zA-Z_][\w\-]*=[\w\-&=%#.]*", " ", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _split_long_sentence(sentence: str) -> list[str]:
+    """把误拼过长的句子按句末标点重新切开."""
+    if len(sentence) <= MAX_SENTENCE_CHARS:
+        return [sentence]
+    pieces = [
+        p.strip()
+        for p in re.split(r"(?<=[。！？；!?;])", sentence)
+        if p.strip()
+    ]
+    return pieces or [sentence]
+
+
+def _strip_noise_lines(sentence: str) -> str:
+    """从句子中剔除行级的噪声片段（附件标记、页码、纯符号行）.
+
+    续行拼接可能把「【附件：x.pdf】」「– 2」这类噪声并进正文，
+    因此在拼接之后还要按行再过滤一次。
+    """
+    kept: list[str] = []
+    for raw_line in re.split(r"[\n\r]+", sentence):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if _ATTACHMENT_MARKER_RE.match(line):
+            continue
+        if re.fullmatch(r"[\s–—\-·]*\d{1,4}[\s–—\-·]*", line):
+            continue
+        if _URL_RE.match(line):
+            continue
+        if not re.search(r"[\u4e00-\u9fffA-Za-z]", line):
+            continue
+        kept.append(line)
+    return " ".join(kept).strip()
+
+
 def _sentences(text: str) -> list[str]:
-    """把正文拆成句子，过滤过短片段."""
-    parts = [p.strip(" \t-*#>") for p in _SENTENCE_SPLIT_RE.split(text or "")]
-    return [p for p in parts if len(p) >= 4]
+    """把正文拆成句子：过滤噪声、剔除 URL，并把被硬换行截断的半句拼回整句."""
+    raw_parts = [
+        p.strip(" \t-*#>")
+        for p in _SENTENCE_SPLIT_RE.split(text or "")
+    ]
+
+    # 先拼接续行：仅当「上一句明显被截断」时才拼接——
+    # 上一句未以句末标点结尾，且下一句不是新的条目/标题（不以标签、序号开头），
+    # 且拼接后仍不超过单句上限。否则保持独立，避免把整段话拼成一句。
+    merged: list[str] = []
+    for part in raw_parts:
+        if not part:
+            continue
+        if merged:
+            previous = merged[-1]
+            previous_open = not previous.endswith(
+                ("。", "！", "？", ";", "；", "!", "?")
+            )
+            starts_new_item = bool(
+                re.match(r"^[\w\u4e00-\u9fff]{1,10}\s*[：:]", part)
+                or re.match(r"^(?:轨迹序号|序号|页面|换装地|\d+[.、])", part)
+                or _ATTACHMENT_MARKER_RE.match(part)
+            )
+            fits = len(previous) + len(part) <= MAX_SENTENCE_CHARS
+            no_url = not _INLINE_URL_RE.search(part) and not _INLINE_URL_RE.search(
+                previous
+            )
+            if previous_open and not starts_new_item and fits and no_url:
+                merged[-1] = previous + part
+                continue
+        merged.append(part)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in merged:
+        cleaned = _strip_noise_lines(_strip_urls(part))
+        for piece in _split_long_sentence(cleaned):
+            if len(piece) < 4 or _is_noise_sentence(piece):
+                continue
+            # 同一句可能同时来自需求描述与附件正文，去重避免功能清单重复
+            key = re.sub(r"\s+", "", piece)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(piece)
+    return result
 
 
 def _clean_point(sentence: str, max_length: int = 120) -> str:

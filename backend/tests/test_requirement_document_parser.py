@@ -9,6 +9,8 @@ from docx import Document
 
 from app.services.requirement_document_parser import (
     DocumentParseError,
+    _clean_pdf_layout,
+    _detect_repeated_page_furniture,
     parse_document,
     summarize_document,
 )
@@ -89,12 +91,60 @@ def test_parse_image_warns_about_missing_ocr():
     assert any("OCR" in warning for warning in parsed.warnings)
 
 
-def test_parse_pdf_without_library_returns_warning():
-    # 未安装 pypdf 时不应抛异常，而是给出可操作的告警
-    parsed = parse_document("需求.pdf", b"%PDF-1.4\n" + b"0" * 64)
-    assert parsed.file_type == "pdf"
-    # 依赖是否安装取决于运行环境，两种结果都必须可解释
-    assert parsed.content or parsed.warnings
+def test_parse_corrupt_pdf_raises_parse_error():
+    # 损坏的 PDF 必须明确报错，不能静默产出空正文
+    with pytest.raises(DocumentParseError):
+        parse_document("需求.pdf", b"%PDF-1.4\n" + b"0" * 64)
+
+
+def test_pdf_backend_prefers_pypdf_then_pdfplumber(monkeypatch):
+    """pypdf 缺失时必须自动回退到 pdfplumber，而不是直接报缺库。"""
+    from app.services import requirement_document_parser as parser
+
+    calls: list[str] = []
+
+    def fake_pypdf(data, warnings):
+        calls.append("pypdf")
+        return None  # 模拟未安装
+
+    def fake_pdfplumber(data, warnings):
+        calls.append("pdfplumber")
+        return ["回退后端提取到的正文"]
+
+    monkeypatch.setattr(parser, "_extract_pdf_with_pypdf", fake_pypdf)
+    monkeypatch.setattr(parser, "_extract_pdf_with_pdfplumber", fake_pdfplumber)
+
+    parsed = parser.parse_document("需求.pdf", b"%PDF-1.4\n" + b"0" * 64)
+    assert calls == ["pypdf", "pdfplumber"]
+    assert "回退后端提取到的正文" in parsed.content
+    assert parsed.warnings == []
+
+
+def test_pdf_reports_warning_when_no_backend_available(monkeypatch):
+    """所有后端都缺失时必须给出安装提示，且不产出正文。"""
+    from app.services import requirement_document_parser as parser
+
+    monkeypatch.setattr(parser, "_extract_pdf_with_pypdf", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        parser, "_extract_pdf_with_pdfplumber", lambda *_a, **_k: None
+    )
+
+    parsed = parser.parse_document("需求.pdf", b"%PDF-1.4\n" + b"0" * 64)
+    assert parsed.content == ""
+    assert any("pip install pypdf" in warning for warning in parsed.warnings)
+
+
+def test_pdf_scanned_document_warns_about_missing_text(monkeypatch):
+    """扫描件（无文本层）应提示补充正文，而不是静默成功。"""
+    from app.services import requirement_document_parser as parser
+
+    monkeypatch.setattr(
+        parser, "_extract_pdf_with_pypdf", lambda *_a, **_k: ["", "  "]
+    )
+
+    parsed = parser.parse_document("扫描件.pdf", b"%PDF-1.4\n" + b"0" * 64)
+    assert parsed.is_empty
+    assert any("扫描件" in warning for warning in parsed.warnings)
 
 
 def test_parse_unsupported_extension_raises():
@@ -118,3 +168,77 @@ def test_summarize_document_shape():
     assert summary["filename"] == "需求.md"
     assert summary["char_count"] == len("需求正文内容")
     assert summary["is_empty"] is False
+
+
+# ---------------------------------------------------------------------------
+# PDF 版面清理：噪声去除与内容保全
+# ---------------------------------------------------------------------------
+def test_clean_pdf_layout_removes_page_numbers_and_export_marker():
+    pages = [
+        "标题行\n正文第一句。\n– 2",
+        "标题行\n正文第二句。\n– 3",
+        "标题行\n正文第三句。\n– 4",
+    ]
+    cleaned = _clean_pdf_layout(pages)
+    assert "– 2" not in cleaned
+    assert "– 3" not in cleaned
+    assert "正文第一句。" in cleaned
+
+
+def test_clean_pdf_layout_removes_toc_noise():
+    pages = ["Table of Contents\nNo headings included in this document\n真实内容。"]
+    cleaned = _clean_pdf_layout(pages)
+    assert "Table of Contents" not in cleaned
+    assert "No headings included" not in cleaned
+    assert "真实内容。" in cleaned
+
+
+def test_clean_pdf_layout_removes_repeated_header():
+    pages = [
+        "公司名 – 需求文档\n内容一。",
+        "公司名 – 需求文档\n内容二。",
+        "公司名 – 需求文档\n内容三。",
+    ]
+    cleaned = _clean_pdf_layout(pages)
+    assert "公司名 – 需求文档" not in cleaned
+    assert "内容一。" in cleaned
+
+
+def test_clean_pdf_layout_keeps_repeated_body_entries():
+    """正文条目在不同分支重复出现时不得被当作页眉删除."""
+    pages = [
+        "轨迹序号1 对应申报地海关代码。\n轨迹序号2 对应换装地1。",
+        "轨迹序号1 对应申报地海关代码。\n轨迹序号2 对应换装地1。",
+        "轨迹序号3 对应境内目的地关区代码。\n轨迹序号4 对应境内目的地关区代码。",
+        "补充说明内容。\n其他说明。",
+    ]
+    cleaned = _clean_pdf_layout(pages)
+    # 这正是真实需求文档的形态：条目重复但属于正文
+    assert cleaned.count("轨迹序号1") == 2
+    assert "轨迹序号3" in cleaned
+
+
+def test_detect_page_furniture_requires_enough_pages():
+    # 少于 3 页时不做页眉判定，避免误删唯一内容
+    assert _detect_repeated_page_furniture(["头部\n内容。", "头部\n内容。"]) == set()
+
+
+def test_detect_page_furniture_finds_consistent_header():
+    pages = [f"页眉文本\n内容{i}。" for i in range(6)]
+    furniture = _detect_repeated_page_furniture(pages)
+    assert "页眉文本" in furniture
+
+
+def test_clean_pdf_layout_merges_soft_wrapped_lines():
+    """被硬换行截断的句子应拼回整句，避免功能清单出现碎片."""
+    pages = ["页面基本信息：出境运输\n方式代码 对应 excel 中的出境运输方式代码。"]
+    cleaned = _clean_pdf_layout(pages)
+    assert "出境运输方式代码" in cleaned.replace("\n", "")
+
+
+def test_clean_pdf_layout_does_not_merge_new_items():
+    """以「轨迹序号」「页面」开头的新条目不应并入上一句."""
+    pages = ["上一句还没有结束\n轨迹序号1 对应申报地海关代码。"]
+    cleaned = _clean_pdf_layout(pages)
+    assert "轨迹序号1" in cleaned
+    assert "上一句还没有结束轨迹序号1" not in cleaned
