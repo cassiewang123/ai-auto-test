@@ -41,6 +41,7 @@ ROUTES = [
     "/requirements",
     "/knowledge-bases",
     "/ai-case-generation",
+    "/functional-test-cases",
     "/api-docs",
     "/scheduled-tasks",
     "/mock-service",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 
+from app.models.functional_test_case import FunctionalTestCase
 from app.models.test_case import TestCase
 from app.models.test_design import GeneratedCase, GeneratedTestPoint
 
@@ -313,7 +314,8 @@ def test_review_dimension_weights_are_clamped(client):
     assert data["dimensions"] == {"覆盖完整性": 5}
 
 
-def test_import_cases_writes_test_cases(client, db_session):
+def test_import_cases_writes_functional_test_cases(client, db_session):
+    """AI 用例必须写入功能测试用例库，而不是 API 自动化用例表."""
     requirement = _create_requirement(client)
     session = _create_session(client, requirement_id=requirement["id"])
     client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-points")
@@ -326,14 +328,49 @@ def test_import_cases_writes_test_cases(client, db_session):
     data = response.json()["data"]
     assert data["created_count"] > 0
 
-    created = db_session.query(TestCase).all()
+    created = (
+        db_session.query(FunctionalTestCase)
+        .filter_by(design_session_id=session["id"])
+        .all()
+    )
     assert len(created) == data["created_count"]
-    assert all("ai-generated" in (case.markers or []) for case in created)
+    for case in created:
+        assert case.source == "ai"
+        assert case.title
+        assert case.steps  # 功能用例携带操作步骤
+        assert case.expected
+        assert case.requirement_id == requirement["id"]
+
+    # 关键断言：API 自动化用例表不得被写入
+    assert db_session.query(TestCase).count() == 0
 
     detail = client.get(f"/api/v1/test-design/sessions/{session['id']}").json()["data"]
     assert detail["status"] == "imported"
     assert len(detail["case_ids"]) == data["created_count"]
     assert all(case["imported_case_id"] for case in detail["cases"])
+
+
+def test_imported_cases_visible_in_functional_case_list(client):
+    requirement = _create_requirement(client)
+    session = _create_session(client, requirement_id=requirement["id"])
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-points")
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-cases", json={})
+    imported = client.post(
+        f"/api/v1/test-design/sessions/{session['id']}/import-cases", json={}
+    ).json()["data"]
+
+    listed = client.get(
+        "/api/v1/functional-test-cases",
+        params={"requirement_id": requirement["id"]},
+    ).json()
+    assert listed["total"] == imported["created_count"]
+    first = listed["data"][0]
+    assert first["steps"]
+    assert first["source"] == "ai"
+
+    # API 自动化用例接口不应看到这些用例
+    api_cases = client.get("/api/v1/test-cases").json()
+    assert api_cases["total"] == 0
 
 
 def test_import_cases_links_requirement_coverage(client):

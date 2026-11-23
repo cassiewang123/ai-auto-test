@@ -1216,6 +1216,43 @@ export const knowledgeBaseApi = {
     api.post<unknown, ApiResponse<any>>('/knowledge-bases/chunk-preview', data),
 };
 
+// ========== 功能测试用例库（区别于 API 自动化用例） ==========
+export const functionalTestCaseApi = {
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    project_id?: string;
+    requirement_id?: string;
+    module?: string;
+    category?: string;
+    priority?: string;
+    status?: string;
+    keyword?: string;
+  }) =>
+    api.get<unknown, PageResponse<any>>('/functional-test-cases', { params }),
+  stats: (params?: { project_id?: string }) =>
+    api.get<unknown, ApiResponse<any>>('/functional-test-cases/stats', { params }),
+  get: (id: string) =>
+    api.get<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`),
+  create: (data: any) =>
+    api.post<unknown, ApiResponse<any>>('/functional-test-cases', data),
+  update: (id: string, data: any) =>
+    api.put<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`, data),
+  remove: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`),
+  // 人工执行记录
+  listExecutions: (id: string) =>
+    api.get<unknown, ApiResponse<any[]>>(`/functional-test-cases/${id}/executions`),
+  addExecution: (
+    id: string,
+    data: { result: string; actual?: string; remark?: string; defect_ref?: string; run_label?: string }
+  ) =>
+    api.post<unknown, ApiResponse<any>>(
+      `/functional-test-cases/${id}/executions`,
+      data
+    ),
+};
+
 // ========== AI 测试用例生成 ==========
 export const testDesignApi = {
   listSessions: (params?: {

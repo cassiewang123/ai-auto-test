@@ -218,6 +218,8 @@ def _register_routers(app: FastAPI) -> None:
         # 需求文档与知识库（RAG）/AI 测试用例生成（均需 JWT 鉴权）
         ("app.api.v1.knowledge_bases", "router", "/knowledge-bases"),
         ("app.api.v1.test_design", "router", "/test-design"),
+        # 功能测试用例库（与 API 自动化用例 /test-cases 分离）
+        ("app.api.v1.functional_test_cases", "router", "/functional-test-cases"),
     ]:
         try:
             mod = importlib.import_module(module_path)

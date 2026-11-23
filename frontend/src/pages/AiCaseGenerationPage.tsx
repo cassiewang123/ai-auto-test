@@ -119,7 +119,7 @@ const STATUS_LABEL: Record<string, string> = {
   clarifying: '待分析',
   points_ready: '测试点待确认',
   cases_ready: '用例待写入',
-  imported: '已写入用例库',
+  imported: '已写入功能用例库',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -336,7 +336,7 @@ export default function AiCaseGenerationPage() {
         selectedCaseIds.length > 0 ? selectedCaseIds : undefined,
         importProjectId
       );
-      message.success(`已写入用例库 ${res.data.created_count} 条用例`);
+      message.success(`已写入功能测试用例库 ${res.data.created_count} 条用例`);
       setImportOpen(false);
       const detail = await testDesignApi.getSession(session.id);
       applySession(detail.data);
@@ -698,7 +698,7 @@ export default function AiCaseGenerationPage() {
                   disabled={session.cases.length === 0}
                   onClick={() => setImportOpen(true)}
                 >
-                  写入用例库
+                  写入功能用例库
                 </Button>
               </Space>
             }
@@ -973,7 +973,7 @@ export default function AiCaseGenerationPage() {
       </Col>
 
       <Modal
-        title="写入用例库"
+        title="写入功能测试用例库"
         open={importOpen}
         onCancel={() => setImportOpen(false)}
         onOk={handleImport}
@@ -985,8 +985,8 @@ export default function AiCaseGenerationPage() {
             type="info"
             showIcon
             icon={<FileDoneOutlined />}
-            message={`将写入 ${selectedCaseIds.length || session?.cases.length || 0} 条用例到用例库`}
-            description="用例标题、前置条件、步骤与预期结果会写入用例描述，可继续在用例管理中完善请求定义"
+            message={`将写入 ${selectedCaseIds.length || session?.cases.length || 0} 条用例到功能测试用例库`}
+            description="这些是功能测试用例（前置条件 / 操作步骤 / 预期结果），写入后不会出现在 API 自动化「用例管理」中；可在「功能测试用例」页查看、编辑与登记执行结果"
           />
           <Descriptions size="small" column={1} bordered>
             <Descriptions.Item label="目标项目">

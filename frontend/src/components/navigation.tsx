@@ -111,6 +111,11 @@ const navigationItems: NavigationItem[] = [
         icon: <RobotOutlined />,
         label: 'AI 用例生成',
       },
+      {
+        key: '/functional-test-cases',
+        icon: <SolutionOutlined />,
+        label: '功能测试用例',
+      },
     ],
   },
   {

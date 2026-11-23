@@ -22,13 +22,13 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.database import get_db
+from app.models.functional_test_case import FunctionalTestCase
 from app.models.knowledge_base import KnowledgeBase
 from app.models.requirement import Requirement
 from app.models.requirement_document import (
     RequirementAnalysis,
     RequirementDocument,
 )
-from app.models.test_case import TestCase
 from app.models.test_design import (
     GeneratedCase,
     GeneratedTestPoint,
@@ -699,7 +699,11 @@ def import_cases(
     payload: ImportCasesRequest | None = None,
     db: Session = Depends(get_db),
 ):
-    """把选中的用例草稿写入用例库（TestCase）."""
+    """把选中的用例草稿写入功能测试用例库（FunctionalTestCase）.
+
+    注意：不写入 API 自动化用例表（test_cases）。AI 生成的是功能测试用例，
+    含前置条件/步骤/预期结果，与绑定 method/url/断言的 API 用例语义不同。
+    """
     session = _get_session_or_404(db, session_id)
     payload = payload or ImportCasesRequest()
 
@@ -715,22 +719,25 @@ def import_cases(
     project_id = payload.project_id or session.project_id
     created_ids: list[str] = []
     for case in cases:
-        test_case = TestCase(
+        functional_case = FunctionalTestCase(
             title=case.title,
-            description=_case_description(case),
-            group_path=case.module,
-            markers=["ai-generated"],
-            method="GET",
-            url="/api/v1/endpoint",
-            headers={},
-            params={},
-            body=None,
+            module=case.module,
+            category=case.category,
+            priority=case.priority,
+            preconditions=case.preconditions,
+            steps=list(case.steps or []),
+            expected=case.expected,
+            trace_source=case.trace_source,
+            status="active",
+            source="ai",
+            requirement_id=session.requirement_id,
+            design_session_id=session.id,
             project_id=project_id,
         )
-        db.add(test_case)
+        db.add(functional_case)
         db.flush()
-        case.imported_case_id = test_case.id
-        created_ids.append(test_case.id)
+        case.imported_case_id = functional_case.id
+        created_ids.append(functional_case.id)
 
     # 回写需求的用例关联，保持需求覆盖率统计准确
     if session.requirement_id:
@@ -748,7 +755,7 @@ def import_cases(
     _append_message(
         session,
         "assistant",
-        f"已写入用例库 {len(created_ids)} 条用例",
+        f"已写入功能测试用例库 {len(created_ids)} 条用例",
         kind="import",
     )
     db.commit()
@@ -757,20 +764,3 @@ def import_cases(
             created_count=len(created_ids), test_case_ids=created_ids
         )
     )
-
-
-def _case_description(case: GeneratedCase) -> str:
-    """把用例草稿的结构化字段拼成用例描述文本."""
-    lines: list[str] = []
-    if case.preconditions:
-        lines.append(f"前置条件：{case.preconditions}")
-    steps = list(case.steps or [])
-    if steps:
-        lines.append("操作步骤：")
-        lines.extend(f"{index}. {step}" for index, step in enumerate(steps, start=1))
-    if case.expected:
-        lines.append(f"预期结果：{case.expected}")
-    if case.trace_source:
-        lines.append(f"需求追溯：{case.trace_source}")
-    lines.append(f"生成分类：{case.category} / {case.priority}")
-    return "\n".join(lines)

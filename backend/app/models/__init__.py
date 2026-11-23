@@ -11,6 +11,10 @@ from app.models.defect_integration import DefectTicket
 from app.models.defect_pattern import DefectPattern
 from app.models.environment import Environment
 from app.models.execution_job import ExecutionAttempt, ExecutionJob, JobEvent
+from app.models.functional_test_case import (
+    FunctionalCaseExecution,
+    FunctionalTestCase,
+)
 from app.models.global_variable import GlobalVariable
 from app.models.interface_knowledge import InterfaceKnowledge
 from app.models.job_artifact import JobArtifact
@@ -104,6 +108,8 @@ __all__ = [
     "TestDesignSession",
     "GeneratedTestPoint",
     "GeneratedCase",
+    "FunctionalTestCase",
+    "FunctionalCaseExecution",
     "ApiToken",
     "WebhookConfig",
     "TestDataSet",
