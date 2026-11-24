@@ -641,7 +641,7 @@ export default function TestCasesPage() {
       <Card
         title={
           <Space>
-            <span>用例管理</span>
+            <span>接口管理</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>共 {cases.length} 个用例</span>
           </Space>
         }

@@ -55,7 +55,8 @@ class AIService:
 
         若 langchain 未安装或未配置 api_key，则返回 None。
         """
-        if not self.config.api_key:
+        # D3 双条件与门：总闸关闭或凭据为空时一律走规则 fallback，绝不外发。
+        if not get_settings().LLM_EXTERNAL_ENABLED or not self.config.api_key:
             return None
         try:
             from langchain_openai import ChatOpenAI
@@ -484,26 +485,98 @@ class AIService:
             f"输入数据:\n{json.dumps(source_data, ensure_ascii=False, indent=2)}\n"
         )
 
+    @staticmethod
+    def _extract_interface_fields(source_data: dict) -> list[str]:
+        """提取接口的参数/请求体字段名，用于按字段生成用例."""
+        fields: list[str] = []
+
+        def add(name: Any) -> None:
+            text = str(name or "").strip()
+            if text and text not in fields:
+                fields.append(text)
+
+        for key in ("params", "body"):
+            value = source_data.get(key)
+            if isinstance(value, dict):
+                for name in value:
+                    add(name)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        add(item.get("name") or item.get("key"))
+                    elif isinstance(item, str):
+                        add(item)
+        return fields
+
     def _fallback_analyze_test_points(
         self,
         source_type: str,
         source_data: dict,
         options: dict | None = None,
     ) -> list[dict]:
-        """无 LLM 时基于规则生成测试点."""
+        """无 LLM 时基于规则生成测试点.
+
+        对 ``interface`` 来源，会按请求参数/请求体字段逐个展开「必填缺失」
+        「边界值」「类型错误」测试点，这是接口用例生成的核心场景。
+        """
         options = options or {}
         points: list[dict] = []
         if source_type == "interface":
             method = source_data.get("method", "GET")
             points.append(
-                {"point": f"{method}正常请求", "type": "normal", "priority": "P0"}
+                {
+                    "point": f"{source_data.get('name') or method} 正常请求",
+                    "type": "normal",
+                    "priority": "P0",
+                }
             )
-            points.append(
-                {"point": "参数缺失", "type": "exception", "priority": "P1"}
-            )
-            points.append(
-                {"point": "参数边界值", "type": "boundary", "priority": "P1"}
-            )
+
+            fields = self._extract_interface_fields(source_data)
+            for field in fields[:5]:
+                points.append(
+                    {
+                        "point": f"参数 {field} 缺失时返回校验错误",
+                        "type": "exception",
+                        "priority": "P1",
+                        "field": field,
+                        "mutation": "missing",
+                    }
+                )
+                points.append(
+                    {
+                        "point": f"参数 {field} 边界值校验",
+                        "type": "boundary",
+                        "priority": "P1",
+                        "field": field,
+                        "mutation": "boundary",
+                    }
+                )
+                points.append(
+                    {
+                        "point": f"参数 {field} 类型错误时拒绝请求",
+                        "type": "exception",
+                        "priority": "P2",
+                        "field": field,
+                        "mutation": "type_error",
+                    }
+                )
+
+            if not fields:
+                points.append(
+                    {"point": "参数缺失", "type": "exception", "priority": "P1"}
+                )
+                points.append(
+                    {"point": "参数边界值", "type": "boundary", "priority": "P1"}
+                )
+
+            if not (source_data.get("headers") or {}).get("Authorization"):
+                points.append(
+                    {
+                        "point": "未携带认证信息时返回未授权",
+                        "type": "permission",
+                        "priority": "P1",
+                    }
+                )
         else:
             # description / har / 其他均使用通用测试点
             points.append(
@@ -515,6 +588,12 @@ class AIService:
             points.append(
                 {"point": "边界场景", "type": "boundary", "priority": "P1"}
             )
+
+        # 支持按场景类型筛选（前端生成选项）
+        case_types = options.get("case_types")
+        if isinstance(case_types, list) and case_types:
+            allowed = {str(item) for item in case_types}
+            points = [point for point in points if point.get("type") in allowed]
 
         max_cases = options.get("max_cases", 20)
         return points[:max_cases]
@@ -568,20 +647,51 @@ class AIService:
     def _fallback_generate_case_from_point(
         self, point: dict, source_data: dict
     ) -> dict:
-        """无 LLM 时基于模板生成结构化用例."""
+        """无 LLM 时基于模板生成结构化用例.
+
+        对「参数缺失 / 边界值 / 类型错误」测试点，会在请求参数或请求体中
+        实际构造对应的取值，而不是只改标题。
+        """
+        import copy
+
         method = source_data.get("method", "POST")
         url = source_data.get("url", source_data.get("path", "/api/v1/endpoint"))
         case_type = point.get("type", "normal")
+        field = point.get("field")
+        mutation = point.get("mutation")
+
+        params = copy.deepcopy(source_data.get("params") or {})
+        body = copy.deepcopy(source_data.get("body"))
+        headers = copy.deepcopy(source_data.get("headers") or {})
+
+        def mutate(container: dict) -> None:
+            if not field:
+                return
+            if mutation == "missing":
+                container.pop(field, None)
+            elif mutation == "boundary":
+                container[field] = "A" * 256
+            elif mutation == "type_error":
+                container[field] = {"invalid": "object"}
+
+        if isinstance(params, dict) and field in params:
+            mutate(params)
+        elif isinstance(body, dict) and field in body:
+            mutate(body)
+        elif isinstance(params, dict) and mutation:
+            # 字段来自请求体时 params 保持原样；此处仅兜底
+            pass
 
         if case_type == "exception":
             assertions: list[dict] = [
                 {"type": "status_code", "expected": "400"}
             ]
-            body: Any = {}
+        elif case_type == "permission":
+            headers.pop("Authorization", None)
+            assertions = [{"type": "status_code", "expected": "401"}]
         else:
             # normal 与 boundary 均期望 200
             assertions = [{"type": "status_code", "expected": "200"}]
-            body = source_data.get("body", {})
 
         return {
             "title": point.get("point", case_type),
@@ -589,7 +699,8 @@ class AIService:
             "priority": point.get("priority", "P1"),
             "method": method,
             "url": url,
-            "headers": {"Content-Type": "application/json"},
+            "headers": headers,
+            "params": params,
             "body": body,
             "assertions": assertions,
             "description": f"自动生成: {point.get('point', case_type)}",

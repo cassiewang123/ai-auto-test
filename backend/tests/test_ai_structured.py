@@ -179,3 +179,115 @@ class TestImportCases:
         assertion_types = [a["assertion_type"] for a in case_data["assertions"]]
         assert "status_code" in assertion_types
         assert "json_path" in assertion_types
+
+
+# ---------------------------------------------------------------------------
+# 接口 + 传参 生成用例（参数维度覆盖）
+# ---------------------------------------------------------------------------
+class TestInterfaceParamGeneration:
+    def _source(self):
+        return {
+            "name": "创建用户",
+            "method": "POST",
+            "url": "/api/v1/users",
+            "headers": {"Content-Type": "application/json", "Authorization": "{{token}}"},
+            "params": {"tenantId": "t1"},
+            "body": {"username": "test", "email": "test@example.com"},
+        }
+
+    def test_generates_points_per_field(self, client):
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": self._source(),
+                "options": {"max_cases": 50},
+            },
+        )
+        assert resp.status_code == 200
+        cases = resp.json()["data"]["cases"]
+        titles = " ".join(case["title"] for case in cases)
+        # 参数与请求体字段都应展开
+        for field in ("tenantId", "username", "email"):
+            assert f"参数 {field} 缺失" in titles
+            assert f"参数 {field} 边界值" in titles
+            assert f"参数 {field} 类型错误" in titles
+        # 有正常请求
+        assert any(case["case_type"] == "normal" for case in cases)
+
+    def test_exception_case_removes_field(self, client):
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": self._source(),
+                "options": {"max_cases": 50},
+            },
+        )
+        cases = resp.json()["data"]["cases"]
+        missing_username = next(
+            case
+            for case in cases
+            if case["title"] == "参数 username 缺失时返回校验错误"
+        )
+        assert "username" not in missing_username["body"]
+        assert missing_username["assertions"][0]["expected"] == "400"
+
+    def test_boundary_case_sets_long_value(self, client):
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": self._source(),
+                "options": {"max_cases": 50},
+            },
+        )
+        cases = resp.json()["data"]["cases"]
+        boundary = next(
+            case for case in cases if case["title"] == "参数 username 边界值校验"
+        )
+        assert len(boundary["body"]["username"]) >= 100
+
+    def test_type_error_case_sends_wrong_type(self, client):
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": self._source(),
+                "options": {"max_cases": 50},
+            },
+        )
+        cases = resp.json()["data"]["cases"]
+        wrong = next(
+            case
+            for case in cases
+            if case["title"] == "参数 email 类型错误时拒绝请求"
+        )
+        assert isinstance(wrong["body"]["email"], dict)
+
+    def test_case_types_filter(self, client):
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": self._source(),
+                "options": {"case_types": ["normal"], "max_cases": 50},
+            },
+        )
+        cases = resp.json()["data"]["cases"]
+        assert len(cases) == 1
+        assert cases[0]["case_type"] == "normal"
+
+    def test_permission_point_when_no_auth_header(self, client):
+        source = self._source()
+        source["headers"] = {"Content-Type": "application/json"}
+        resp = client.post(
+            "/api/v1/ai/generate-test-cases",
+            json={
+                "source_type": "interface",
+                "source_data": source,
+                "options": {"max_cases": 50},
+            },
+        )
+        cases = resp.json()["data"]["cases"]
+        assert any(case["case_type"] == "permission" for case in cases)
