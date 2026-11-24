@@ -254,3 +254,107 @@ class TestCopyTestCase:
     def test_copy_not_found(self, client):
         resp = client.post(f"{BASE}/nope/copy")
         assert resp.status_code == 404
+
+
+class TestDeleteCaseWithExecutionHistory:
+    """有执行历史的用例必须可删除（回归：删除接口曾返回 500）."""
+
+    def test_delete_case_with_test_results(self, client, db_session):
+        import uuid
+
+        from app.models.test_case import TestCase
+        from app.models.test_result import TestResult
+
+        case = _create_case(client)
+        db_session.add(
+            TestResult(
+                run_id=str(uuid.uuid4()),
+                test_case_id=case["id"],
+                status="passed",
+            )
+        )
+        db_session.commit()
+
+        resp = client.delete(f"{BASE}/{case['id']}")
+        assert resp.status_code == 200, resp.text
+        assert db_session.get(TestCase, case["id"]) is None
+        assert (
+            db_session.query(TestResult)
+            .filter_by(test_case_id=case["id"])
+            .count()
+            == 0
+        )
+
+    def test_batch_delete_cases_with_test_results(self, client, db_session):
+        import uuid
+
+        from app.models.test_case import TestCase
+        from app.models.test_result import TestResult
+
+        first = _create_case(client, title="批量删除一")
+        second = _create_case(client, title="批量删除二")
+        for case in (first, second):
+            db_session.add(
+                TestResult(
+                    run_id=str(uuid.uuid4()),
+                    test_case_id=case["id"],
+                    status="failed",
+                )
+            )
+        db_session.commit()
+
+        resp = client.post(
+            f"{BASE}/batch-delete",
+            json={"case_ids": [first["id"], second["id"]]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["deleted"] == 2
+        assert db_session.query(TestResult).count() == 0
+        assert db_session.get(TestCase, first["id"]) is None
+
+
+def test_delete_case_with_fk_enforced():
+    """在开启外键约束的库上验证删除不再抛 IntegrityError."""
+    import uuid
+
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.api.v1.test_cases import _delete_case_dependents
+    from app.database import Base
+    from app.models.test_case import TestCase
+    from app.models.test_result import TestResult
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_fk(conn, _record):
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        case = TestCase(title="带历史", method="GET", url="/x")
+        session.add(case)
+        session.flush()
+        session.add(
+            TestResult(
+                run_id=str(uuid.uuid4()),
+                test_case_id=case.id,
+                status="passed",
+            )
+        )
+        session.commit()
+
+        _delete_case_dependents(session, [case.id])
+        session.delete(case)
+        session.commit()
+        assert session.get(TestCase, case.id) is None
+    finally:
+        session.close()
+        engine.dispose()

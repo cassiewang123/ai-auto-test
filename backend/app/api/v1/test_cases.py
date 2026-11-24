@@ -11,12 +11,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import String, func, literal, select
+from sqlalchemy import String, delete, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.database import get_db
-from app.models import AssertionRule, InterfaceChangeLog, TestCase, TestRunSummary
+from app.models import (
+    AssertionRule,
+    InterfaceChangeLog,
+    TestCase,
+    TestResult,
+    TestRunSummary,
+)
 from app.models.user import User
 from app.schemas.common import DataResponse, PageResponse
 from app.schemas.test_case import (
@@ -447,6 +453,21 @@ def batch_execute(
     })
 
 
+def _delete_case_dependents(db: Session, case_ids: list[str]) -> None:
+    """删除用例前清理没有数据库级联的子表记录.
+
+    ``test_results.test_case_id`` 外键未声明 ON DELETE CASCADE，而 SQLite 连接
+    会开启 ``PRAGMA foreign_keys=ON``，导致删除有执行历史的用例时抛
+    IntegrityError（接口返回 500）。这里显式删除这些记录，使删除行为在所有
+    数据库上一致。
+    """
+    if not case_ids:
+        return
+    db.execute(
+        delete(TestResult).where(TestResult.test_case_id.in_(case_ids))
+    )
+
+
 @router.post("/batch-delete", response_model=DataResponse[dict])
 def batch_delete(
     req: BatchDeleteRequest,
@@ -459,6 +480,8 @@ def batch_delete(
         ensure_resource_role(
             db, current_user, case, "admin", owner_field=None
         )
+    case_ids = [case.id for case in cases]
+    _delete_case_dependents(db, case_ids)
     for case in cases:
         db.delete(case)
     db.commit()
@@ -572,6 +595,7 @@ def delete_test_case(
             after=None,
         )
     )
+    _delete_case_dependents(db, [case_id])
     db.delete(case)
     db.commit()
     return DataResponse[TestCaseResponse](data=data)
