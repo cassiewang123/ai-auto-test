@@ -22,6 +22,7 @@ import {
   InputNumber,
   Row,
   Col,
+  Tooltip,
 } from 'antd';
 import {
   PlusOutlined,
@@ -552,19 +553,58 @@ export default function TestCasesPage() {
       width: 80,
       render: (m: string) => <Tag color={methodColor[m] || 'default'}>{m}</Tag>,
     },
-    { title: '标题', dataIndex: 'title', ellipsis: true, width: 200 },
-    { title: 'URL', dataIndex: 'url', ellipsis: true },
+    { title: '标题', dataIndex: 'title', ellipsis: true, width: 180 },
+    { title: 'URL', dataIndex: 'url', ellipsis: true, width: 200 },
     {
       title: '模块',
       dataIndex: 'group_path',
-      width: 140,
-      render: (v: string) => v ? <Tag icon={<FolderOutlined />}>{v}</Tag> : <span style={{ color: '#9ca3af' }}>-</span>,
+      width: 190,
+      render: (v: string) =>
+        v ? (
+          <Tooltip title={v} placement="topLeft">
+            <Tag
+              icon={<FolderOutlined />}
+              style={{
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'inline-block',
+                verticalAlign: 'middle',
+                marginInlineEnd: 0,
+              }}
+            >
+              {v}
+            </Tag>
+          </Tooltip>
+        ) : (
+          <span style={{ color: '#9ca3af' }}>-</span>
+        ),
     },
     {
       title: '所属项目',
       dataIndex: 'project_id',
-      width: 140,
-      render: (pid: string) => pid ? projectNameMap.get(pid)?.name || pid : <Tag>未分类</Tag>,
+      width: 120,
+      ellipsis: true,
+      render: (pid: string) =>
+        pid ? (
+          <Tooltip title={projectNameMap.get(pid)?.name || pid} placement="topLeft">
+            <span
+              style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                verticalAlign: 'middle',
+              }}
+            >
+              {projectNameMap.get(pid)?.name || pid}
+            </span>
+          </Tooltip>
+        ) : (
+          <Tag>未分类</Tag>
+        ),
     },
     {
       title: '最近执行',
@@ -676,6 +716,8 @@ export default function TestCasesPage() {
             columns={columns}
             size="middle"
             data-testid="cases-table"
+            tableLayout="fixed"
+            scroll={{ x: 1270 }}
           />
         )}
       </Card>
