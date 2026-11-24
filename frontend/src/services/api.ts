@@ -1216,6 +1216,30 @@ export const knowledgeBaseApi = {
     api.post<unknown, ApiResponse<any>>('/knowledge-bases/chunk-preview', data),
 };
 
+// ========== 接口分组 ==========
+export const apiGroupApi = {
+  list: (params?: { project_id?: string }) =>
+    api.get<unknown, { groups: any[]; total: number }>('/api-groups', { params }),
+  create: (data: {
+    name: string;
+    parent_path?: string | null;
+    description?: string | null;
+    sort_order?: number;
+    project_id?: string | null;
+  }) => api.post<unknown, ApiResponse<any>>('/api-groups', data),
+  update: (
+    id: string,
+    data: {
+      name?: string;
+      parent_path?: string | null;
+      description?: string | null;
+      sort_order?: number;
+    }
+  ) => api.put<unknown, ApiResponse<any>>(`/api-groups/${id}`, data),
+  remove: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/api-groups/${id}`),
+};
+
 // ========== 功能测试用例库（区别于 API 自动化用例） ==========
 export const functionalTestCaseApi = {
   list: (params?: {

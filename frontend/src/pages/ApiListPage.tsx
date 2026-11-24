@@ -53,6 +53,7 @@ import {
   projectApi,
   changeLogApi,
   historyApi,
+  apiGroupApi,
 } from '../services/api';
 import type { CallHistoryRecord, ExecutionResultData } from '../services/api';
 import type {
@@ -301,6 +302,13 @@ export default function ApiListPage() {
   }, [sidebarWidth]);
   // 树形视图选中的分组路径
   const [selectedGroupPath, setSelectedGroupPath] = useState<string>('');
+  // 显式维护的分组（含由接口推导出的分组），用于下拉与目录树
+  const [apiGroups, setApiGroups] = useState<any[]>([]);
+  // 新建/编辑分组弹窗
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<any | null>(null);
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [groupForm] = Form.useForm();
   const [selectedCaseId, setSelectedCaseId] = useState<string>(
     () => searchParams.get('case_id') || ''
   );
@@ -373,6 +381,17 @@ export default function ApiListPage() {
     }
   }
 
+  async function loadGroups() {
+    try {
+      const params = selectedProjectId ? { project_id: selectedProjectId } : {};
+      const res: any = await apiGroupApi.list(params);
+      setApiGroups(res.groups || []);
+    } catch (e: any) {
+      // 分组加载失败不阻断接口列表
+      message.error(e.message);
+    }
+  }
+
   async function loadData() {
     const requestId = ++casesRequestId.current;
     setLoading(true);
@@ -386,6 +405,8 @@ export default function ApiListPage() {
       if (requestId === casesRequestId.current) {
         setCases(res.data || []);
       }
+      // 接口变化后重新拉取分组（推导分组与计数会随之变化）
+      await loadGroups();
     } catch (e: any) {
       if (requestId === casesRequestId.current) {
         message.error(e.message);
@@ -394,6 +415,79 @@ export default function ApiListPage() {
       if (requestId === casesRequestId.current) {
         setLoading(false);
       }
+    }
+  }
+
+  // ---- 分组管理 ----
+  function openCreateGroup(parentPath = '') {
+    setEditingGroup(null);
+    groupForm.resetFields();
+    groupForm.setFieldsValue({ name: '', parent_path: parentPath || '', description: '' });
+    setGroupModalOpen(true);
+  }
+
+  function openEditGroup(group: any) {
+    setEditingGroup(group);
+    groupForm.setFieldsValue({
+      name: group.name,
+      parent_path: group.parent_path || '',
+      description: group.description || '',
+    });
+    setGroupModalOpen(true);
+  }
+
+  async function handleSaveGroup() {
+    const values = await groupForm.validateFields();
+    setGroupSaving(true);
+    try {
+      if (editingGroup) {
+        let targetId: string = editingGroup.id;
+        // 推导分组尚未落库，先登记为正式分组再重命名
+        if (String(targetId).startsWith('derived::')) {
+          const created: any = await apiGroupApi.create({
+            name: editingGroup.name,
+            parent_path: editingGroup.parent_path || null,
+            project_id: selectedProjectId || null,
+          });
+          targetId = created.data.id;
+        }
+        await apiGroupApi.update(targetId, {
+          name: values.name,
+          parent_path: values.parent_path || null,
+          description: values.description || null,
+        });
+        message.success('分组已更新，相关接口分组已同步');
+      } else {
+        await apiGroupApi.create({
+          name: values.name,
+          parent_path: values.parent_path || null,
+          description: values.description || null,
+          project_id: selectedProjectId || null,
+        });
+        message.success('分组已创建');
+      }
+      setGroupModalOpen(false);
+      await loadData();
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setGroupSaving(false);
+    }
+  }
+
+  async function handleDeleteGroup(group: any) {
+    if (String(group.id).startsWith('derived::')) {
+      message.info('该分组由接口分组路径决定，请先删除或移动其中接口');
+      return;
+    }
+    try {
+      const res: any = await apiGroupApi.remove(group.id);
+      message.success(
+        `分组已删除${res.data?.moved_cases ? `，${res.data.moved_cases} 个接口已移到上级分组` : ''}`
+      );
+      await loadData();
+    } catch (e: any) {
+      message.error(e.message);
     }
   }
 
@@ -442,8 +536,12 @@ export default function ApiListPage() {
     [projects]
   );
 
+  // 分组下拉：接口中出现的 group_path + 显式维护/推导出的分组（含空分组）
   const groupOptions = Array.from(
-    new Set(cases.map((item) => item.group_path || '').filter(Boolean))
+    new Set([
+      ...cases.map((item) => item.group_path || '').filter(Boolean),
+      ...apiGroups.map((item: any) => item.path),
+    ])
   ).sort((left, right) => left.localeCompare(right));
 
   const filtered = useMemo(
@@ -533,11 +631,21 @@ export default function ApiListPage() {
     caseData?: TestCase;
   }
 
-  // 构建 group_path 分层树
-  function buildGroupTree(list: TestCase[]): GroupTreeNode[] {
+  // 构建 group_path 分层树（extraPaths 用于展示尚无接口的空分组）
+  function buildGroupTree(list: TestCase[], extraPaths: string[] = []): GroupTreeNode[] {
     // 将 group_path 按 "/" 拆分，构建嵌套结构
     const root: Record<string, any> = {};
     const noGroup: TestCase[] = [];
+
+    // 先铺开分组路径，保证空分组也能出现在目录树中
+    extraPaths.forEach((gp) => {
+      const parts = gp.split('/').map((p) => p.trim()).filter(Boolean);
+      let node = root;
+      parts.forEach((part) => {
+        if (!node[part]) node[part] = { __cases: [], __children: {} };
+        node = node[part].__children;
+      });
+    });
 
     list.forEach((c) => {
       const gp = c.group_path;
@@ -611,7 +719,10 @@ export default function ApiListPage() {
     return result;
   }
 
-  const groupTreeData = buildGroupTree(filtered);
+  const groupTreeData = buildGroupTree(
+    filtered,
+    apiGroups.map((item: any) => item.path)
+  );
 
   // 记录工作区实际宽度，用于限制目录最大宽度，避免把右侧详情挤没
   useEffect(() => {
@@ -1367,6 +1478,9 @@ export default function ApiListPage() {
               ]}
             />
             <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
+            <Button icon={<FolderOutlined />} onClick={() => openCreateGroup()}>
+              新建分组
+            </Button>
           </Space>
         </div>
 
@@ -1565,8 +1679,31 @@ export default function ApiListPage() {
                           menu={{
                             items: [
                               {
+                                key: 'edit',
+                                label: '编辑分组',
+                                icon: <EditOutlined />,
+                                onClick: () =>
+                                  openEditGroup(
+                                    apiGroups.find((g: any) => g.path === groupPath) || {
+                                      id: `derived::${groupPath}`,
+                                      path: groupPath,
+                                      name: groupPath.split('/').pop(),
+                                      parent_path: groupPath.includes('/')
+                                        ? groupPath.split('/').slice(0, -1).join('/')
+                                        : null,
+                                      derived: true,
+                                    }
+                                  ),
+                              },
+                              {
+                                key: 'create-child',
+                                label: '新建子分组',
+                                icon: <PlusOutlined />,
+                                onClick: () => openCreateGroup(groupPath),
+                              },
+                              {
                                 key: 'move',
-                                label: '移动到分组...',
+                                label: '将接口移动到其他分组...',
                                 onClick: () => {
                                   setMoveGroupSource(groupPath);
                                   setMoveGroupTarget('');
@@ -1577,6 +1714,25 @@ export default function ApiListPage() {
                                 key: 'select',
                                 label: '查看此分组',
                                 onClick: () => selectGroup(groupPath),
+                              },
+                              {
+                                key: 'delete',
+                                label: '删除分组',
+                                icon: <DeleteOutlined />,
+                                danger: true,
+                                onClick: () => {
+                                  const target = apiGroups.find((g: any) => g.path === groupPath);
+                                  if (!target || String(target.id).startsWith('derived::')) {
+                                    message.info('该分组由接口分组路径决定，请先删除或移动其中接口');
+                                    return;
+                                  }
+                                  Modal.confirm({
+                                    title: `确认删除分组「${groupPath}」？`,
+                                    content: '其下接口与子分组会移动到上级分组。',
+                                    okButtonProps: { danger: true },
+                                    onOk: () => handleDeleteGroup(target),
+                                  });
+                                },
                               },
                             ],
                           }}
@@ -2468,6 +2624,50 @@ export default function ApiListPage() {
             })}
           />
         )}
+      </Modal>
+
+      {/* 新建/编辑分组 Modal */}
+      <Modal
+        title={editingGroup ? '编辑分组' : '新建分组'}
+        open={groupModalOpen}
+        onOk={handleSaveGroup}
+        confirmLoading={groupSaving}
+        onCancel={() => setGroupModalOpen(false)}
+        destroyOnHidden
+      >
+        {editingGroup?.derived && (
+          <div style={{ marginBottom: 12, color: '#6b7280' }}>
+            该分组当前由接口的分组路径推导而来。保存后会登记为正式分组，
+            并同步更新其下所有接口的分组路径。
+          </div>
+        )}
+        <Form form={groupForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="分组名称"
+            rules={[{ required: true, message: '请输入分组名称' }]}
+          >
+            <Input placeholder="如：ApiType 码表（不能包含 /）" />
+          </Form.Item>
+          <Form.Item
+            name="parent_path"
+            label="上级分组"
+            extra="留空为顶级模块；选择或输入已有分组路径"
+          >
+            <Select
+              allowClear
+              showSearch
+              placeholder="顶级模块"
+              options={[
+                { value: '', label: '顶级模块' },
+                ...groupOptions.map((path) => ({ value: path, label: path })),
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={2} placeholder="可选：这个分组存放哪些接口" />
+          </Form.Item>
+        </Form>
       </Modal>
 
       {/* 移动到分组 Modal（目录树视图右键菜单） */}
