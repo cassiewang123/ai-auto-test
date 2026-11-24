@@ -74,6 +74,7 @@ describe('lite navigation', () => {
       '/quick-test',
       '/test-cases',
       '/api-case-generation',
+      '/api-case-management',
       '/import',
       '/api-assets',
       '/test-plans',

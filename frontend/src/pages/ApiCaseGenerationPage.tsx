@@ -27,7 +27,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { aiApi, projectApi, testCaseApi } from '../services/api';
+import { aiApi, apiCaseRecordApi, projectApi, testCaseApi } from '../services/api';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -238,12 +238,17 @@ export default function ApiCaseGenerationPage() {
     setImporting(true);
     try {
       const cases = selectedRows.map((key) => generated[key as number]);
-      const res = await aiApi.importCases({
+      // 导入到「用例管理」的接口用例库，而不是直接进入可执行的接口管理
+      const res = await apiCaseRecordApi.bulkImport({
         cases,
         project_id: targetProjectId || selectedInterface?.project_id || null,
+        interface_name: selectedInterface?.title || null,
+        group_path: selectedInterface?.group_path || null,
       });
-      message.success(`已导入 ${res.data?.created_count ?? cases.length} 条接口用例`);
-      navigate('/test-cases');
+      message.success(
+        `已导入 ${res.data?.created_count ?? cases.length} 条接口用例到「用例管理」`
+      );
+      navigate('/api-case-management');
     } catch (e: any) {
       message.error(e.message);
     } finally {

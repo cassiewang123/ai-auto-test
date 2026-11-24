@@ -43,6 +43,7 @@ ROUTES = [
     "/ai-case-generation",
     "/functional-test-cases",
     "/api-case-generation",
+    "/api-case-management",
     "/scheduled-tasks",
     "/mock-service",
     "/history",

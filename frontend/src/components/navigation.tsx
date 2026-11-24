@@ -65,6 +65,7 @@ const navigationItems: NavigationItem[] = [
           { key: '/quick-test', icon: <ThunderboltOutlined />, label: '接口调试' },
           { key: '/test-cases', icon: <UnorderedListOutlined />, label: '接口管理' },
           { key: '/api-case-generation', icon: <ExperimentOutlined />, label: '接口用例' },
+          { key: '/api-case-management', icon: <UnorderedListOutlined />, label: '用例管理' },
           { key: '/import', icon: <ImportOutlined />, label: '接口导入' },
         ],
       },

@@ -18,6 +18,9 @@ const CoveragePage = lazy(() => import('./pages/CoveragePage'));
 const ApiCaseGenerationPage = lazy(
   () => import('./pages/ApiCaseGenerationPage')
 );
+const ApiCaseManagementPage = lazy(
+  () => import('./pages/ApiCaseManagementPage')
+);
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const MockServicePage = lazy(() => import('./pages/MockServicePage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
@@ -102,6 +105,7 @@ export const routeObjects: RouteObject[] = [
       { path: '/reports', element: <ReportsPage /> },
       { path: '/coverage', element: <CoveragePage /> },
       { path: '/api-case-generation', element: <ApiCaseGenerationPage /> },
+      { path: '/api-case-management', element: <ApiCaseManagementPage /> },
       { path: '/scheduled-tasks', element: <ScheduledTasksPage /> },
       { path: '/mock-service', element: <MockServicePage /> },
       { path: '/history', element: <HistoryPage /> },

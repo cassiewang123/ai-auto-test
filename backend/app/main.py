@@ -222,6 +222,8 @@ def _register_routers(app: FastAPI) -> None:
         ("app.api.v1.functional_test_cases", "router", "/functional-test-cases"),
         # 接口分组管理（新建/编辑分组，路径与用例 group_path 同步）
         ("app.api.v1.api_groups", "router", "/api-groups"),
+        # 接口用例库（用例管理：保存生成结果并支持导出）
+        ("app.api.v1.api_cases", "router", "/api-cases"),
     ]:
         try:
             mod = importlib.import_module(module_path)

@@ -1,5 +1,6 @@
 """数据模型包，导出所有 ORM 模型."""
 from app.models.ai_invocation import AIFeedback, AIInvocation
+from app.models.api_case_record import ApiCaseRecord
 from app.models.api_group import ApiGroup
 from app.models.api_token import ApiToken
 from app.models.audit_log import AuditLog
@@ -113,6 +114,7 @@ __all__ = [
     "FunctionalCaseExecution",
     "ApiToken",
     "ApiGroup",
+    "ApiCaseRecord",
     "WebhookConfig",
     "TestDataSet",
     "NotificationChannel",

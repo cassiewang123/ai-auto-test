@@ -1218,6 +1218,55 @@ export const knowledgeBaseApi = {
     api.post<unknown, ApiResponse<any>>('/knowledge-bases/chunk-preview', data),
 };
 
+// ========== 接口用例库（用例管理） ==========
+export const apiCaseRecordApi = {
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    project_id?: string;
+    method?: string;
+    case_type?: string;
+    priority?: string;
+    status?: string;
+    keyword?: string;
+  }) => api.get<unknown, PageResponse<any>>('/api-cases', { params }),
+  stats: (params?: { project_id?: string }) =>
+    api.get<unknown, ApiResponse<any>>('/api-cases/stats', { params }),
+  get: (id: string) => api.get<unknown, ApiResponse<any>>(`/api-cases/${id}`),
+  create: (data: any) => api.post<unknown, ApiResponse<any>>('/api-cases', data),
+  update: (id: string, data: any) =>
+    api.put<unknown, ApiResponse<any>>(`/api-cases/${id}`, data),
+  remove: (id: string) =>
+    api.delete<unknown, ApiResponse<any>>(`/api-cases/${id}`),
+  bulkImport: (data: {
+    cases: any[];
+    project_id?: string | null;
+    interface_name?: string | null;
+    group_path?: string | null;
+  }) =>
+    api.post<unknown, ApiResponse<{ created_count: number; case_ids: string[] }>>(
+      '/api-cases/bulk-import',
+      data
+    ),
+  exportUrl: (params?: {
+    project_id?: string;
+    method?: string;
+    case_type?: string;
+    priority?: string;
+    status?: string;
+    keyword?: string;
+  }) => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        query.append(key, String(value));
+      }
+    });
+    const qs = query.toString();
+    return `/api/v1/api-cases/export${qs ? `?${qs}` : ''}`;
+  },
+};
+
 // ========== 接口分组 ==========
 export const apiGroupApi = {
   list: (params?: { project_id?: string }) =>
