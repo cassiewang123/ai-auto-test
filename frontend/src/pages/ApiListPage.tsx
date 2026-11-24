@@ -67,6 +67,7 @@ import JsonEditor from '../components/JsonEditor';
 import ExecutionResultView from '../components/ExecutionResultView';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
+import { matchesGroupPath, splitGroupPath } from '../utils/groupPath';
 import {
   ASSERTION_OPERATORS,
   ASSERTION_TYPES,
@@ -108,12 +109,6 @@ const DETAIL_MIN_WIDTH = 420;
 
 function clampSidebarWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), Math.max(maxWidth, SIDEBAR_MIN_WIDTH));
-}
-
-function splitGroupPath(path: string): { leaf: string; prefix: string } {
-  const segments = path.split('/').filter(Boolean);
-  const leaf = segments.pop() || path;
-  return { leaf, prefix: segments.join('/') };
 }
 
 function historyToExecutionResult(record: CallHistoryRecord): ExecutionResultData {
@@ -548,7 +543,10 @@ export default function ApiListPage() {
     () =>
       cases.filter((c) => {
         if (methodFilter && c.method !== methodFilter) return false;
-        if (groupFilter && (c.group_path || '') !== groupFilter) return false;
+        // 选中分组时包含其下所有子分组，避免父级模块显示 0 个接口
+        if (groupFilter && !matchesGroupPath(c.group_path, groupFilter)) {
+          return false;
+        }
         if (!search) return true;
         const s = search.toLowerCase();
         return (
@@ -1431,7 +1429,17 @@ export default function ApiListPage() {
             />
             <Select
               value={groupFilter}
-              onChange={setGroupFilter}
+              onChange={(value) => {
+                setGroupFilter(value);
+                // 同步侧栏目录树的选中态与标题，避免两处显示不一致
+                if (value) {
+                  setSelectedGroupPath(value);
+                  setSelectedTreeKey(`group::${value}`);
+                } else {
+                  setSelectedGroupPath('');
+                  setSelectedTreeKey('');
+                }
+              }}
               style={{ width: 180 }}
               suffixIcon={<FilterOutlined />}
               popupMatchSelectWidth={420}
