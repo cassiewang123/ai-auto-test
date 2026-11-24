@@ -71,3 +71,121 @@ def test_postman_import_creates_cases_and_variables(client):
     assert variables_response.status_code == 200
     names = {item["name"] for item in variables_response.json()["data"]}
     assert {"contentProtocol", "contentHost", "contentPort", "version"} <= names
+
+
+def _minimal_collection() -> dict:
+    """最小的 Postman v2.1 集合，避免依赖本机文件."""
+    return {
+        "info": {
+            "name": "Demo",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        },
+        "item": [
+            {
+                "name": "FolderA",
+                "item": [
+                    {
+                        "name": "ReqA",
+                        "request": {
+                            "method": "GET",
+                            "url": {
+                                "raw": "https://example.com/a",
+                                "protocol": "https",
+                                "host": ["example", "com"],
+                                "path": ["a"],
+                            },
+                            "header": [],
+                        },
+                    }
+                ],
+            },
+            {
+                "name": "FolderB",
+                "item": [
+                    {
+                        "name": "ReqB",
+                        "request": {
+                            "method": "POST",
+                            "url": {
+                                "raw": "https://example.com/b",
+                                "protocol": "https",
+                                "host": ["example", "com"],
+                                "path": ["b"],
+                            },
+                            "header": [],
+                        },
+                    }
+                ],
+            },
+        ],
+        "variable": [],
+    }
+
+
+def test_postman_preview_applies_root_group(client):
+    response = client.post(
+        "/api/v1/import/postman/preview",
+        json={
+            "collection": _minimal_collection(),
+            "root_group_path": "swgd-imap-content",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    paths = {item["group_path"] for item in data["interfaces"]}
+    # 根分组作为前缀，原有 Postman 文件夹层级保留
+    assert paths == {
+        "swgd-imap-content/FolderA",
+        "swgd-imap-content/FolderB",
+    }
+    assert "swgd-imap-content/FolderA" in data["groups"]
+
+
+def test_postman_preview_without_root_group_keeps_original_paths(client):
+    response = client.post(
+        "/api/v1/import/postman/preview",
+        json={"collection": _minimal_collection()},
+    )
+    paths = {item["group_path"] for item in response.json()["data"]["interfaces"]}
+    assert paths == {"FolderA", "FolderB"}
+
+
+def test_postman_preview_root_group_is_idempotent(client):
+    """根分组已包含在原路径中时不应重复拼接前缀."""
+    collection = _minimal_collection()
+    response = client.post(
+        "/api/v1/import/postman/preview",
+        json={"collection": collection, "root_group_path": "FolderA"},
+    )
+    paths = {item["group_path"] for item in response.json()["data"]["interfaces"]}
+    # FolderA 本身已是路径前缀，不会被拼成 FolderA/FolderA
+    assert "FolderA" in paths
+    assert "FolderA/FolderB" in paths
+
+
+def test_postman_import_writes_cases_into_root_group(client):
+    preview = client.post(
+        "/api/v1/import/postman/preview",
+        json={
+            "collection": _minimal_collection(),
+            "root_group_path": "导入根分组",
+        },
+    ).json()["data"]
+
+    response = client.post(
+        "/api/v1/import/postman/import",
+        json={
+            "selected_interfaces": preview["interfaces"],
+            "root_group_path": "导入根分组",
+        },
+    )
+    assert response.status_code == 200
+    case_ids = response.json()["data"]["case_ids"]
+    assert len(case_ids) == 2
+
+    paths = set()
+    for case_id in case_ids:
+        case = client.get(f"/api/v1/test-cases/{case_id}").json()["data"]
+        paths.add(case["group_path"])
+    # 导入时不会二次加前缀
+    assert paths == {"导入根分组/FolderA", "导入根分组/FolderB"}

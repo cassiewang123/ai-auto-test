@@ -677,6 +677,18 @@ API 测试 -> 接口导入
 
 不要直接把包含真实密码、Token、Cookie 的 HAR 文件提交到 Git。
 
+### 11.2.1 Postman Collection 导入
+
+1. 打开「接口导入 → Postman Collection」，上传 Collection JSON
+   （v2.0 / v2.1，不执行脚本）。
+2. 选择「导入到项目（可选）」。
+3. 选择「导入到分组（可选）」：所选分组会作为根分组，Postman 集合里的
+   文件夹层级保留在其下。例如根分组选 `swgd-imap-content`、集合内是
+   `ApiType 码表`，导入后接口分组为 `swgd-imap-content/ApiType 码表`。
+   不选则沿用 Postman 原有层级。
+4. 填写 `epToken`（可选），点「预览解析结果」。
+5. 勾选需要的请求后导入。
+
 ### 11.3 接口定义和接口文档
 
 - **接口定义**：按项目、分组和方法管理已保存的接口，可查看详情、运行或

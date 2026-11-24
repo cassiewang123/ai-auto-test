@@ -485,6 +485,7 @@ export const importApi = {
     collection: any;
     variables?: Record<string, string>;
     default_headers?: Record<string, string>;
+    root_group_path?: string | null;
   }) =>
     api.post<
       unknown,
@@ -504,6 +505,7 @@ export const importApi = {
     selected_interfaces: any[];
     project_id?: string;
     import_variables?: boolean;
+    root_group_path?: string | null;
   }) =>
     api.post<
       unknown,

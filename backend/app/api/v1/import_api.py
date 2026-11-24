@@ -154,7 +154,7 @@ class ParsedEndpoint:
         """根据响应定义生成默认断言规则."""
         assertions = []
         # 取第一个 2xx 响应码作为期望
-        for code, resp in self.responses.items():
+        for code, _resp in self.responses.items():
             if code.startswith("2"):
                 assertions.append({
                     "assertion_type": "status_code",
@@ -461,6 +461,8 @@ class PostmanPreviewRequest(BaseModel):
     collection: dict
     variables: dict | None = None
     default_headers: dict | None = None
+    # 导入到指定分组时，作为根分组前缀；Postman 的文件夹层级保留在其下
+    root_group_path: str | None = None
 
 
 class PostmanImportRequest(BaseModel):
@@ -468,6 +470,26 @@ class PostmanImportRequest(BaseModel):
     project_id: str | None = None
     # 是否把集合变量写入工作区全局变量（已存在的同名变量不覆盖）
     import_variables: bool = True
+    root_group_path: str | None = None
+
+
+def _apply_group_prefix(
+    group_path: str | None, root_group_path: str | None
+) -> str | None:
+    """把接口分组挂到指定根分组下，保留原有子层级.
+
+    例：根分组 ``swgd-imap-content``、接口原分组 ``ApiType 码表``
+    → ``swgd-imap-content/ApiType 码表``。
+    该函数幂等：已经带该前缀时不会重复拼接。
+    """
+    root = (root_group_path or "").strip().strip("/")
+    if not root:
+        return group_path or None
+
+    current = (group_path or "").strip().strip("/")
+    if current == root or current.startswith(f"{root}/"):
+        return current
+    return f"{root}/{current}" if current else root
 
 
 def _postman_case_kwargs(iface: dict, project_id: str | None) -> dict:
@@ -501,6 +523,12 @@ def preview_postman(payload: PostmanPreviewRequest, db: Session = Depends(get_db
     except ValueError as exc:
         raise AppException(status_code=422, message=str(exc)) from exc
 
+    # 导入到指定分组：把该分组作为根前缀，保留 Postman 原文件夹层级
+    for endpoint in endpoints:
+        endpoint["group_path"] = _apply_group_prefix(
+            endpoint.get("group_path"), payload.root_group_path
+        )
+
     groups = sorted({item.get("group_path") or "未分组" for item in endpoints})
     methods: dict[str, int] = {}
     unresolved: list[str] = []
@@ -533,6 +561,13 @@ def import_postman(payload: PostmanImportRequest, db: Session = Depends(get_db))
     created_ids = []
     variables: dict[str, str] = {}
     for iface in payload.selected_interfaces:
+        # 兼容直接调用导入接口（不经过预览）的情况：同样按根分组挂载
+        iface = {
+            **iface,
+            "group_path": _apply_group_prefix(
+                iface.get("group_path"), payload.root_group_path
+            ),
+        }
         case = TestCase(**_postman_case_kwargs(iface, payload.project_id))
         db.add(case)
         db.flush()

@@ -29,7 +29,7 @@ import {
   InboxOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { importApi, captureApi, projectApi } from '../services/api';
+import { importApi, captureApi, projectApi, apiGroupApi } from '../services/api';
 import type { ImportedEndpoint, CapturedEndpoint } from '../services/api';
 import type { Project, ProjectCreate } from '../types';
 import JsonEditor from '../components/JsonEditor';
@@ -78,6 +78,9 @@ export default function ImportPage() {
   const [postmanFileName, setPostmanFileName] = useState('');
   const [postmanToken, setPostmanToken] = useState('');
   const [postmanProjectId, setPostmanProjectId] = useState<string | undefined>(undefined);
+  // 导入到分组（可选）：作为根分组，Postman 文件夹层级保留在其下
+  const [postmanGroupPath, setPostmanGroupPath] = useState<string | undefined>(undefined);
+  const [postmanGroups, setPostmanGroups] = useState<Array<{ path: string; case_count: number }>>([]);
   const [postmanImportVariables, setPostmanImportVariables] = useState(true);
   const [postmanLoading, setPostmanLoading] = useState(false);
   const [postmanImporting, setPostmanImporting] = useState(false);
@@ -110,6 +113,16 @@ export default function ImportPage() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // 分组选项：随所选项目刷新
+  useEffect(() => {
+    apiGroupApi
+      .list(postmanProjectId ? { project_id: postmanProjectId } : {})
+      .then((res) => setPostmanGroups(res.groups || []))
+      .catch(() => {
+        // 分组加载失败不阻断导入，用户仍可用 Postman 原分组
+      });
+  }, [postmanProjectId]);
 
   async function handlePreview() {
     setLoading(true);
@@ -354,6 +367,7 @@ export default function ImportPage() {
       const res = await importApi.previewPostman({
         collection: postmanCollection,
         variables,
+        root_group_path: postmanGroupPath || null,
       });
       const data = res.data;
       setPostmanInterfaces(data.interfaces || []);
@@ -391,6 +405,7 @@ export default function ImportPage() {
         selected_interfaces: selected,
         project_id: postmanProjectId,
         import_variables: postmanImportVariables,
+        root_group_path: postmanGroupPath || null,
       });
       const result = res.data;
       message.success(`成功导入 ${result.created_count} 个测试用例`);
@@ -730,14 +745,18 @@ export default function ImportPage() {
                     </div>
                   )}
                   <Row gutter={16} style={{ marginTop: 16 }}>
-                    <Col xs={24} md={10}>
+                    <Col xs={24} md={6}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         导入到项目（可选）
                       </label>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <Select
                           value={postmanProjectId}
-                          onChange={(value) => setPostmanProjectId(value)}
+                          onChange={(value) => {
+                            setPostmanProjectId(value);
+                            // 项目变化后分组选项随之刷新，清空旧分组避免跨项目误用
+                            setPostmanGroupPath(undefined);
+                          }}
                           placeholder="选择导入到的项目"
                           showSearch
                           optionFilterProp="label"
@@ -755,7 +774,25 @@ export default function ImportPage() {
                         </Button>
                       </div>
                     </Col>
-                    <Col xs={24} md={8}>
+                    <Col xs={24} md={6}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        导入到分组（可选）
+                      </label>
+                      <Select
+                        allowClear
+                        value={postmanGroupPath}
+                        onChange={(value) => setPostmanGroupPath(value)}
+                        placeholder="例如：swgd-imap-content"
+                        showSearch
+                        optionFilterProp="label"
+                        style={{ width: '100%' }}
+                        options={postmanGroups.map((group) => ({
+                          value: group.path,
+                          label: `${group.path}（${group.case_count}）`,
+                        }))}
+                      />
+                    </Col>
+                    <Col xs={24} md={6}>
                       <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
                         epToken（可选）
                       </label>
