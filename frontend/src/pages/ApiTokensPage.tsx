@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { apiTokenApi, TOKEN_SCOPES } from '../services/ciCdApi';
 import type { ApiToken, ApiTokenCreateResult } from '../services/ciCdApi';
+import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 
 const { Text, Paragraph } = Typography;
 
@@ -41,6 +42,7 @@ export default function ApiTokensPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const { copy } = useCopyToClipboard();
 
   // 一次性明文 token 展示
   const [createdToken, setCreatedToken] = useState<ApiTokenCreateResult | null>(null);
@@ -102,10 +104,10 @@ export default function ApiTokensPage() {
   }
 
   function copyToken(token: string) {
-    navigator.clipboard.writeText(token).then(
-      () => message.success('已复制到剪贴板'),
-      () => message.error('复制失败，请手动复制')
-    );
+    void copy(token, {
+      successMessage: '已复制到剪贴板',
+      errorMessage: '复制失败，请手动复制',
+    });
   }
 
   const columns = [

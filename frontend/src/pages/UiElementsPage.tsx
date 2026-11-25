@@ -25,6 +25,7 @@ import {
 import dayjs from 'dayjs';
 import { uiElementApi, projectApi } from '../services/api';
 import type { Project } from '../types';
+import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 
 const { TextArea } = Input;
 
@@ -36,26 +37,6 @@ const selectorTypeColor: Record<string, string> = {
 };
 
 const SELECTOR_TYPES = ['css', 'xpath', 'id', 'name'];
-
-// 复制文本到剪贴板，带降级处理
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 export default function UiElementsPage() {
   const [data, setData] = useState<any[]>([]);
@@ -73,6 +54,7 @@ export default function UiElementsPage() {
   const [editing, setEditing] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const { copy } = useCopyToClipboard();
 
   async function loadData(
     p = page,
@@ -171,13 +153,11 @@ export default function UiElementsPage() {
     }
   }
 
-  async function handleCopy(value: string) {
-    const ok = await copyToClipboard(value);
-    if (ok) {
-      message.success('已复制选择器值');
-    } else {
-      message.error('复制失败，请手动复制');
-    }
+  function handleCopy(value: string) {
+    void copy(value, {
+      successMessage: '已复制选择器值',
+      errorMessage: '复制失败，请手动复制',
+    });
   }
 
   const columns = [

@@ -29,6 +29,7 @@ import { mockApi, projectApi } from '../services/api';
 import type { Project } from '../types';
 import JsonEditor from '../components/JsonEditor';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
+import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 
 const { TextArea } = Input;
 
@@ -63,6 +64,7 @@ export default function MockServicePage() {
   const [editing, setEditing] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const { copy } = useCopyToClipboard();
 
   async function loadData(p = page, ps = pageSize) {
     setLoading(true);
@@ -203,25 +205,11 @@ export default function MockServicePage() {
   // 监听路径变化以实时预览 Mock 访问地址
   const watchPath = Form.useWatch('path', form) || '';
 
-  async function handleCopyUrl(path: string) {
-    const url = buildMockUrl(path);
-    try {
-      await navigator.clipboard.writeText(url);
-      message.success('已复制 Mock 地址');
-    } catch {
-      // 降级处理
-      const textarea = document.createElement('textarea');
-      textarea.value = url;
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand('copy');
-        message.success('已复制 Mock 地址');
-      } catch {
-        message.error('复制失败，请手动复制');
-      }
-      document.body.removeChild(textarea);
-    }
+  function handleCopyUrl(path: string) {
+    void copy(buildMockUrl(path), {
+      successMessage: '已复制 Mock 地址',
+      errorMessage: '复制失败，请手动复制',
+    });
   }
 
   const columns = [

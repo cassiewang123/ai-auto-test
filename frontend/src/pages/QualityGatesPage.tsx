@@ -38,13 +38,11 @@ interface QualityGate {
 }
 
 const MODE_OPTIONS = [
-  { label: '阻断 (block)', value: 'block' },
-  { label: '告警 (warn)', value: 'warn' },
-  { label: '记录 (log)', value: 'log' },
+  { label: '告警记录 (warn)', value: 'warn' },
+  { label: '仅记录 (log)', value: 'log' },
 ];
 
 const MODE_COLOR: Record<string, string> = {
-  block: 'red',
   warn: 'orange',
   log: 'blue',
 };
@@ -95,7 +93,7 @@ export default function QualityGatesPage() {
   function openCreate() {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ mode: 'block', is_active: true, rules: '' });
+    form.setFieldsValue({ mode: 'log', is_active: true, rules: '' });
     setModalOpen(true);
   }
 
@@ -176,6 +174,9 @@ export default function QualityGatesPage() {
             <span>质量门禁</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
               共 {total} 条
+            </span>
+            <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
+              本平台门禁为质量评估报表，不阻断执行
             </span>
           </Space>
         }
@@ -292,12 +293,12 @@ export default function QualityGatesPage() {
             label="门禁名称"
             rules={[{ required: true, message: '请输入门禁名称' }]}
           >
-            <Input placeholder="如：发布前质量门禁" />
+            <Input placeholder="如：回归质量评估" />
           </Form.Item>
           <Form.Item
             name="mode"
-            label="门禁模式"
-            rules={[{ required: true, message: '请选择门禁模式' }]}
+            label="评估记录级别"
+            rules={[{ required: true, message: '请选择评估记录级别' }]}
           >
             <Select options={MODE_OPTIONS} />
           </Form.Item>
