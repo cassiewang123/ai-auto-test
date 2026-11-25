@@ -11,6 +11,21 @@ from app.models.api_case_record import ApiCaseRecord
 BASE = "/api/v1/api-cases"
 
 
+def _column_values(sheet, header: str) -> list:
+    """按表头名取出整列的值（跳过表头行）.
+
+    导出会纵向合并相同数据，合并后的单元格只有首行有值；这里按 original
+    单元格取值，因此合并块只贡献一个值。断言列顺序调整后不再依赖下标。
+    """
+    headers = [cell.value for cell in sheet[1]]
+    index = headers.index(header) + 1
+    return [
+        sheet.cell(row=row, column=index).value
+        for row in range(2, sheet.max_row + 1)
+        if sheet.cell(row=row, column=index).value is not None
+    ]
+
+
 def _case_payload(**overrides):
     payload = {
         "title": "参数 tableName 缺失时返回校验错误",
@@ -179,7 +194,8 @@ def test_export_returns_xlsx(client):
     workbook = load_workbook(BytesIO(response.content))
     sheet = workbook["接口用例"]
     headers = [cell.value for cell in sheet[1]]
-    assert headers[:6] == ["序号", "用例标题", "场景", "方法", "URL", "优先级"]
+    # 分组与关联接口排在最前，便于按模块/接口阅读
+    assert headers[:6] == ["分组", "关联接口", "序号", "用例标题", "场景", "方法"]
     assert "请求体" in headers
     assert "断言" in headers
     assert sheet.max_row == 3
@@ -196,7 +212,7 @@ def test_export_respects_filters(client):
     response = client.get(f"{BASE}/export", params={"case_type": "normal"})
     workbook = load_workbook(BytesIO(response.content))
     sheet = workbook["接口用例"]
-    titles = [sheet.cell(row=r, column=2).value for r in range(2, sheet.max_row + 1)]
+    titles = _column_values(sheet, "用例标题")
     assert titles == ["导出正常"]
 
 
@@ -406,5 +422,105 @@ def test_export_respects_group_filter(client):
     response = client.get(f"{BASE}/export", params={"group_path": "磐石关务/回执"})
     workbook = load_workbook(BytesIO(response.content))
     sheet = workbook["接口用例"]
-    titles = [sheet.cell(row=r, column=2).value for r in range(2, sheet.max_row + 1)]
+    titles = _column_values(sheet, "用例标题")
     assert titles == ["回执用例"]
+
+
+def _merged_ranges(sheet) -> set[str]:
+    return {str(item) for item in sheet.merged_cells.ranges}
+
+
+def test_export_merges_same_group_and_interface(client):
+    """同分组、同关联接口的用例要在导出里并成一块."""
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="反馈-正常", interface_name="01 新增反馈", group_path="A/Feedback"),
+            _case_payload(title="反馈-异常", interface_name="01 新增反馈", group_path="A/Feedback"),
+            _case_payload(title="回执-正常", interface_name="02 查询回执", group_path="A/Feedback"),
+        ],
+        interface_name=None,
+        group_path=None,
+    )
+    response = client.get(f"{BASE}/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["接口用例"]
+    merged = _merged_ranges(sheet)
+
+    # 3 条用例同属一个分组 → 分组列合并成 A2:A4
+    assert "A2:A4" in merged
+    # 「01 新增反馈」两条连续 → 关联接口列合并成 B2:B3；「02 查询回执」只有一条不合并
+    assert "B2:B3" in merged
+    assert "B4:B4" not in merged
+
+    # 合并后只有左上角保留值
+    assert sheet["A2"].value == "A/Feedback"
+    assert sheet["A3"].value is None
+    assert sheet["B2"].value == "01 新增反馈"
+    assert sheet["B4"].value == "02 查询回执"
+
+
+def test_export_does_not_merge_across_groups(client):
+    """同名关联接口但分组不同，不能跨分组合并."""
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="A组用例", interface_name="同名接口", group_path="模块一"),
+            _case_payload(title="B组用例", interface_name="同名接口", group_path="模块二"),
+        ],
+        interface_name=None,
+        group_path=None,
+    )
+    response = client.get(f"{BASE}/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["接口用例"]
+
+    # 两个分组各只有一行，不应产生任何合并
+    assert _merged_ranges(sheet) == set()
+    assert _column_values(sheet, "关联接口") == ["同名接口", "同名接口"]
+
+
+def test_export_skips_merge_for_ungrouped_and_empty_interface(client):
+    """未分组 / 无关联接口不合并：值相同只是因为都没填."""
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="无模块A", interface_name=None, group_path=None),
+            _case_payload(title="无模块B", interface_name=None, group_path=None),
+        ],
+        interface_name=None,
+        group_path=None,
+    )
+    response = client.get(f"{BASE}/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["接口用例"]
+    assert _merged_ranges(sheet) == set()
+    # 未分组统一显示为「未分组」，便于阅读
+    assert _column_values(sheet, "分组") == ["未分组", "未分组"]
+
+
+def test_export_sorts_by_group_then_interface(client):
+    """导出需按分组 → 关联接口排序，否则相同数据不连续、无法合并."""
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="Z组-接口2", interface_name="接口B", group_path="Z 模块"),
+            _case_payload(title="A组-接口2", interface_name="接口B", group_path="A 模块"),
+            _case_payload(title="Z组-接口1", interface_name="接口A", group_path="Z 模块"),
+            _case_payload(title="A组-接口1", interface_name="接口A", group_path="A 模块"),
+        ],
+        interface_name=None,
+        group_path=None,
+    )
+    response = client.get(f"{BASE}/export")
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["接口用例"]
+
+    assert _column_values(sheet, "分组") == ["A 模块", "Z 模块"]
+    assert _column_values(sheet, "关联接口") == ["接口A", "接口B", "接口A", "接口B"]
+    assert _column_values(sheet, "用例标题") == [
+        "A组-接口1",
+        "A组-接口2",
+        "Z组-接口1",
+        "Z组-接口2",
+    ]

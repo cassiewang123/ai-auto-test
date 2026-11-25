@@ -95,6 +95,82 @@ def _group_filter_clause(group_path: str):
     )
 
 
+def _equal_value_runs(sheet, column_index: int, first_row: int, last_row: int):
+    """把某列在 [first_row, last_row] 内按「连续相同值」切成若干段.
+
+    返回 [(起始行, 结束行, 值), ...]，供导出时纵向合并相同数据使用。
+    """
+    runs: list[tuple[int, int, object]] = []
+    row = first_row
+    while row <= last_row:
+        value = sheet.cell(row=row, column=column_index).value
+        end = row
+        while (
+            end + 1 <= last_row
+            and sheet.cell(row=end + 1, column=column_index).value == value
+        ):
+            end += 1
+        runs.append((row, end, value))
+        row = end + 1
+    return runs
+
+
+def _merge_vertical(
+    sheet, column_index: int, start_row: int, end_row: int
+) -> None:
+    """把同一列的 [start_row, end_row] 纵向合并成一个单元格.
+
+    合并后只在左上角保留值，并把该值垂直居中，读起来像「一个模块下挂了
+    若干行用例」。
+    """
+    if end_row <= start_row:
+        return
+    for row in range(start_row + 1, end_row + 1):
+        sheet.cell(row=row, column=column_index).value = None
+    sheet.merge_cells(
+        start_row=start_row,
+        end_row=end_row,
+        start_column=column_index,
+        end_column=column_index,
+    )
+    sheet.cell(row=start_row, column=column_index).alignment = Alignment(
+        horizontal="center", vertical="center", wrap_text=True
+    )
+
+
+def _merge_same_blocks(sheet, items: list) -> None:
+    """把「分组」「关联接口」两列中连续相同的值纵向合并.
+
+    合并是两级嵌套的：
+      1. 分组：同一模块下的所有行并成一块；
+      2. 关联接口：在该分组内，同一接口的用例再并成一块。
+    因为写入前已按「分组 → 关联接口」排序，相同值必然连续，用连续相同值
+    切段即可。
+
+    未分组 / 无关联接口的行不参与合并：它们的值相同只是因为都没填，
+    合并会把互不相关的用例并成一块，反而误导。
+    """
+    if not items:
+        return
+    first_row = 2
+    last_row = first_row + len(items) - 1
+    if last_row <= first_row:
+        return
+
+    group_col, interface_col = 1, 2
+    for group_start, group_end, group_value in _equal_value_runs(
+        sheet, group_col, first_row, last_row
+    ):
+        if group_value and group_value != "未分组":
+            _merge_vertical(sheet, group_col, group_start, group_end)
+        # 关联接口只在同一分组内部合并，跨分组的同名接口不合并
+        for iface_start, iface_end, iface_value in _equal_value_runs(
+            sheet, interface_col, group_start, group_end
+        ):
+            if iface_value:
+                _merge_vertical(sheet, interface_col, iface_start, iface_end)
+
+
 def _validate(
     method: str | None = None,
     case_type: str | None = None,
@@ -328,16 +404,26 @@ def export_api_cases(
     }
     query = select(ApiCaseRecord).where(ApiCaseRecord.is_active.is_(True))
     query = _apply_filters(query, filters)
-    items = (
-        db.execute(query.order_by(ApiCaseRecord.created_at.desc()))
-        .scalars()
-        .all()
+    items = db.execute(query).scalars().all()
+    # 导出按「分组 → 关联接口 → 用例」排序：只有相同数据排在一起，
+    # 导出的表格才能把分组/关联接口合并成一块，读起来是一个模块一张表。
+    items = sorted(
+        items,
+        key=lambda item: (
+            _normalize_path(item.group_path),
+            item.interface_name or "",
+            item.created_at or datetime.min,
+            item.title,
+        ),
     )
 
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "接口用例"
+    # 分组与关联接口放在最前面：先看「属于哪个模块、哪个接口」，再看用例本身
     headers = [
+        "分组",
+        "关联接口",
         "序号",
         "用例标题",
         "场景",
@@ -349,8 +435,6 @@ def export_api_cases(
         "查询参数",
         "请求体",
         "断言",
-        "关联接口",
-        "分组",
         "说明",
         "创建时间",
     ]
@@ -372,6 +456,8 @@ def export_api_cases(
     for index, item in enumerate(items, start=1):
         sheet.append(
             [
+                item.group_path or "未分组",
+                item.interface_name or "",
                 index,
                 item.title,
                 CASE_TYPE_LABEL.get(item.case_type, item.case_type),
@@ -383,8 +469,6 @@ def export_api_cases(
                 json.dumps(item.params or {}, ensure_ascii=False),
                 json.dumps(item.body, ensure_ascii=False) if item.body is not None else "",
                 json.dumps(item.assertions or [], ensure_ascii=False),
-                item.interface_name or "",
-                item.group_path or "",
                 item.description or "",
                 item.created_at.strftime("%Y-%m-%d %H:%M:%S")
                 if item.created_at
@@ -392,7 +476,7 @@ def export_api_cases(
             ]
         )
 
-    widths = [6, 38, 8, 8, 42, 8, 10, 28, 28, 40, 40, 22, 22, 30, 20]
+    widths = [26, 22, 6, 38, 8, 8, 42, 8, 10, 28, 28, 40, 40, 30, 20]
     for col_index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(col_index)].width = width
     wrap = Alignment(wrap_text=True, vertical="top")
@@ -400,8 +484,10 @@ def export_api_cases(
     for row in sheet.iter_rows(min_row=2):
         for col_index, cell in enumerate(row, start=1):
             cell.border = border
-            cell.alignment = center if col_index in {1, 3, 4, 6, 7} else wrap
+            cell.alignment = center if col_index in {3, 5, 6, 8, 9} else wrap
     sheet.freeze_panes = "A2"
+
+    _merge_same_blocks(sheet, items)
 
     buffer = io.BytesIO()
     workbook.save(buffer)
