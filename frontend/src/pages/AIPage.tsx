@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
+  Alert,
   Card,
   Input,
   Button,
@@ -25,6 +26,12 @@ import {
   ImportOutlined,
 } from '@ant-design/icons';
 import { aiApi, projectApi } from '../services/api';
+import {
+  buildKeyedCases,
+  pickSelectedCases,
+  toImportCases,
+  type KeyedCase,
+} from '../utils/generatedCaseSelection';
 import type { Project } from '../types';
 
 const { TextArea } = Input;
@@ -74,13 +81,17 @@ export default function AIPage() {
   const [interfaceBody, setInterfaceBody] = useState('');
   const [harContent, setHarContent] = useState('');
   const [maxCases, setMaxCases] = useState(10);
-  const [structuredCases, setStructuredCases] = useState<StructuredCase[]>([]);
+  const [structuredCases, setStructuredCases] = useState<
+    KeyedCase<StructuredCase>[]
+  >([]);
   const [generatingStructured, setGeneratingStructured] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [targetProjectId, setTargetProjectId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [previewCase, setPreviewCase] = useState<StructuredCase | null>(null);
+  // 外部 LLM 启用知情弹窗：仅前端知情层，不持久化、不作为安全边界。
+  const [enableModalOpen, setEnableModalOpen] = useState(false);
 
   useEffect(() => {
     projectApi.listAll().then((res) => {
@@ -280,6 +291,18 @@ export default function AIPage() {
 
   return (
     <div>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="规则引擎 · 未接入 LLM · 数据不会外发"
+        description="当前全部 AI 能力基于本地规则引擎运行。LLM_MODEL=gpt-4 仅为未启用时的占位模型名，不代表已接入。"
+        action={
+          <Button size="small" onClick={() => setEnableModalOpen(true)}>
+            启用外部 LLM
+          </Button>
+        }
+      />
       <Tabs
         items={[
           {
@@ -656,6 +679,34 @@ export default function AIPage() {
           },
         ]}
       />
+
+      <Modal
+        title="启用外部 LLM（知情确认）"
+        open={enableModalOpen}
+        onCancel={() => setEnableModalOpen(false)}
+        onOk={() => {
+          setEnableModalOpen(false);
+          message.info(
+            '需设置 LLM_EXTERNAL_ENABLED=true 与 OPENAI_API_KEY 并重启后端，本操作不会即时生效'
+          );
+        }}
+        okText="我已了解并确认"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <p>启用后，以下内容可能被发送到外部大模型服务：</p>
+        <ul>
+          <li>接口定义（方法、路径、请求/响应结构）</li>
+          <li>请求响应（样例数据、执行结果）</li>
+          <li>断言与测试点（断言规则、测试点描述）</li>
+          <li>业务规则与知识（规则文本、缺陷模式、接口知识）</li>
+        </ul>
+        <p>
+          请二次确认：本平台默认关闭外发（LLM_EXTERNAL_ENABLED=false），
+          启用需同时设置 LLM_EXTERNAL_ENABLED=true 与 OPENAI_API_KEY 并重启后端服务。
+          本次确认仅是前端知情提示，不会修改配置、不会即时生效，刷新页面后复位。
+        </p>
+      </Modal>
     </div>
   );
 }

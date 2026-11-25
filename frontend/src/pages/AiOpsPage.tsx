@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Table,
   Button,
   Select,
@@ -156,6 +157,20 @@ export default function AiOpsPage() {
 
   return (
     <div data-testid="ai-ops-page">
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="规则引擎 · 未接入 LLM · 数据不会外发"
+        description="当前规则模式无调用记录；下方统计与采纳率仅在启用外部 LLM 后才有数据，未启用时保持为 0。"
+      />
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="当前规则模式无调用记录"
+        description="本轮不新建调用采集链，标「无数据」比造数据诚实。启用外部 LLM 后才会产生调用记录。"
+      />
       <div data-testid="ai-stats-cards" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           <Col xs={24} sm={12} lg={6}>

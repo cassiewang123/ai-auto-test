@@ -306,7 +306,7 @@ def delete_interface(knowledge_id: str, db: Session = Depends(get_db)):
 
 
 # ===========================================================================
-# RAG 检索
+# 关键词检索
 # ===========================================================================
 @router.post("/search", response_model=DataResponse[dict])
 def search_knowledge(
@@ -314,6 +314,6 @@ def search_knowledge(
     project_id: str | None = Query(None, description="项目ID筛选"),
     db: Session = Depends(get_db),
 ):
-    """RAG 检索：输入关键词，召回相关知识."""
+    """关键词检索：输入关键词，召回相关知识."""
     knowledge = _service.search_knowledge(query, project_id, db)
     return DataResponse(data=knowledge)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Table,
   Button,
   Modal,
@@ -210,6 +211,12 @@ export default function DefectPatternsPage() {
 
   return (
     <div>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="规则引擎 · 未接入 LLM · 数据不会外发"
+      />
       <Card
         title={
           <Space>

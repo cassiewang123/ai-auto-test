@@ -91,6 +91,10 @@ const CHANNEL_TYPE_LABEL: Record<string, string> = {
 const EVENT_TYPE_OPTIONS = [
   { label: '测试执行完成', value: 'test_run.completed' },
   { label: '测试执行失败', value: 'test_run.failed' },
+  { label: '统一任务完成', value: 'job.completed' },
+  { label: '统一任务失败', value: 'job.failed' },
+  { label: '统一任务超时', value: 'job.timed_out' },
+  { label: '质量评估未达标（仅记录）', value: 'job.quality_gate.failed' },
   { label: '定时任务完成', value: 'scheduled_task.completed' },
   { label: '性能测试完成', value: 'perf_test.completed' },
 ];
@@ -98,6 +102,10 @@ const EVENT_TYPE_OPTIONS = [
 const EVENT_TYPE_LABEL: Record<string, string> = {
   'test_run.completed': '测试执行完成',
   'test_run.failed': '测试执行失败',
+  'job.completed': '统一任务完成',
+  'job.failed': '统一任务失败',
+  'job.timed_out': '统一任务超时',
+  'job.quality_gate.failed': '质量评估未达标（仅记录）',
   'scheduled_task.completed': '定时任务完成',
   'perf_test.completed': '性能测试完成',
   test: '测试通知',

@@ -1,4 +1,4 @@
-"""知识工程服务：RAG 检索与 Prompt 注入."""
+"""知识工程服务：关键词检索与 Prompt 注入."""
 from __future__ import annotations
 
 from sqlalchemy import or_, select
@@ -13,7 +13,7 @@ class KnowledgeService:
     """知识检索与注入服务."""
 
     # ------------------------------------------------------------------
-    # RAG 检索
+    # 关键词检索
     # ------------------------------------------------------------------
     def search_knowledge(
         self, query: str, project_id: str | None, db: Session
