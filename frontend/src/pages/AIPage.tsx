@@ -201,11 +201,11 @@ export default function AIPage() {
         source_data: buildSourceData(),
         options: { max_cases: maxCases },
       });
-      const cases = res.data?.cases || [];
-      setStructuredCases(cases);
-      // 默认全选
-      setSelectedRowKeys(cases.map((_, idx) => idx));
-      message.success(`已生成 ${cases.length} 条结构化用例`);
+      const rows = buildKeyedCases<StructuredCase>(res.data?.cases || []);
+      setStructuredCases(rows);
+      // 默认全选：选中项保存的是行键，与表格 rowKey 保持一致
+      setSelectedRowKeys(rows.map((row) => row.rowKey));
+      message.success(`已生成 ${rows.length} 条结构化用例`);
     } catch (e: any) {
       message.error(e.message || '生成失败');
     } finally {
@@ -218,9 +218,14 @@ export default function AIPage() {
       message.warning('请至少选择一条用例');
       return;
     }
-    const selectedCases = selectedRowKeys
-      .map((k) => structuredCases[Number(k)])
-      .filter(Boolean);
+    const selectedCases = toImportCases(
+      pickSelectedCases(structuredCases, selectedRowKeys)
+    );
+    if (selectedCases.length === 0) {
+      message.warning('选中的用例已失效，请重新生成后再导入');
+      setSelectedRowKeys([]);
+      return;
+    }
     setImporting(true);
     try {
       const res = await aiApi.importCases({
@@ -470,9 +475,7 @@ export default function AIPage() {
                     }
                   >
                     <Table
-                      rowKey={(record) =>
-                        `${record.title}-${record.method}-${record.url}`
-                      }
+                      rowKey="rowKey"
                       columns={structuredColumns}
                       dataSource={structuredCases}
                       size="small"
