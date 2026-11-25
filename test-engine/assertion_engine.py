@@ -1,11 +1,12 @@
 """断言引擎：对 ResponseData 执行断言规则，返回 list[AssertionResult].
 
 支持的断言类型（rule["assertion_type"]）：
-    - status_code:   比较响应状态码
-    - json_path:     用 jsonpath-ng 取值后比对
-    - header:        检查响应头是否存在且匹配
-    - response_time: 比较耗时是否 <= 阈值
-    - json_schema:   用 jsonschema 校验 body 结构
+    - status_code:      比较响应状态码
+    - json_path:        用 jsonpath-ng 取值后比对
+    - header:           检查响应头是否存在且匹配
+    - response_time:    比较耗时是否 <= 阈值
+    - json_schema:      用 jsonschema 校验 body 结构
+    - business_status:  检查响应体里的业务成功/失败标志
 
 操作符（rule["operator"]）：
     eq / ne / gt / lt / ge / le / contains / regex / type
@@ -17,6 +18,14 @@
 expected 兼容两种来源：
     - 直接值（int/dict/...）
     - JSON 编码文本（来自 ORM 的 Text 字段），会被自动解析
+
+关于 business_status：
+    很多接口出错时仍返回 HTTP 200，只在响应体里给出 flag/errorCode/code 等
+    业务失败标志。只断言状态码时，这类失败会被误判为通过。执行器在「没有
+    任何响应体断言」时会自动附加一项业务状态检查（详见 executor.py）；
+    也可以显式添加：
+        {"assertion_type": "business_status", "operator": "eq",
+         "expected": "passed"}   # 期望业务成功
 """
 from __future__ import annotations
 
@@ -47,6 +56,155 @@ _TYPE_NAMES = {"int", "integer", "float", "number", "str", "string",
                "bool", "boolean", "list", "array", "dict", "object",
                "none", "null"}
 
+# ---------------------------------------------------------------------------
+# 业务状态检测：识别「HTTP 200 但业务失败」的响应体
+# ---------------------------------------------------------------------------
+# 布尔/标志类字段，取这些值表示失败或成功
+_FLAG_FIELDS = ("flag", "success", "ok", "succeeded", "isSuccess", "is_success")
+_FAILURE_FLAG_TEXT = {"f", "false", "0", "no", "n", "fail", "failed",
+                      "error", "failure", "err"}
+_SUCCESS_FLAG_TEXT = {"t", "true", "1", "yes", "y", "ok", "success",
+                      "passed", "pass", "succeed", "成功"}
+
+# 非零即失败的错误码字段（约定这类字段 0 表示无错误）
+_ERROR_CODE_FIELDS = ("errorcode", "errcode", "error_code", "err_code",
+                      "error_no", "errorno", "retcode", "ret_code")
+
+# 通用业务码字段：约定 0 / 200 表示成功
+_CODE_FIELDS = ("code", "statuscode", "status_code", "bizcode", "biz_code")
+_SUCCESS_CODES = {0, 200, "0", "200"}
+
+# 文本状态字段
+_STATUS_FIELDS = ("status", "result", "state")
+_FAILURE_STATUS_TEXT = {"fail", "failed", "failure", "error", "err",
+                        "异常", "失败"}
+_SUCCESS_STATUS_TEXT = {"success", "ok", "passed", "pass", "succeed",
+                        "正常", "成功"}
+
+# 错误描述字段：非空且 data 为空时视为失败
+_ERROR_MESSAGE_FIELDS = ("errorinfo", "error_info", "errmsg", "err_msg",
+                         "errormessage", "error_message", "errordesc",
+                         "error_desc")
+
+
+def _normalized_key_map(body: dict) -> dict[str, Any]:
+    """把 body 的键统一成小写，便于匹配不同命名风格（errorCode / error_code）."""
+    return {str(key).lower(): value for key, value in body.items()}
+
+
+def _as_flag_state(value: Any) -> str | None:
+    """把标志位归一化为 'passed' / 'failed'，无法判断时返回 None."""
+    if isinstance(value, bool):
+        return "passed" if value else "failed"
+    if isinstance(value, (int, float)):
+        return "passed" if value else "failed"
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _FAILURE_FLAG_TEXT:
+            return "failed"
+        if text in _SUCCESS_FLAG_TEXT:
+            return "passed"
+    return None
+
+
+def _as_number(value: Any) -> float | None:
+    """把数字或数字字符串转成 float，失败返回 None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def inspect_business_status(body: Any) -> dict[str, Any] | None:
+    """检查响应体的业务状态，返回检测结果；无法判断时返回 None.
+
+    返回形如 ``{"status": "failed", "signal": "flag", "message": "..."}``，
+    status 为 ``passed`` / ``failed``。按「显式标志 > 错误码 > 业务码 >
+    状态文本 > 错误描述」的优先级判断，先命中者为准。
+
+    只识别约定俗成的字段，识别不到就返回 None，不会凭空判失败。
+    """
+    if not isinstance(body, dict) or not body:
+        return None
+    lower = _normalized_key_map(body)
+
+    # 1) 显式布尔标志位
+    for field in _FLAG_FIELDS:
+        if field.lower() in lower:
+            value = lower[field.lower()]
+            state = _as_flag_state(value)
+            if state is not None:
+                if state == "failed":
+                    return {
+                        "status": "failed",
+                        "signal": field,
+                        "message": f"业务标志 {field}={value!r} 表示失败",
+                    }
+                return {
+                    "status": "passed",
+                    "signal": field,
+                    "message": f"业务标志 {field}={value!r} 表示成功",
+                }
+
+    # 2) 错误码字段：非 0 即失败
+    for field in _ERROR_CODE_FIELDS:
+        if field in lower:
+            number = _as_number(lower[field])
+            if number is not None and number != 0:
+                return {
+                    "status": "failed",
+                    "signal": field,
+                    "message": f"错误码 {field}={lower[field]!r} 非 0",
+                }
+
+    # 3) 通用业务码：0 / 200 视为成功
+    for field in _CODE_FIELDS:
+        if field in lower:
+            value = lower[field]
+            number = _as_number(value)
+            if number is not None and value not in _SUCCESS_CODES:
+                return {
+                    "status": "failed",
+                    "signal": field,
+                    "message": f"业务码 {field}={value!r} 不为 0/200",
+                }
+
+    # 4) 文本状态字段
+    for field in _STATUS_FIELDS:
+        if field in lower and isinstance(lower[field], str):
+            text = lower[field].strip().lower()
+            if text in _FAILURE_STATUS_TEXT:
+                return {
+                    "status": "failed",
+                    "signal": field,
+                    "message": f"业务状态 {field}={lower[field]!r} 表示失败",
+                }
+            if text in _SUCCESS_STATUS_TEXT:
+                return {
+                    "status": "passed",
+                    "signal": field,
+                    "message": f"业务状态 {field}={lower[field]!r} 表示成功",
+                }
+
+    # 5) 有错误描述且没有返回数据
+    for field in _ERROR_MESSAGE_FIELDS:
+        if field in lower:
+            message = lower[field]
+            if isinstance(message, str) and message.strip() and body.get("data") is None:
+                return {
+                    "status": "failed",
+                    "signal": field,
+                    "message": f"{field}={message.strip()!r} 且 data 为空",
+                }
+
+    return None
+
 
 class AssertionEngine:
     """对响应数据执行断言评估."""
@@ -63,6 +221,26 @@ class AssertionEngine:
     def all_passed(results: list[AssertionResult]) -> bool:
         """整体状态：空列表或全部通过为 True，任一失败为 False."""
         return all(r.passed for r in results)
+
+    def evaluate_business_status(self, response: ResponseData) -> AssertionResult | None:
+        """自动检查业务状态；识别不到任何业务标志时返回 None.
+
+        供执行器在「用例没有响应体断言」时兜底调用：HTTP 200 不代表业务
+        成功，识别到失败标志就产出一条失败断言，让整体状态变为 failed。
+        通过时也返回结果，便于前端展示「已检查业务状态」；无信号则不打扰。
+        """
+        info = inspect_business_status(response.body)
+        if info is None:
+            return None
+        return AssertionResult(
+            assertion_type="business_status",
+            expression=info["signal"],
+            operator="eq",
+            expected="passed",
+            actual=info["status"],
+            passed=info["status"] == "passed",
+            message=info["message"],
+        )
 
     # ---------------- 单条断言 ----------------
     def _evaluate_one(self, response: ResponseData, rule: dict) -> AssertionResult:
@@ -138,12 +316,28 @@ class AssertionEngine:
         except SchemaValidationError as exc:
             return body, False, f"JSON Schema 校验失败: {exc.message}"
 
+    def _assert_business_status(self, response, expression, operator_name, expected):
+        """显式声明的业务状态断言：默认期望 business status 为 passed."""
+        target = str(expected).strip().lower() if expected is not None else "passed"
+        if target in _SUCCESS_FLAG_TEXT:
+            target = "passed"
+        elif target in _FAILURE_FLAG_TEXT:
+            target = "failed"
+
+        info = inspect_business_status(response.body)
+        if info is None:
+            return None, False, "响应体中没有可识别的业务状态标志（flag/success/errorCode/code 等）"
+        actual = info["status"]
+        passed = actual == target
+        return actual, passed, "" if passed else f"{info['message']}（期望 {target}）"
+
     _HANDLERS = {
         "status_code": _assert_status_code,
         "json_path": _assert_json_path,
         "header": _assert_header,
         "response_time": _assert_response_time,
         "json_schema": _assert_json_schema,
+        "business_status": _assert_business_status,
     }
 
     # ---------------- 比较核心 ----------------

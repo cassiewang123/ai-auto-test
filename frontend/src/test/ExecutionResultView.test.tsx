@@ -128,4 +128,49 @@ describe('ExecutionResultView', () => {
     expect(text).toContain('本次执行没有收到响应');
     expect(text).toContain('UnsupportedProtocol');
   });
+
+  it('业务状态失败时展示中文类型并标为失败', () => {
+    act(() => {
+      root.render(
+        <ExecutionResultView
+          result={makeResult({
+            status: 'failed',
+            response: {
+              status_code: 200,
+              headers: { 'content-type': 'application/json' },
+              body: { flag: 'f', errorCode: 100, errorInfo: 'id not found', data: null },
+              elapsed: 0.6,
+              text: '{}',
+            },
+            assertion_results: [
+              {
+                assertion_type: 'status_code',
+                expression: null,
+                operator: 'eq',
+                expected: 200,
+                actual: 200,
+                passed: true,
+                message: '',
+              },
+              {
+                assertion_type: 'business_status',
+                expression: 'flag',
+                operator: 'eq',
+                expected: 'passed',
+                actual: 'failed',
+                passed: false,
+                message: "业务标志 flag='f' 表示失败",
+              },
+            ],
+          })}
+        />
+      );
+    });
+
+    const text = container.textContent || '';
+    // 断言类型以中文展示，而不是原始的 business_status
+    expect(text).toContain('业务状态');
+    expect(text).not.toContain('business_status');
+    expect(text).toContain("业务标志 flag='f' 表示失败");
+  });
 });

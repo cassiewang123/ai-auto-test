@@ -10,6 +10,14 @@ TestCaseExecutor.execute(request_def, assertions, variables) -> ExecutionResult
 
 异常处理：请求/提取/断言过程中的异常被捕获，状态置为 "error"，
 并记录 error_message 与 error_traceback。
+
+业务状态兜底：
+    很多接口出错时仍返回 HTTP 200，只在响应体里给出 flag/errorCode/code
+    等业务失败标志。若用例只断言了状态码/耗时（没有任何响应体断言），
+    执行器会额外调用断言引擎的业务状态检查：识别到失败标志就追加一条
+    失败断言，使整体结果变为 failed，避免「接口明明报错却显示通过」。
+    若用例已经显式断言了响应体（json_path / json_schema /
+    business_status），则不再自动追加，尊重用例作者自己的判断。
 """
 from __future__ import annotations
 
@@ -78,6 +86,9 @@ class TestCaseExecutor:
 
             # 3. 断言评估
             assertion_results = self.assertion_engine.evaluate(response, assertions)
+            assertion_results.extend(
+                self._auto_business_check(response, assertions)
+            )
             status = "passed" if self.assertion_engine.all_passed(assertion_results) else "failed"
         except Exception as exc:  # noqa: BLE001 - 捕获所有异常以记录错误
             status = "error"
@@ -98,6 +109,29 @@ class TestCaseExecutor:
         )
 
     # ---------------- 工具方法 ----------------
+    # 已经代表「响应体被断言过」的类型；有其中任意一种就不自动追加业务检查
+    _BODY_ASSERTION_TYPES = {"json_path", "json_schema", "business_status"}
+
+    def _auto_business_check(
+        self, response: ResponseData, assertions: list[dict]
+    ) -> list:
+        """没有响应体断言时，自动做一次业务状态检查.
+
+        只把「识别到业务失败」的结果追加进来；响应体没有可识别标志、或
+        检查通过时不追加，保持原有结果与统计不变。识别到失败标志时整体
+        状态随之变为 failed。
+        """
+        declared = {
+            str(rule.get("assertion_type") or "").strip()
+            for rule in assertions or []
+        }
+        if declared & self._BODY_ASSERTION_TYPES:
+            return []
+        result = self.assertion_engine.evaluate_business_status(response)
+        if result is None or result.passed:
+            return []
+        return [result]
+
     @staticmethod
     def _to_extracted_variables(
         extracted: dict[str, Any], rules: list[dict]

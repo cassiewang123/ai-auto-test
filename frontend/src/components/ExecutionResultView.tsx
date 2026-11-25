@@ -18,6 +18,16 @@ const STATUS_LABEL: Record<string, string> = {
   skipped: '跳过',
 };
 
+/** 断言类型的中文名；未知类型原样展示 */
+const ASSERTION_TYPE_LABEL: Record<string, string> = {
+  status_code: '状态码',
+  json_path: 'JSON 路径',
+  header: '响应头',
+  response_time: '响应耗时',
+  json_schema: 'JSON Schema',
+  business_status: '业务状态',
+};
+
 interface ExecutionResultViewProps {
   result: ExecutionResultData;
 }
@@ -196,7 +206,16 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
                 render: (p: boolean) =>
                   p ? <Tag color="green">PASS</Tag> : <Tag color="red">FAIL</Tag>,
               },
-              { title: '类型', dataIndex: 'assertion_type', width: 120 },
+              {
+                title: '类型',
+                dataIndex: 'assertion_type',
+                width: 120,
+                render: (value: string) => (
+                  <span title={value}>
+                    {ASSERTION_TYPE_LABEL[value] || value}
+                  </span>
+                ),
+              },
               {
                 title: '表达式',
                 dataIndex: 'expression',

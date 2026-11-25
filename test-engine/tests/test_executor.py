@@ -272,6 +272,120 @@ class TestVariableExtractionFlow:
         assert original == {"existing": "1"}
 
 
+# --------------------------- 业务状态兜底 ---------------------------
+class TestAutoBusinessStatus:
+    """HTTP 200 但响应体报错时，不应被判为通过."""
+
+    BUSINESS_FAILURE_BODY = {
+        "flag": "f",
+        "errorCode": 100,
+        "errorInfo": "id not found",
+        "code": 100,
+        "message": "id not found",
+        "data": None,
+    }
+
+    def test_http_200_with_business_error_fails(self):
+        """只断言状态码时，业务失败应让整体结果为 failed."""
+        def handler(request):
+            return httpx.Response(200, json=self.BUSINESS_FAILURE_BODY)
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/public/updateInfo"),
+            [{"assertion_type": "status_code", "operator": "eq", "expected": 200}],
+        )
+
+        assert result.status == "failed"
+        # 状态码断言本身通过，追加的业务状态断言失败
+        assert result.assertion_results[0].passed is True
+        auto = result.assertion_results[-1]
+        assert auto.assertion_type == "business_status"
+        assert auto.passed is False
+        assert auto.actual == "failed"
+
+    def test_no_assertions_still_detects_business_error(self):
+        """完全没有断言时，也应识别出业务失败."""
+        def handler(request):
+            return httpx.Response(200, json=self.BUSINESS_FAILURE_BODY)
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/x"), []
+        )
+        assert result.status == "failed"
+        assert any(
+            r.assertion_type == "business_status" and not r.passed
+            for r in result.assertion_results
+        )
+
+    def test_business_success_keeps_passed_and_adds_nothing(self):
+        """业务正常时不追加断言，保持结果与统计干净."""
+        def handler(request):
+            return httpx.Response(200, json={"code": 0, "data": {"name": "x"}})
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/x"),
+            [{"assertion_type": "status_code", "operator": "eq", "expected": 200}],
+        )
+        assert result.status == "passed"
+        assert len(result.assertion_results) == 1
+
+    def test_body_assertion_disables_auto_check(self):
+        """用例已显式断言响应体时，不再自动追加，尊重作者判断."""
+        def handler(request):
+            return httpx.Response(200, json=self.BUSINESS_FAILURE_BODY)
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/x"),
+            [
+                {"assertion_type": "status_code", "operator": "eq", "expected": 200},
+                {
+                    "assertion_type": "json_path",
+                    "expression": "$.flag",
+                    "operator": "eq",
+                    "expected": "f",
+                },
+            ],
+        )
+        assert result.status == "passed"
+        assert all(r.assertion_type != "business_status" for r in result.assertion_results)
+
+    def test_author_can_assert_business_failure_explicitly(self):
+        """显式期望业务失败时（负向用例），业务失败应判通过."""
+        def handler(request):
+            return httpx.Response(200, json=self.BUSINESS_FAILURE_BODY)
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/x"),
+            [
+                {"assertion_type": "status_code", "operator": "eq", "expected": 200},
+                {
+                    "assertion_type": "business_status",
+                    "operator": "eq",
+                    "expected": "failed",
+                },
+            ],
+        )
+        assert result.status == "passed"
+        assert all(r.passed for r in result.assertion_results)
+
+    def test_non_json_body_keeps_old_behavior(self):
+        def handler(request):
+            return httpx.Response(200, text="ok")
+
+        executor = make_executor(handler)
+        result = executor.execute(
+            RequestDefinition(method="GET", url="https://api.test/x"),
+            [{"assertion_type": "status_code", "operator": "eq", "expected": 200}],
+        )
+        assert result.status == "passed"
+        assert len(result.assertion_results) == 1
+
+
 # ----------------------------- 组件可注入 -----------------------------
 class TestDependencyInjection:
     def test_default_components_created(self):

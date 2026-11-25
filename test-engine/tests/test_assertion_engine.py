@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.schemas.execution import ResponseData
-from test_engine.assertion_engine import AssertionEngine
+from test_engine.assertion_engine import AssertionEngine, inspect_business_status
 
 
 @pytest.fixture
@@ -256,3 +256,126 @@ class TestOverallAndEdgeCases:
         r = engine.evaluate(resp, [rule])[0]
         assert r.passed is False
         assert "magic" in r.message or "不支持" in r.message
+
+
+# ------------------------- business_status -------------------------
+class TestInspectBusinessStatus:
+    """响应体的业务成功/失败识别."""
+
+    def test_non_dict_body_has_no_signal(self):
+        assert inspect_business_status(None) is None
+        assert inspect_business_status("plain text") is None
+        assert inspect_business_status([1, 2]) is None
+        assert inspect_business_status({}) is None
+
+    def test_unrecognized_fields_have_no_signal(self):
+        # 没有任何约定字段时不应凭空判定失败
+        assert inspect_business_status({"hello": "world"}) is None
+
+    @pytest.mark.parametrize("flag,expected_status", [
+        ("f", "failed"),
+        ("false", "failed"),
+        ("F", "failed"),
+        (False, "failed"),
+        ("t", "passed"),
+        ("true", "passed"),
+        (True, "passed"),
+    ])
+    def test_flag_field(self, flag, expected_status):
+        info = inspect_business_status({"flag": flag, "data": None})
+        assert info is not None
+        assert info["status"] == expected_status
+        assert info["signal"] == "flag"
+
+    @pytest.mark.parametrize("field", ["errorCode", "errCode", "error_code", "err_code"])
+    def test_error_code_field_non_zero_means_failure(self, field):
+        info = inspect_business_status({field: 100, "data": None})
+        assert info is not None
+        assert info["status"] == "failed"
+
+    def test_error_code_zero_means_no_signal(self):
+        # 0 表示无错误，不是「成功信号」，应继续往下看
+        assert inspect_business_status({"errorCode": 0}) is None
+
+    @pytest.mark.parametrize("code", [0, 200, "0", "200"])
+    def test_business_code_success_values(self, code):
+        info = inspect_business_status({"code": code})
+        assert info is None  # 成功码不足以断言业务成功，只排除失败
+
+    @pytest.mark.parametrize("code", [100, 500, "9999", 1])
+    def test_business_code_non_success_means_failure(self, code):
+        info = inspect_business_status({"code": code})
+        assert info is not None
+        assert info["status"] == "failed"
+        assert info["signal"] == "code"
+
+    def test_status_text_field(self):
+        failed = inspect_business_status({"status": "failed"})
+        passed = inspect_business_status({"status": "success"})
+        assert failed["status"] == "failed"
+        assert passed["status"] == "passed"
+
+    def test_error_info_with_empty_data_means_failure(self):
+        info = inspect_business_status(
+            {"errorInfo": "id not found", "data": None, "message": "id not found"}
+        )
+        assert info is not None
+        assert info["status"] == "failed"
+
+    def test_error_info_with_data_present_is_not_enough(self):
+        # 有数据返回时，单独的 message 不足以判定失败
+        assert inspect_business_status(
+            {"errorInfo": "ok", "data": {"id": 1}}
+        ) is None
+
+    def test_explicit_flag_wins_over_code(self):
+        info = inspect_business_status({"flag": "t", "code": 100})
+        assert info["status"] == "passed"
+        assert info["signal"] == "flag"
+
+
+class TestBusinessStatusAssertion:
+    """显式声明的 business_status 断言."""
+
+    def test_failure_response_fails(self, engine):
+        resp = ResponseData(
+            status_code=200,
+            body={"flag": "f", "errorCode": 100, "data": None},
+        )
+        rule = {"assertion_type": "business_status", "operator": "eq", "expected": "passed"}
+        result = engine.evaluate(resp, [rule])[0]
+        assert result.passed is False
+        assert result.actual == "failed"
+        assert "失败" in result.message or "flag" in result.message
+
+    def test_success_response_passes(self, engine):
+        resp = ResponseData(status_code=200, body={"flag": "t", "data": {"id": 1}})
+        rule = {"assertion_type": "business_status", "operator": "eq", "expected": "passed"}
+        result = engine.evaluate(resp, [rule])[0]
+        assert result.passed is True
+
+    def test_expecting_failure_passes_when_business_failed(self, engine):
+        resp = ResponseData(status_code=200, body={"errorCode": 100})
+        rule = {"assertion_type": "business_status", "operator": "eq", "expected": "failed"}
+        result = engine.evaluate(resp, [rule])[0]
+        assert result.passed is True
+
+    def test_no_recognizable_signal_fails_loudly(self, engine):
+        resp = ResponseData(status_code=200, body={"hello": "world"})
+        rule = {"assertion_type": "business_status", "operator": "eq", "expected": "passed"}
+        result = engine.evaluate(resp, [rule])[0]
+        assert result.passed is False
+        assert "没有可识别" in result.message
+
+    def test_evaluate_business_status_returns_none_without_signal(self, engine):
+        assert engine.evaluate_business_status(
+            ResponseData(status_code=200, body={"hello": "world"})
+        ) is None
+
+    def test_evaluate_business_status_returns_result_with_signal(self, engine):
+        result = engine.evaluate_business_status(
+            ResponseData(status_code=200, body={"flag": "f"})
+        )
+        assert result is not None
+        assert result.assertion_type == "business_status"
+        assert result.passed is False
