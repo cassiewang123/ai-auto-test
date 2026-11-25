@@ -356,82 +356,101 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
         </Card>
       )}
 
-      {response ? (
-        <Card type="inner" title="响应内容" styles={{ body: { padding: 12 } }}>
-          <Tabs
-            activeKey={tab}
-            onChange={setTab}
-            items={[
-              {
-                key: 'body',
-                label: '响应体',
-                children: binaryBody ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 16,
-                      padding: '18px 16px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: 6,
-                      background: '#f8fafc',
-                    }}
-                  >
-                    <Space align="center" size={12}>
-                      <FileOutlined style={{ color: '#2563eb', fontSize: 24 }} />
-                      <div>
-                        <div
-                          title={binaryBody.filename}
-                          style={{
-                            maxWidth: 460,
-                            overflow: 'hidden',
-                            color: '#0f172a',
-                            fontWeight: 600,
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
+      {response || result.request ? (
+        // 实际请求与响应并排展示：对齐同一个请求的「发出去」和「返回来」，
+        // 排查时不用来回切标签页。
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              result.request && response ? 'repeat(auto-fit, minmax(360px, 1fr))' : '1fr',
+            gap: 12,
+            alignItems: 'start',
+          }}
+        >
+          {result.request && (
+            <Card type="inner" title="实际请求" styles={{ body: { padding: 12 } }}>
+              <RequestDetail request={result.request} />
+            </Card>
+          )}
+          {response && (
+            <Card type="inner" title="响应内容" styles={{ body: { padding: 12 } }}>
+              <Tabs
+                activeKey={tab}
+                onChange={setTab}
+                items={[
+                  {
+                    key: 'body',
+                    label: '响应体',
+                    children: binaryBody ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 16,
+                          padding: '18px 16px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: 6,
+                          background: '#f8fafc',
+                        }}
+                      >
+                        <Space align="center" size={12}>
+                          <FileOutlined style={{ color: '#2563eb', fontSize: 24 }} />
+                          <div>
+                            <div
+                              title={binaryBody.filename}
+                              style={{
+                                maxWidth: 460,
+                                overflow: 'hidden',
+                                color: '#0f172a',
+                                fontWeight: 600,
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {binaryBody.filename}
+                            </div>
+                            <Typography.Text
+                              type="secondary"
+                              title={binaryBody.content_type}
+                              style={{ fontSize: 12 }}
+                            >
+                              {binaryTypeLabel(binaryBody)} · {formatBytes(binaryBody.size)}
+                            </Typography.Text>
+                          </div>
+                        </Space>
+                        <Button
+                          type="primary"
+                          icon={<DownloadOutlined />}
+                          onClick={() => downloadBinary(binaryBody)}
                         >
-                          {binaryBody.filename}
-                        </div>
-                        <Typography.Text
-                          type="secondary"
-                          title={binaryBody.content_type}
-                          style={{ fontSize: 12 }}
-                        >
-                          {binaryTypeLabel(binaryBody)} · {formatBytes(binaryBody.size)}
-                        </Typography.Text>
+                          下载文件
+                        </Button>
                       </div>
-                    </Space>
-                    <Button
-                      type="primary"
-                      icon={<DownloadOutlined />}
-                      onClick={() => downloadBinary(binaryBody)}
-                    >
-                      下载文件
-                    </Button>
-                  </div>
-                ) : (
-                  <CodeBlock>
-                    {typeof response.body === 'object' && response.body !== null
-                      ? pretty(response.body)
-                      : response.text || pretty(response.body)}
-                  </CodeBlock>
-                ),
-              },
-              {
-                key: 'headers',
-                label: `响应头 (${Object.keys(response.headers || {}).length})`,
-                children: <CodeBlock>{pretty(response.headers)}</CodeBlock>,
-              },
-              {
-                key: 'request',
-                label: '实际请求',
-                children: <RequestDetail request={result.request} />,
-              },
-            ]}
-          />
-        </Card>
+                    ) : (
+                      <CodeBlock>
+                        {typeof response.body === 'object' && response.body !== null
+                          ? pretty(response.body)
+                          : response.text || pretty(response.body)}
+                      </CodeBlock>
+                    ),
+                  },
+                  {
+                    key: 'headers',
+                    label: `响应头 (${Object.keys(response.headers || {}).length})`,
+                    children: <CodeBlock>{pretty(response.headers)}</CodeBlock>,
+                  },
+                ]}
+              />
+            </Card>
+          )}
+          {!response && (
+            <Card type="inner" title="响应内容" styles={{ body: { padding: 12 } }}>
+              <Typography.Text type="secondary">本次执行没有收到响应</Typography.Text>
+            </Card>
+          )}
+        </div>
       ) : (
         <Card type="inner">
           <Typography.Text type="secondary">本次执行没有收到响应</Typography.Text>

@@ -2438,7 +2438,7 @@ export default function ApiListPage() {
             关闭
           </Button>
         }
-        width={920}
+        width={1220}
         destroyOnHidden
       >
         {singleResult && <ExecutionResultView result={singleResult.result} />}
@@ -2654,7 +2654,7 @@ export default function ApiListPage() {
             关闭
           </Button>
         }
-        width={920}
+        width={1220}
         destroyOnHidden
       >
         {batchDetail?.loading ? (

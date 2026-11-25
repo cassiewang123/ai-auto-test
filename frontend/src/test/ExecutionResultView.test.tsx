@@ -84,15 +84,9 @@ describe('ExecutionResultView', () => {
     // 响应体应渲染出 JSON 内容
     expect(text).toContain('"total": 236');
 
-    // 切到「实际请求」标签页可看到真实请求地址（含变量渲染后的 URL）
-    const requestTab = Array.from(
-      container.querySelectorAll<HTMLElement>('.ant-tabs-tab')
-    ).find((el) => el.textContent?.includes('实际请求'));
-    expect(requestTab).toBeTruthy();
-    act(() => {
-      requestTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(container.textContent).toContain(
+    // 实际请求与响应体同屏，无需切换标签即可看到真实请求地址
+    expect(text).toContain('实际请求');
+    expect(text).toContain(
       'http://gateway.example.com/apiService/queryPage'
     );
   });
@@ -174,18 +168,7 @@ describe('ExecutionResultView', () => {
     expect(text).toContain("业务标志 flag='f' 表示失败");
   });
 
-  /** 切到「实际请求」标签页（Tabs 内容懒渲染） */
-  function openRequestTab() {
-    const tab = Array.from(
-      container.querySelectorAll<HTMLElement>('.ant-tabs-tab')
-    ).find((el) => el.textContent?.includes('实际请求'));
-    expect(tab).toBeTruthy();
-    act(() => {
-      tab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-  }
-
-  it('实际请求展示请求行、查询参数、请求头与请求体', () => {
+  it('实际请求与响应体同时可见，无需切换标签', () => {
     act(() => {
       root.render(
         <ExecutionResultView
@@ -203,23 +186,31 @@ describe('ExecutionResultView', () => {
       );
     });
 
-    openRequestTab();
     const text = container.textContent || '';
 
-    // 请求行
+    // 两张卡片都在页面上，不需要点标签
+    expect(text).toContain('实际请求');
+    expect(text).toContain('响应内容');
+    // 「实际请求」不再是标签页
+    const tabLabels = Array.from(
+      container.querySelectorAll<HTMLElement>('.ant-tabs-tab')
+    ).map((el) => el.textContent || '');
+    expect(tabLabels.some((label) => label.includes('实际请求'))).toBe(false);
+    expect(tabLabels.some((label) => label.includes('响应体'))).toBe(true);
+
+    // —— 请求侧 ——
     expect(text).toContain('请求行');
     expect(text).toContain('http://gateway.example.com/apiService/queryPage');
-    // 查询参数：既给出拼好的完整地址，也给出结构化参数
     expect(text).toContain('完整地址（含查询参数）');
     expect(text).toContain('page=1');
     expect(text).toContain('size=20');
     expect(text).toContain('查询参数 (2)');
-    // 请求头
     expect(text).toContain('请求头 (2)');
     expect(text).toContain('Content-Type');
-    // 请求体
-    expect(text).toContain('请求体');
     expect(text).toContain('"keyword": "abc"');
+
+    // —— 响应侧同时可见 ——
+    expect(text).toContain('"total": 236');
   });
 
   it('没有参数/请求头/请求体时给出明确说明而不是留白', () => {
@@ -240,12 +231,36 @@ describe('ExecutionResultView', () => {
       );
     });
 
-    openRequestTab();
     const text = container.textContent || '';
     expect(text).toContain('未携带查询参数');
     expect(text).toContain('未携带自定义请求头');
     expect(text).toContain('无请求体');
     // 没有查询参数时不展示「完整地址」小节
     expect(text).not.toContain('完整地址（含查询参数）');
+  });
+
+  it('只有请求没有响应时仍展示请求信息', () => {
+    act(() => {
+      root.render(
+        <ExecutionResultView
+          result={makeResult({
+            status: 'error',
+            response: null,
+            request: {
+              method: 'GET',
+              url: 'http://gateway.example.com/ping',
+              headers: {},
+              params: {},
+              body: null,
+            },
+          })}
+        />
+      );
+    });
+
+    const text = container.textContent || '';
+    expect(text).toContain('实际请求');
+    expect(text).toContain('请求行');
+    expect(text).toContain('本次执行没有收到响应');
   });
 });
