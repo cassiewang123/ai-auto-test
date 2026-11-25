@@ -169,18 +169,25 @@ export default function ApiCaseManagementPage() {
 
   // 点击用例标题即打开编辑，这是本页的主要操作路径；
   // 「详情」保留为收起的次级入口。
-  const openEdit = useCallback(
-    (record: ApiCaseRecord) => {
-      setEditing(record);
-      form.setFieldsValue(recordToForm(record));
-    },
-    [form]
-  );
+  //
+  // 注意：这里只切换「要编辑哪条用例」，具体的字段值由下面的 useEffect
+  // 在弹窗真正挂载后再写入。否则 setFieldsValue 会早于 Modal 内的 <Form>
+  // 挂载，rc-field-form 首次挂载时用 initialValues（空）重建 store，
+  // 把刚写进去的值整片清空 —— 表现为弹窗打开后所有字段都是空的。
+  const openEdit = useCallback((record: ApiCaseRecord) => {
+    setEditing(record);
+  }, []);
 
   const closeEdit = useCallback(() => {
     setEditing(null);
     form.resetFields();
   }, [form]);
+
+  useEffect(() => {
+    if (!editing) return;
+    // 等 <Form> 挂载完成（Modal 打开后的下一帧）再填值
+    form.setFieldsValue(recordToForm(editing));
+  }, [editing, form]);
 
   const loadData = useCallback(
     async (p = page, ps = pageSize) => {
@@ -748,7 +755,10 @@ export default function ApiCaseManagementPage() {
         width="min(900px, 94vw)"
         okText="保存"
         cancelText="取消"
-        destroyOnHidden
+        // 不用 destroyOnHidden：表单在弹窗关闭时被销毁会连带清空 store，
+        // 关闭动画期间再把上一条的值写进去就会串到下一条用例上。
+        // 这里让 Form 常驻，靠 closeEdit 里的 resetFields 清理。
+        forceRender
       >
         <Alert
           type="info"

@@ -3,7 +3,11 @@
  *
  * 关注点：生成页能按模块选择接口并逐接口生成、结果带上来源模块；
  * 用例管理页能按模块分组展示、点击用例进入编辑并保存。
+ *
+ * 页面统一用 StrictMode 包裹渲染：main.tsx 就是这么挂载的，StrictMode 会
+ * 重复执行 effect，曾导致编辑弹窗的字段被清空（详见编辑用例的两个用例）。
  */
+import { StrictMode } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -120,7 +124,11 @@ const caseFixtures = [
 ];
 
 function renderPage(node: React.ReactElement) {
-  return render(<MemoryRouter>{node}</MemoryRouter>);
+  return render(
+    <StrictMode>
+      <MemoryRouter>{node}</MemoryRouter>
+    </StrictMode>
+  );
 }
 
 describe('接口用例生成页 - 按模块生成', () => {
@@ -313,5 +321,52 @@ describe('用例管理页 - 按模块显示与编辑', () => {
 
     await waitFor(() => expect(messageError).toHaveBeenCalled());
     expect(apiCaseRecordApi.update).not.toHaveBeenCalled();
+  });
+
+  it('编辑弹窗要带出用例详情（方法/URL/场景/优先级/模块/JSON 字段）', async () => {
+    renderPage(<ApiCaseManagementPage />);
+    fireEvent.click(await screen.findByText('新增反馈-正常场景'));
+
+    const dialog = await screen.findByRole('dialog');
+    // 标题
+    expect(
+      await within(dialog).findByDisplayValue('新增反馈-正常场景')
+    ).toBeInTheDocument();
+    // 接口地址
+    expect(within(dialog).getByDisplayValue('/api/feedback')).toBeInTheDocument();
+    // 关联接口
+    expect(within(dialog).getByDisplayValue('新增反馈')).toBeInTheDocument();
+    // 请求体 / 断言 以格式化 JSON 呈现
+    expect(within(dialog).getByDisplayValue(/"a": 1/)).toBeInTheDocument();
+    expect(
+      within(dialog).getByDisplayValue(/status_code/)
+    ).toBeInTheDocument();
+    // 下拉类字段要显示中文/原值，而不是空白
+    expect(within(dialog).getByText('POST')).toBeInTheDocument();
+    expect(within(dialog).getByText('正常')).toBeInTheDocument();
+    expect(within(dialog).getByText('P0')).toBeInTheDocument();
+    expect(within(dialog).getByText('已确认')).toBeInTheDocument();
+  });
+
+  it('先关掉一条再打开另一条，第二次也要带出对应详情', async () => {
+    renderPage(<ApiCaseManagementPage />);
+
+    // 先打开第一条并取消
+    fireEvent.click(await screen.findByText('新增反馈-正常场景'));
+    let dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /取\s*消/ }));
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue('新增反馈-正常场景')).not.toBeInTheDocument()
+    );
+
+    // 再打开另一条，必须是它自己的数据，不能是空的也不能是上一条的
+    fireEvent.click(screen.getByText('报文发送-边界值'));
+    dialog = await screen.findByRole('dialog');
+    expect(
+      await within(dialog).findByDisplayValue('报文发送-边界值')
+    ).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue('/api/message')).toBeInTheDocument();
+    expect(within(dialog).getByText('边界')).toBeInTheDocument();
+    expect(within(dialog).getByText('P1')).toBeInTheDocument();
   });
 });
