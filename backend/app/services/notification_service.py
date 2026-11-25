@@ -31,6 +31,10 @@ _EVENT_TITLES = {
     "test_run.failed": "测试执行失败",
     "scheduled_task.completed": "定时任务执行完成",
     "perf_test.completed": "性能测试完成",
+    "job.completed": "统一任务执行完成",
+    "job.failed": "统一任务执行失败",
+    "job.timed_out": "统一任务执行超时",
+    "job.quality_gate.failed": "质量门禁未通过",
 }
 
 
@@ -80,6 +84,34 @@ def format_message(event_type: str, context: dict[str, Any]) -> str:
         return (
             f"测试执行失败 | 失败:{ctx.get('failed', 0)} "
             f"错误:{ctx.get('error', 0)}"
+        )
+    if event_type == "job.completed":
+        return (
+            f"统一任务完成 | 任务:{ctx.get('job_id', '')} "
+            f"总数:{ctx.get('total', 0)} "
+            f"通过:{ctx.get('passed', 0)} "
+            f"失败:{ctx.get('failed', 0)} "
+            f"耗时:{ctx.get('duration', 0)}s"
+        )
+    if event_type in {"job.failed", "job.timed_out"}:
+        status_label = "失败" if event_type == "job.failed" else "超时"
+        return (
+            f"统一任务{status_label} | 任务:{ctx.get('job_id', '')} "
+            f"错误:{ctx.get('error_message') or ctx.get('message') or '-'}"
+        )
+    if event_type == "job.quality_gate.failed":
+        failed_gates = [
+            item
+            for item in (ctx.get("quality_gates") or [])
+            if isinstance(item, dict) and not item.get("passed", True)
+        ]
+        gate_text = ", ".join(
+            str(item.get("gate_name") or item.get("gate_id") or "?")
+            for item in failed_gates
+        )
+        return (
+            f"质量门禁未通过 | 任务:{ctx.get('job_id', '')} "
+            f"门禁:{gate_text}"
         )
     if event_type == "scheduled_task.completed":
         return (

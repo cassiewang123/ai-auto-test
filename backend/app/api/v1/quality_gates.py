@@ -1,5 +1,7 @@
 """质量门禁 API：CRUD、评估、历史结果查询.
 
+本平台门禁为质量评估 / 报表，仅记录评估结果，不阻断任务执行。
+
 端点：
     GET    /quality-gates              — 列表
     POST   /quality-gates              — 创建
@@ -9,9 +11,6 @@
     GET    /quality-gates/{id}/results — 查询历史结果
 """
 from __future__ import annotations
-
-import json
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -36,27 +35,17 @@ from app.services.project_access import (
     ensure_resource_role,
     scope_project_resources,
 )
+from app.services.quality_gate_service import (
+    evaluate_gate_rules,
+    normalize_gate_mode,
+    parse_gate_json,
+    serialize_gate_json,
+)
 
 router = APIRouter()
 
-_VALID_MODES = {"block", "warn", "log"}
-
-
-def _parse_json(raw: str | None, default: Any) -> Any:
-    """将 Text 中存储的 JSON 字符串解析为 Python 对象."""
-    if not raw:
-        return default
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return default
-
-
-def _dump_json(value: Any) -> str:
-    """将 Python 对象序列化为 JSON 字符串以存入 Text 字段."""
-    if value is None:
-        return ""
-    return json.dumps(value, ensure_ascii=False)
+# 质量评估记录级别；不提供 block（本平台不阻断执行）
+_VALID_MODES = {"warn", "log"}
 
 
 def _to_gate_response(gate: QualityGate) -> QualityGateResponse:
@@ -65,8 +54,8 @@ def _to_gate_response(gate: QualityGate) -> QualityGateResponse:
         id=gate.id,
         name=gate.name,
         project_id=gate.project_id,
-        rules=_parse_json(gate.rules, None),
-        mode=gate.mode,
+        rules=parse_gate_json(gate.rules, None),
+        mode=normalize_gate_mode(gate.mode),
         is_active=gate.is_active,
         created_at=gate.created_at,
         updated_at=gate.updated_at,
@@ -81,73 +70,10 @@ def _to_result_response(result: QualityGateResult) -> QualityGateResultResponse:
         project_id=result.project_id,
         run_id=result.run_id,
         passed=result.passed,
-        results=_parse_json(result.results, None),
+        results=parse_gate_json(result.results, None),
         triggered_by=result.triggered_by,
         created_at=result.created_at,
     )
-
-
-def _evaluate_rules(
-    rules: list[dict[str, Any]] | None,
-    metrics: dict[str, Any],
-) -> tuple[bool, list[dict[str, Any]]]:
-    """评估门禁规则，返回 (是否全部通过, 各规则评估结果).
-
-    规则结构示例：
-        {"metric": "pass_rate", "op": ">=", "threshold": 0.9}
-    支持的比较运算符：>=, >, <=, <, ==, !=。
-    metrics 为实际指标值字典，如 {"pass_rate": 0.95, "coverage": 0.8}。
-    """
-    rule_results: list[dict[str, Any]] = []
-    all_passed = True
-    rules = rules or []
-
-    op_funcs = {
-        ">=": lambda a, b: a >= b,
-        ">": lambda a, b: a > b,
-        "<=": lambda a, b: a <= b,
-        "<": lambda a, b: a < b,
-        "==": lambda a, b: a == b,
-        "!=": lambda a, b: a != b,
-    }
-
-    for rule in rules:
-        metric = rule.get("metric")
-        op = rule.get("op", ">=")
-        threshold = rule.get("threshold")
-        actual = metrics.get(metric) if metric else None
-
-        passed = False
-        if actual is None:
-            # 指标缺失视为未通过
-            reason = f"指标 '{metric}' 缺失"
-        elif op not in op_funcs:
-            reason = f"不支持的运算符 '{op}'"
-        else:
-            try:
-                passed = op_funcs[op](actual, threshold)
-                reason = (
-                    f"{metric}={actual} {op} {threshold}: "
-                    f"{'通过' if passed else '未通过'}"
-                )
-            except TypeError:
-                passed = False
-                reason = f"指标 '{metric}' 类型不匹配：{actual} {op} {threshold}"
-
-        if not passed:
-            all_passed = False
-        rule_results.append(
-            {
-                "metric": metric,
-                "op": op,
-                "threshold": threshold,
-                "actual": actual,
-                "passed": passed,
-                "reason": reason,
-            }
-        )
-
-    return all_passed, rule_results
 
 
 @router.get("", response_model=PageResponse[QualityGateResponse])
@@ -213,8 +139,8 @@ def create_quality_gate(
     gate = QualityGate(
         name=payload.name,
         project_id=payload.project_id,
-        rules=_dump_json(payload.rules),
-        mode=payload.mode or "block",
+        rules=serialize_gate_json(payload.rules),
+        mode=payload.mode or "log",
         is_active=payload.is_active if payload.is_active is not None else True,
     )
     db.add(gate)
@@ -258,7 +184,7 @@ def update_quality_gate(
             f"非法门禁模式，可选: {','.join(sorted(_VALID_MODES))}"
         )
     if "rules" in update_data:
-        gate.rules = _dump_json(update_data.pop("rules"))
+        gate.rules = serialize_gate_json(update_data.pop("rules"))
     for field, value in update_data.items():
         setattr(gate, field, value)
     db.commit()
@@ -300,15 +226,15 @@ def evaluate_quality_gate(
     if payload.project_id and payload.project_id != gate.project_id:
         raise ValidationError("Evaluation project must match the quality gate project")
 
-    rules = _parse_json(gate.rules, None)
-    passed, rule_results = _evaluate_rules(rules, payload.metrics)
+    rules = parse_gate_json(gate.rules, None)
+    passed, rule_results = evaluate_gate_rules(rules, payload.metrics)
 
     result = QualityGateResult(
         gate_id=gate.id,
         project_id=payload.project_id or gate.project_id,
         run_id=payload.run_id,
         passed=passed,
-        results=_dump_json(rule_results),
+        results=serialize_gate_json(rule_results),
         triggered_by=current_user.id,
     )
     db.add(result)

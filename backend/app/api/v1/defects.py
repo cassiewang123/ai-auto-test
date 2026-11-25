@@ -47,6 +47,7 @@ def _serialize(ticket: DefectTicket) -> dict:
         "severity": ticket.severity,
         "project_id": ticket.project_id,
         "test_result_id": ticket.test_result_id,
+        "execution_job_id": ticket.execution_job_id,
         "created_by": ticket.created_by,
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
         "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
@@ -93,6 +94,7 @@ def list_defects(
     status: str | None = Query(None, description="按状态筛选"),
     severity: str | None = Query(None, description="按严重程度筛选"),
     project_id: str | None = Query(None, description="按项目筛选"),
+    execution_job_id: str | None = Query(None, description="按执行任务筛选"),
     external_system: str | None = Query(None, description="按外部系统筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -118,6 +120,11 @@ def list_defects(
     if project_id:
         stmt = stmt.where(DefectTicket.project_id == project_id)
         count_stmt = count_stmt.where(DefectTicket.project_id == project_id)
+    if execution_job_id:
+        stmt = stmt.where(DefectTicket.execution_job_id == execution_job_id)
+        count_stmt = count_stmt.where(
+            DefectTicket.execution_job_id == execution_job_id
+        )
     if external_system:
         stmt = stmt.where(DefectTicket.external_system == external_system)
         count_stmt = count_stmt.where(DefectTicket.external_system == external_system)

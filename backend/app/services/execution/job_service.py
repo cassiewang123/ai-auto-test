@@ -17,6 +17,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ from app.models.execution_job import (
 )
 from app.models.project_member import ProjectMember
 from app.services.execution.job_reporting import RESULT_METRICS_CONFIG_KEY
+from app.services.execution.variables import load_global_variables
 from app.services.security.data_redaction import redact_sensitive_data
 
 logger = logging.getLogger(__name__)
@@ -485,6 +487,39 @@ class JobService:
         attempt.error_code = error_code
         attempt.error_message = error_message
 
+        quality_gate_outcomes: list[dict[str, Any]] = []
+        if job.project_id:
+            try:
+                from app.services.quality_gate_service import (
+                    evaluate_job_quality_gates,
+                )
+
+                quality_gate_outcomes = evaluate_job_quality_gates(
+                    self.db,
+                    job,
+                    result_metrics,
+                )
+            except Exception:
+                logger.exception("Job %s 自动质量门禁评估失败", job.id)
+
+        failure_defect_id: str | None = None
+        if result_status in {"failed", "timed_out"} and job.project_id:
+            try:
+                from app.services.execution.failure_defect_service import (
+                    create_failure_defect_draft,
+                )
+
+                defect = create_failure_defect_draft(
+                    self.db,
+                    job,
+                    metrics=result_metrics,
+                    quality_gates=quality_gate_outcomes,
+                )
+                if defect:
+                    failure_defect_id = defect.id
+            except Exception:
+                logger.exception("Job %s 自动缺陷草稿创建失败", job.id)
+
         if result_status == "succeeded":
             terminal_event = "job.completed"
         elif result_status == "timed_out":
@@ -502,10 +537,77 @@ class JobService:
                 "error_message": error_message,
                 "artifacts": persisted_artifacts,
                 "metrics": result_metrics,
+                "quality_gates": quality_gate_outcomes,
+                "defect_draft_id": failure_defect_id,
             },
         )
+        failed_gate_outcomes: list[dict[str, Any]] = []
+        if quality_gate_outcomes:
+            evaluated_payload = {
+                "results": [
+                    {
+                        "gate_id": outcome["gate_id"],
+                        "gate_name": outcome["gate_name"],
+                        "mode": outcome["mode"],
+                        "passed": outcome["passed"],
+                        "result_id": outcome["result_id"],
+                    }
+                    for outcome in quality_gate_outcomes
+                ]
+            }
+            self._emit_event(
+                job.id,
+                "job.quality_gates.evaluated",
+                evaluated_payload,
+            )
+            failed_gate_outcomes = [
+                outcome
+                for outcome in quality_gate_outcomes
+                if not outcome.get("passed", True)
+            ]
+            if failed_gate_outcomes:
+                self._emit_event(
+                    job.id,
+                    "job.quality_gate.failed",
+                    {
+                        "results": [
+                            item
+                            for item in evaluated_payload["results"]
+                            if not item["passed"]
+                        ]
+                    },
+                )
         self.db.commit()
         self.db.refresh(job)
+
+        if result_status in {"succeeded", "failed", "timed_out"}:
+            try:
+                from app.services.execution.job_notification_service import (
+                    build_job_notification_context,
+                    dispatch_job_terminal_notifications_sync,
+                )
+
+                notification_context = build_job_notification_context(
+                    job,
+                    metrics=result_metrics,
+                    quality_gates=quality_gate_outcomes,
+                    defect_draft_id=failure_defect_id,
+                )
+                dispatch_job_terminal_notifications_sync(
+                    self.db,
+                    job,
+                    terminal_event,
+                    notification_context,
+                )
+                if failed_gate_outcomes:
+                    dispatch_job_terminal_notifications_sync(
+                        self.db,
+                        job,
+                        "job.quality_gate.failed",
+                        notification_context,
+                    )
+            except Exception:
+                logger.exception("Job %s 自动通知分发失败", job.id)
         return job
 
     @staticmethod
@@ -596,7 +698,8 @@ class JobService:
 
         # 解析环境基址 URL、变量与会话 Cookie
         url = case.url
-        variables: dict[str, Any] = {}
+        # 全局/工作空间变量优先加载，环境变量随后覆盖
+        variables: dict[str, Any] = load_global_variables(self.db, case.project_id)
         environment_cookies: list[dict] = []
         environment_allow_private = False
         if case.environment_id:
@@ -604,7 +707,7 @@ class JobService:
 
             env = self.db.get(Environment, case.environment_id)
             if env:
-                variables = dict(env.variables or {})
+                variables.update(env.variables or {})
                 environment_cookies = decrypt_cookies(env.cookies)
                 environment_allow_private = bool(getattr(env, "allow_private", False))
             if env and env.base_url and not url.startswith("http"):
@@ -1400,9 +1503,127 @@ class JobService:
         return job
 
     # ------------------------------------------------------------------ #
+    # 服务重启恢复
+    # ------------------------------------------------------------------ #
+    def recover_interrupted_local_jobs(
+        self,
+        active_task_ids: set[str] | None = None,
+    ) -> dict[str, int]:
+        """将本地线程/eager 模式下因服务重启遗留的任务收敛到失败终态。
+
+        运行中的任务所在线程已随 API 进程消失，无法安全续跑；尚未开始的
+        queued 任务也没有在重启后自动重新投递，因此统一标记为失败并记录
+        job.failed 事件，避免历史任务永远停留在 queued/running。
+        """
+        active_task_ids = {str(value) for value in (active_task_ids or [])}
+        candidates = list(
+            self.db.execute(
+                select(ExecutionJob).where(
+                    ExecutionJob.status.in_(_CANCELLABLE_STATUSES)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        recovered_queued = 0
+        recovered_running = 0
+        for candidate in candidates:
+            metadata = self.get_dispatch_metadata(candidate)
+            mode = metadata.get("mode")
+            task_id = metadata.get("celery_task_id")
+            if mode not in {"local", "eager"}:
+                continue
+            if task_id and task_id in active_task_ids:
+                continue
+
+            job = self.db.execute(
+                select(ExecutionJob)
+                .where(ExecutionJob.id == candidate.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).scalar_one_or_none()
+            if not job or job.status not in _CANCELLABLE_STATUSES:
+                continue
+            metadata = self.get_dispatch_metadata(job)
+            if metadata.get("mode") not in {"local", "eager"}:
+                continue
+
+            previous_status = job.status
+            finished_at = _now()
+            if previous_status == "running":
+                error_message = "服务重启导致本地线程执行中断，任务已标记为失败"
+                recovered_running += 1
+            else:
+                error_message = "服务重启时任务尚未开始执行，已标记为失败"
+                recovered_queued += 1
+
+            job.status = "failed"
+            job.finished_at = finished_at
+            job.error_code = "process_restart"
+            job.error_message = error_message
+            if previous_status == "running":
+                attempt = (
+                    self.db.execute(
+                        select(ExecutionAttempt)
+                        .where(
+                            ExecutionAttempt.job_id == job.id,
+                            ExecutionAttempt.status == "running",
+                        )
+                        .order_by(
+                            ExecutionAttempt.started_at.desc(),
+                            ExecutionAttempt.created_at.desc(),
+                        )
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+                if attempt:
+                    attempt.status = "failed"
+                    attempt.finished_at = finished_at
+                    attempt.error_code = "process_restart"
+                    attempt.error_message = error_message
+
+            self._emit_event(
+                job.id,
+                "job.failed",
+                {
+                    "status": "failed",
+                    "error_code": "process_restart",
+                    "previous_status": previous_status,
+                    "dispatch_mode": mode,
+                    "celery_task_id": task_id,
+                },
+            )
+
+        self.db.commit()
+        return {
+            "recovered": recovered_queued + recovered_running,
+            "queued": recovered_queued,
+            "running": recovered_running,
+        }
+
+    # ------------------------------------------------------------------ #
     # 终态判断（供 WebSocket 使用）
     # ------------------------------------------------------------------ #
     @staticmethod
     def is_terminal(status: str | None) -> bool:
         """判断状态是否为终态。"""
         return status in _TERMINAL_STATUSES
+
+
+def recover_interrupted_local_jobs(
+    session_factory: Callable[[], Session] | None = None,
+) -> dict[str, int]:
+    """在应用启动时恢复本地模式遗留任务；供生命周期钩子调用。"""
+    if session_factory is None:
+        from app.database import SessionLocal
+
+        session_factory = SessionLocal
+
+    db = session_factory()
+    try:
+        return JobService(db).recover_interrupted_local_jobs()
+    finally:
+        db.close()

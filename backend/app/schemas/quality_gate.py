@@ -13,7 +13,7 @@ class QualityGateBase(BaseModel):
     name: str = Field(..., max_length=200, description="门禁名称")
     project_id: str | None = Field(default=None, max_length=36, description="项目 ID")
     rules: list[dict[str, Any]] | None = Field(default=None, description="门禁规则")
-    mode: str = Field(default="block", max_length=20, description="门禁模式：block/warn/log")
+    mode: str = Field(default="log", max_length=20, description="评估记录级别：warn/log（不阻断）")
     is_active: bool = Field(default=True, description="是否启用")
 
 
@@ -42,7 +42,7 @@ class QualityGateResponse(BaseModel):
     name: str
     project_id: str | None = None
     rules: list[dict[str, Any]] | None = None
-    mode: str = "block"
+    mode: str = "log"
     is_active: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None

@@ -7,23 +7,32 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError as PydanticValidationError
-
 from app.api.v1 import execution as execution_api
 from app.config import Settings
 from app.runners.base import ExecutionJobSpec, RunnerHandle, RunnerStatus
 from app.runners.local_process import LocalProcessRunner
 from app.runners.script_process import run_script_in_subprocess
+from pydantic import ValidationError as PydanticValidationError
 
 _PRODUCTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 _SAFE_PRODUCTION_SETTINGS = {
     "_env_file": None,
     "ENVIRONMENT": "production",
+    "DEBUG": False,
+    "DATABASE_URL": (
+        "oracle+oracledb://airetest:airetest_prod@oracle:1521/"
+        "?service_name=FREEPDB1"
+    ),
+    "CORS_ORIGINS": "https://airtest.example.com",
+    "URL_ALLOW_PRIVATE": False,
     "SECRET_KEY": "production-jwt-secret",
     "SECRET_ENCRYPTION_KEY": _PRODUCTION_KEY,
     "ALLOW_SYNC_EXECUTION": False,
     "TASK_DISPATCH_MODE": "celery",
     "TASK_FALLBACK_MODE": "disabled",
+    "TASK_EAGER_IN_TESTS": False,
+    "CELERY_BROKER_URL": "redis://redis:6379/0",
+    "CELERY_RESULT_BACKEND": "redis://redis:6379/0",
 }
 
 
@@ -46,6 +55,13 @@ def test_default_settings_use_lightweight_local_mode(monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("override", "message"),
     [
+        ({"DEBUG": True}, "DEBUG=false"),
+        ({"URL_ALLOW_PRIVATE": True}, "URL_ALLOW_PRIVATE=false"),
+        ({"CORS_ORIGINS": "*"}, "CORS_ORIGINS"),
+        ({"DATABASE_URL": "sqlite:///./airetest-lite.db"}, "DATABASE_URL"),
+        ({"TASK_EAGER_IN_TESTS": True}, "TASK_EAGER_IN_TESTS=false"),
+        ({"CELERY_BROKER_URL": ""}, "CELERY_BROKER_URL"),
+        ({"CELERY_RESULT_BACKEND": ""}, "CELERY_RESULT_BACKEND"),
         ({"ALLOW_SYNC_EXECUTION": True}, "ALLOW_SYNC_EXECUTION=false"),
         ({"SECRET_KEY": "dev-secret-change-in-production"}, "explicit SECRET_KEY"),
         ({"TASK_DISPATCH_MODE": "local"}, "TASK_DISPATCH_MODE"),

@@ -11,7 +11,7 @@ class QualityGate(Base):
     name = Column(String(200), nullable=False)
     project_id = Column(String(36), nullable=True, index=True)
     rules = Column(Text, nullable=True)  # JSON: 门禁规则
-    mode = Column(String(20), default="block")  # block/warn/log
+    mode = Column(String(20), default="log")  # warn/log（评估记录级别，不阻断）
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
