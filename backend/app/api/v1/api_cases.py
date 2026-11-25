@@ -309,8 +309,9 @@ def bulk_import_api_cases(
             status="active",
             source="ai",
             description=case.get("description"),
-            interface_name=payload.interface_name,
-            group_path=payload.group_path,
+            # 防御：接口名/分组可能来自超长标题，截断到字段上限避免 422
+            interface_name=(payload.interface_name or "")[:256] or None,
+            group_path=(payload.group_path or "")[:256] or None,
             project_id=payload.project_id,
             created_by=current_user.id,
         )

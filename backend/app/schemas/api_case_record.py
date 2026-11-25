@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiCaseRecordBase(BaseModel):
@@ -77,10 +77,20 @@ class ApiCaseRecordStats(BaseModel):
 class ApiCaseBulkImportRequest(BaseModel):
     """把生成结果批量写入接口用例库."""
 
+    # 前端选中行索引失效时可能传入 null/字符串/数组等非字典项。
+    # 这里统一丢弃非法项，避免整批导入因 422 失败，合法的用例照常入库。
     cases: list[dict[str, Any]]
-    project_id: str | None = None
+    project_id: str | None = Field(default=None, max_length=36)
+    # 接口名可能来自很长的接口标题，这里不设上限，写入时会截断到字段长度
     interface_name: str | None = None
     group_path: str | None = None
+
+    @field_validator("cases", mode="before")
+    @classmethod
+    def _drop_invalid_cases(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [item for item in value if isinstance(item, dict)]
 
 
 class ApiCaseBulkImportResponse(BaseModel):

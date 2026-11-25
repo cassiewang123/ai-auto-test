@@ -72,6 +72,30 @@ def test_bulk_import_skips_invalid_cases(client):
     assert result["created_count"] == 1
 
 
+def test_bulk_import_drops_non_dict_entries(client, db_session):
+    """前端选中索引失效时可能传入 null/字符串/数组，不应导致整批 422."""
+    result = _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="有效用例"),
+            None,  # JSON.stringify(undefined) 产生的 null
+            "not-a-dict",
+            ["not", "a", "dict"],
+        ],
+    )
+    assert result["created_count"] == 1
+    stored = db_session.query(ApiCaseRecord).all()
+    assert [item.title for item in stored] == ["有效用例"]
+
+
+def test_bulk_import_all_invalid_entries_rejected(client):
+    """全部为非法项时仍应返回 422（没有可导入的用例）。"""
+    response = client.post(
+        f"{BASE}/bulk-import", json={"cases": [None, "bad", ["bad"]]}
+    )
+    assert response.status_code == 422
+
+
 def test_bulk_import_rejects_empty(client):
     response = client.post(f"{BASE}/bulk-import", json={"cases": []})
     assert response.status_code == 422

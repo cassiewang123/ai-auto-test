@@ -60,7 +60,11 @@ describe('App lazy routes', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByTestId('username-input')).toBeInTheDocument();
+    // 并发全量跑时 lazy chunk 解析受 worker 竞争影响（隔离 678-691ms 通过、
+    // 并发曾三次超 1s 默认超时），这里把等待上限放宽到 5s，断言本身不变。
+    expect(
+      await screen.findByTestId('username-input', undefined, { timeout: 5000 })
+    ).toBeInTheDocument();
     expect(screen.getByTestId('login-submit')).toBeInTheDocument();
   });
 });

@@ -28,6 +28,12 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, apiCaseRecordApi, projectApi, testCaseApi } from '../services/api';
+import {
+  buildKeyedCases,
+  pickSelectedCases,
+  toImportCases,
+  type KeyedCase,
+} from '../utils/generatedCaseSelection';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -112,7 +118,7 @@ export default function ApiCaseGenerationPage() {
   const [caseTypes, setCaseTypes] = useState<string[]>(['normal', 'exception', 'boundary']);
   const [maxCases, setMaxCases] = useState(15);
   const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState<GeneratedCase[]>([]);
+  const [generated, setGenerated] = useState<KeyedCase<GeneratedCase>[]>([]);
   const [selectedRows, setSelectedRows] = useState<React.Key[]>([]);
   const [importing, setImporting] = useState(false);
   const [previewCase, setPreviewCase] = useState<GeneratedCase | null>(null);
@@ -219,10 +225,10 @@ export default function ApiCaseGenerationPage() {
         source_data: sourceData,
         options: { case_types: caseTypes, max_cases: maxCases },
       });
-      const cases: GeneratedCase[] = res.data?.cases || [];
-      setGenerated(cases);
-      setSelectedRows(cases.map((_, index) => index));
-      message.success(`已生成 ${cases.length} 条接口测试用例`);
+      const rows = buildKeyedCases<GeneratedCase>(res.data?.cases || []);
+      setGenerated(rows);
+      setSelectedRows(rows.map((row) => row.rowKey));
+      message.success(`已生成 ${rows.length} 条接口测试用例`);
     } catch (e: any) {
       message.error(e.message);
     } finally {
@@ -237,7 +243,15 @@ export default function ApiCaseGenerationPage() {
     }
     setImporting(true);
     try {
-      const cases = selectedRows.map((key) => generated[key as number]);
+      // 选中项保存的是表格行键，必须按行键匹配；直接拿它当数组下标会取到
+      // undefined，提交后后端只会报「cases.0: Input should be a valid dictionary」。
+      const picked = pickSelectedCases(generated, selectedRows);
+      const cases = toImportCases(picked);
+      if (cases.length === 0) {
+        message.warning('选中的用例已失效，请重新生成后再导入');
+        setSelectedRows([]);
+        return;
+      }
       // 导入到「用例管理」的接口用例库，而不是直接进入可执行的接口管理
       const res = await apiCaseRecordApi.bulkImport({
         cases,
@@ -486,7 +500,7 @@ export default function ApiCaseGenerationPage() {
             <Space>
               <Button
                 size="small"
-                onClick={() => setSelectedRows(generated.map((_, index) => index))}
+                onClick={() => setSelectedRows(generated.map((row) => row.rowKey))}
                 disabled={generated.length === 0}
               >
                 全选
@@ -506,7 +520,7 @@ export default function ApiCaseGenerationPage() {
                 disabled={selectedRows.length === 0}
                 onClick={handleImport}
               >
-                导入接口管理（{selectedRows.length}）
+                导入用例管理（{selectedRows.length}）
               </Button>
             </Space>
           }
@@ -515,7 +529,7 @@ export default function ApiCaseGenerationPage() {
             <Empty description="选择接口、填写参数后点击「生成接口用例」" style={{ padding: 40 }} />
           ) : (
             <Table
-              rowKey={(record) => `${record.title}-${record.case_type}`}
+              rowKey="rowKey"
               size="small"
               dataSource={generated}
               columns={columns}
