@@ -243,8 +243,10 @@ export default function ApiListPage() {
   // 行选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
-  // 批量执行弹窗里「按分组选择」的当前分组
-  const [batchGroupPath, setBatchGroupPath] = useState<string | undefined>();
+  // 批量执行弹窗里「按分组选择」的模式：追加到当前选择 / 替换当前选择
+  const [batchSelectionMode, setBatchSelectionMode] = useState<'append' | 'replace'>(
+    'append'
+  );
   const [batchExecuting, setBatchExecuting] = useState(false);
   const [batchResults, setBatchResults] = useState<{
     visible: boolean;
@@ -726,32 +728,70 @@ export default function ApiListPage() {
   );
 
   // 批量执行弹窗：按分组选择接口（父级分组包含其下所有子分组）
+  // 标签里带「已选/总数」，追加模式下能直观看出某个分组选了多少
   const batchGroupOptions = useMemo(() => {
     const options = buildGroupSelectOptions([
       ...filtered.map((item) => item.group_path || ''),
       ...apiGroups.map((item: any) => item.path),
     ]);
-    return options.map((option) => ({
-      value: option.value,
-      label: `${option.display}（${
-        filtered.filter((item) => matchesGroupPath(item.group_path, option.value))
-          .length
-      }）`,
-    }));
-  }, [filtered, apiGroups]);
+    const selectedSet = new Set(selectedRowKeys);
+    return options.map((option) => {
+      const groupItems = filtered.filter((item) =>
+        matchesGroupPath(item.group_path, option.value)
+      );
+      const selectedCount = groupItems.filter((item) =>
+        selectedSet.has(item.id)
+      ).length;
+      return {
+        value: option.value,
+        label: `${option.display}（${selectedCount}/${groupItems.length}）`,
+      };
+    });
+  }, [filtered, apiGroups, selectedRowKeys]);
 
+  /**
+   * 按分组选择接口（父级分组包含其下所有子分组）.
+   *
+   * 默认「追加」：把该分组下的接口并进当前勾选，方便先选分组 A、再选分组 B；
+   * 若该分组已全部选中，再点一次则取消它们（分组级开关）。切到「替换」时
+   * 用分组内容覆盖当前勾选。
+   */
   function selectCasesByGroup(groupPath: string) {
-    const ids = filtered
+    const groupIds = filtered
       .filter((item) => matchesGroupPath(item.group_path, groupPath))
       .map((item) => item.id);
-    setSelectedRowKeys(ids);
-    setBatchGroupPath(groupPath);
     const label = splitGroupPath(groupPath).leaf || '未分组';
-    if (ids.length === 0) {
+
+    if (groupIds.length === 0) {
       message.warning(`分组「${label}」下没有接口`);
       return;
     }
-    message.success(`已选中分组「${label}」下 ${ids.length} 个接口（含子分组）`);
+
+    if (batchSelectionMode === 'replace') {
+      setSelectedRowKeys(groupIds);
+      message.success(
+        `已按分组「${label}」替换选择，共 ${groupIds.length} 个接口（含子分组）`
+      );
+      return;
+    }
+
+    const groupIdSet = new Set(groupIds);
+    const alreadyAllSelected = groupIds.every((id) => selectedRowKeys.includes(id));
+    if (alreadyAllSelected) {
+      const next = selectedRowKeys.filter((id) => !groupIdSet.has(id));
+      setSelectedRowKeys(next);
+      message.info(
+        `已取消分组「${label}」下的 ${groupIds.length} 个接口，当前共选 ${next.length} 个`
+      );
+      return;
+    }
+
+    const merged = Array.from(new Set([...selectedRowKeys, ...groupIds]));
+    const added = merged.length - selectedRowKeys.length;
+    setSelectedRowKeys(merged);
+    message.success(
+      `已追加分组「${label}」下的 ${added} 个接口，当前共选 ${merged.length} 个`
+    );
   }
 
   // 记录工作区实际宽度，用于限制目录最大宽度，避免把右侧详情挤没
@@ -2441,39 +2481,37 @@ export default function ApiListPage() {
             当前筛选 {filtered.length} 个接口，已选 {selectedRowKeys.length} 个
           </span>
           <Space size={8} wrap>
+            <Segmented
+              size="small"
+              value={batchSelectionMode}
+              onChange={(value) =>
+                setBatchSelectionMode(value as 'append' | 'replace')
+              }
+              options={[
+                { label: '追加', value: 'append' },
+                { label: '替换', value: 'replace' },
+              ]}
+              title="按分组选择时：追加到当前勾选，或替换当前勾选"
+            />
             <Select
               size="small"
               showSearch
-              allowClear
               placeholder="按分组选择（含子分组）"
               style={{ width: 230 }}
-              value={batchGroupPath}
+              value={undefined}
               optionFilterProp="label"
               options={batchGroupOptions}
               onChange={(value) => {
-                if (!value) {
-                  setBatchGroupPath(undefined);
-                  return;
-                }
-                selectCasesByGroup(value);
+                if (value) selectCasesByGroup(value);
               }}
             />
             <Button
               size="small"
-              onClick={() => {
-                setSelectedRowKeys(filtered.map((item) => item.id));
-                setBatchGroupPath(undefined);
-              }}
+              onClick={() => setSelectedRowKeys(filtered.map((item) => item.id))}
             >
               全选当前筛选
             </Button>
-            <Button
-              size="small"
-              onClick={() => {
-                setSelectedRowKeys([]);
-                setBatchGroupPath(undefined);
-              }}
-            >
+            <Button size="small" onClick={() => setSelectedRowKeys([])}>
               清空
             </Button>
           </Space>
@@ -2486,10 +2524,7 @@ export default function ApiListPage() {
           scroll={{ y: 320 }}
           rowSelection={{
             selectedRowKeys,
-            onChange: (keys) => {
-              setSelectedRowKeys(keys as string[]);
-              setBatchGroupPath(undefined);
-            },
+            onChange: (keys) => setSelectedRowKeys(keys as string[]),
           }}
           columns={[
             { title: '方法', dataIndex: 'method', width: 76 },
@@ -2501,7 +2536,13 @@ export default function ApiListPage() {
               ellipsis: true,
               render: (value: string) =>
                 value ? (
-                  <Tooltip title="点击选中该分组下全部接口（含子分组）">
+                  <Tooltip
+                    title={
+                      batchSelectionMode === 'append'
+                        ? '点击追加该分组下全部接口（含子分组），再点一次取消'
+                        : '点击用该分组下全部接口替换当前选择'
+                    }
+                  >
                     <a onClick={() => selectCasesByGroup(value)}>
                       {splitGroupPath(value).leaf}
                     </a>
