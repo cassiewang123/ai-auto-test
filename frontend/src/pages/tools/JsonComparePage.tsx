@@ -23,6 +23,9 @@ import {
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
 import JsonEditor from '../../components/JsonEditor';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { MOD_ENTER_HINT, useModEnter } from '../../hooks/useHotkey';
+import { downloadTextFile } from '../../utils/download';
 import {
   compareJson,
   jsonDiffLabel,
@@ -47,6 +50,7 @@ export default function JsonComparePage() {
   const [rightText, setRightText] = useState('');
   const [ignoreArrayOrder, setIgnoreArrayOrder] = useState(false);
   const [differences, setDifferences] = useState<JsonDifference[] | null>(null);
+  const { copy } = useCopyToClipboard();
 
   const leftValidation = useMemo(
     () => validateJsonText(leftText, { allowEmpty: false }),
@@ -84,6 +88,9 @@ export default function JsonComparePage() {
     );
   }
 
+  // 主操作快捷键：Ctrl/Cmd + Enter 触发对比
+  useModEnter(handleCompare);
+
   function buildReport(): string | null {
     if (differences === null) {
       message.warning('请先执行对比');
@@ -103,29 +110,23 @@ export default function JsonComparePage() {
     return lines.join('\n');
   }
 
-  async function copyReport() {
+  const copyReport = () => {
     const report = buildReport();
     if (!report) return;
-    try {
-      await navigator.clipboard.writeText(report);
-      message.success('对比报告已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+    void copy(report, {
+      successMessage: '对比报告已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
+  };
 
   function downloadReport() {
     const report = buildReport();
     if (!report) return;
-    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `json-compare-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
+    downloadTextFile(
+      `json-compare-${new Date().toISOString().slice(0, 10)}.txt`,
+      report,
+      'text/plain;charset=utf-8'
+    );
     message.success('对比报告已导出');
   }
 
@@ -189,9 +190,11 @@ export default function JsonComparePage() {
           <Button icon={<ClearOutlined />} onClick={clearAll}>
             清空
           </Button>
-          <Button type="primary" icon={<DiffOutlined />} onClick={handleCompare}>
-            开始对比
-          </Button>
+          <Tooltip title={`快捷键：${MOD_ENTER_HINT}`}>
+            <Button type="primary" icon={<DiffOutlined />} onClick={handleCompare}>
+              开始对比
+            </Button>
+          </Tooltip>
         </Space>
       }
     >

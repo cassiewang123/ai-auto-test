@@ -1,5 +1,151 @@
 .quick-test-workspace {
+  /* 上下分屏：整页跟随可视区域，减去页头/标签栏/内容内边距的约值 */
+  --quick-test-chrome-offset: 200px;
+  display: grid;
+  grid-template-columns: minmax(0, 250px) minmax(0, 1fr);
+  gap: 16px;
   min-width: 0;
+  min-height: 560px;
+  height: calc(100vh - var(--quick-test-chrome-offset));
+}
+
+/* ---- 左侧历史面板 ---- */
+.quick-test-history-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.quick-test-history-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.quick-test-history-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quick-test-history-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.quick-test-history-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quick-test-history-item {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.quick-test-history-item:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.quick-test-history-item:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.quick-test-history-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quick-test-history-method {
+  flex: none;
+  margin: 0;
+  font-size: 11px;
+}
+
+.quick-test-history-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-test-history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.quick-test-history-code {
+  margin: 0;
+  font-size: 11px;
+}
+
+.quick-test-history-time {
+  margin-left: auto;
+}
+
+/* ---- 右侧主区：请求在上、响应在下，各自独立滚动 ---- */
+.quick-test-main-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.quick-test-main-pane > .quick-test-request-card {
+  display: flex;
+  flex: 1 1 52%;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.quick-test-main-pane > .quick-test-request-card > .ant-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .quick-test-request-card > .ant-card-head .ant-card-head-wrapper {
@@ -8,6 +154,14 @@
 
 .quick-test-request-card > .ant-card-head .ant-card-head-title {
   min-width: 0;
+}
+
+/* 标题里的长说明在空间不足时省略，避免卡片头部换行吃掉垂直空间 */
+.quick-test-request-card > .ant-card-head .ant-card-head-title .ant-space-item:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quick-test-environment-context {
@@ -118,10 +272,161 @@
 }
 
 .quick-test-output-section {
+  flex: 1 1 48%;
   min-width: 0;
-  margin-top: 20px;
-  padding-top: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 12px;
   border-top: 1px solid #e5e7eb;
+}
+
+.quick-test-response-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.quick-test-body-hint {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ---- A8 断言模板按钮组 ---- */
+.quick-test-assertion-templates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+/* ---- A9 变量提示与查看面板 ---- */
+/* URL 输入：AutoComplete 包装后仍占满网格列 */
+.quick-test-request-row .quick-test-url-input.ant-select-auto-complete {
+  width: 100%;
+  min-width: 0;
+}
+
+/* KV 值输入：变量提示下拉 */
+.quick-test-key-value-row .quick-test-value-suggest.ant-select-auto-complete {
+  width: 100%;
+  min-width: 0;
+}
+
+.quick-test-variables-popover {
+  color: #334155;
+  font-size: 12px;
+}
+
+.quick-test-variables-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.quick-test-variables-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  color: #64748b;
+}
+
+.quick-test-variable-group {
+  margin-bottom: 10px;
+}
+
+.quick-test-variable-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.quick-test-variable-group-empty {
+  padding-left: 4px;
+  color: #94a3b8;
+}
+
+.quick-test-variable-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed #f1f5f9;
+}
+
+/* 不可引用项（环境 base_url）的醒目说明行 */
+.quick-test-variable-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 5px;
+  color: #9a3412;
+  font-size: 11px;
+}
+
+.quick-test-variable-note-tag {
+  flex: none;
+  margin-inline-end: 0;
+}
+
+.quick-test-variable-name {
+  overflow: hidden;
+  color: #4f46e5;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-test-variable-value-cell {
+  min-width: 0;
+}
+
+.quick-test-variable-value {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  color: #475569;
+  font-family: Consolas, "Courier New", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-test-variable-tag {
+  margin-inline-end: 0;
+}
+
+.quick-test-variables-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.quick-test-variables-footer-note {
+  color: #9a3412;
 }
 
 .quick-test-output-header {
@@ -164,6 +469,30 @@
 .quick-test-console-collapse > .ant-collapse-item > .ant-collapse-header {
   background: #f8fafc;
   font-weight: 600;
+}
+
+/* 窄屏（<992px）：退化为纵向堆叠，避免双栏挤压 */
+@media (max-width: 991px) {
+  .quick-test-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  .quick-test-history-pane {
+    max-height: 280px;
+  }
+
+  .quick-test-history-body {
+    max-height: 220px;
+  }
+
+  .quick-test-main-pane > .quick-test-request-card,
+  .quick-test-main-pane > .quick-test-request-card > .ant-card-body,
+  .quick-test-output-section {
+    flex: none;
+    overflow: visible;
+  }
 }
 
 @media (max-width: 767px) {

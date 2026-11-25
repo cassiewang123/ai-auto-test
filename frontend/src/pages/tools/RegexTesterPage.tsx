@@ -10,13 +10,12 @@ import {
   Space,
   Table,
   Tag,
-  message,
 } from 'antd';
 import { ClearOutlined, CodeOutlined, CopyOutlined } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
-import { evaluateRegex, replaceRegex } from '../../utils/tools/regexTool';
-
-const { TextArea } = Input;
+import InputOutputPanel from '../../components/tools/InputOutputPanel';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { buildHighlightSegments, evaluateRegex, replaceRegex } from '../../utils/tools/regexTool';
 
 const flagOptions = [
   { value: 'g', label: '全局匹配 g' },
@@ -33,6 +32,7 @@ export default function RegexTesterPage() {
   const [flags, setFlags] = useState('g');
   const [text, setText] = useState(sampleText);
   const [replacement, setReplacement] = useState('$1/$2/$3');
+  const { copy } = useCopyToClipboard();
 
   const evaluation = useMemo(
     () => evaluateRegex(pattern, flags, text),
@@ -48,14 +48,33 @@ export default function RegexTesterPage() {
     }
   }, [evaluation.valid, flags, pattern, replacement, text]);
 
-  async function copy(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      message.success(`${label}已复制`);
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  // 命中高亮片段：与匹配表格同源（evaluateRegex 的 matches），非法或无匹配时仅展示原文
+  const highlightSegments = useMemo(
+    () =>
+      evaluation.valid && pattern !== '' && text !== ''
+        ? buildHighlightSegments(text, evaluation.matches)
+        : null,
+    [evaluation.valid, evaluation.matches, pattern, text]
+  );
+
+  const renderHighlight = () =>
+    highlightSegments && (
+      <div className="tools-highlight" data-testid="regex-highlight">
+        {highlightSegments.map((segment, index) =>
+          segment.matched ? (
+            <mark key={`match-${index}`}>{segment.text}</mark>
+          ) : (
+            <span key={`plain-${index}`}>{segment.text}</span>
+          )
+        )}
+      </div>
+    );
+
+  const copyReplaced = () =>
+    copy(replacedText, {
+      successMessage: '替换结果已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
 
   return (
     <ToolPage
@@ -76,7 +95,7 @@ export default function RegexTesterPage() {
           </Button>
           <Button
             icon={<CopyOutlined />}
-            onClick={() => copy(replacedText, '替换结果')}
+            onClick={copyReplaced}
             disabled={pattern === ''}
           >
             复制替换结果
@@ -102,28 +121,29 @@ export default function RegexTesterPage() {
           </Space>
         </Card>
 
-        <div className="tools-two-column">
-          <Card size="small" title="测试文本">
-            <TextArea
-              className="tools-textarea"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={10}
-              placeholder="粘贴需要匹配的文本"
-              data-testid="regex-text"
-            />
-          </Card>
-          <Card size="small" title="替换为">
-            <TextArea
-              className="tools-textarea"
-              value={replacement}
-              onChange={(event) => setReplacement(event.target.value)}
-              rows={10}
-              placeholder="支持 $1、$2 等分组引用"
-              data-testid="regex-replacement"
-            />
-          </Card>
-        </div>
+        <InputOutputPanel
+          inputTitle="测试文本"
+          outputTitle="替换为"
+          inputValue={text}
+          onInputChange={setText}
+          outputValue={replacement}
+          onOutputChange={setReplacement}
+          outputReadOnly={false}
+          inputRows={10}
+          outputRows={10}
+          inputPlaceholder="粘贴需要匹配的文本"
+          outputPlaceholder="支持 $1、$2 等分组引用"
+          inputTestId="regex-text"
+          outputTestId="regex-replacement"
+          inputFooter={
+            highlightSegments ? (
+              <>
+                <div className="tools-highlight-title">命中高亮（{evaluation.matches.length} 处）</div>
+                {renderHighlight()}
+              </>
+            ) : null
+          }
+        />
 
         {!evaluation.valid ? (
           <Alert type="error" showIcon title="正则表达式无效" description={evaluation.error} />

@@ -8,7 +8,6 @@ import {
   Space,
   Statistic,
   Table,
-  message,
 } from 'antd';
 import {
   ClearOutlined,
@@ -16,6 +15,7 @@ import {
   FontSizeOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import { countText, wordFrequencies } from '../../utils/tools/textMetrics';
 
 const { TextArea } = Input;
@@ -24,8 +24,9 @@ export default function WordCountPage() {
   const [text, setText] = useState('');
   const statistics = useMemo(() => countText(text), [text]);
   const frequencies = useMemo(() => wordFrequencies(text, 20), [text]);
+  const { copy } = useCopyToClipboard();
 
-  async function copyStatistics() {
+  function copyStatistics() {
     const report = [
       `字符数：${statistics.characters}`,
       `不含空白字符：${statistics.charactersWithoutSpaces}`,
@@ -39,12 +40,10 @@ export default function WordCountPage() {
       `段落数：${statistics.paragraphs}`,
       `UTF-8 字节：${statistics.bytes}`,
     ].join('\n');
-    try {
-      await navigator.clipboard.writeText(report);
-      message.success('统计结果已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
+    void copy(report, {
+      successMessage: '统计结果已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
   }
 
   return (

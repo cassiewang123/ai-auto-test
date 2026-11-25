@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Input, Select, Space, Switch, Tag, message } from 'antd';
+import { useMemo } from 'react';
+import { Button, Card, Select, Space, Switch, Tag } from 'antd';
 import {
   ClearOutlined,
   CodeOutlined,
@@ -10,6 +10,11 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import JsonEditor from '../../components/JsonEditor';
+import InputOutputPanel from '../../components/tools/InputOutputPanel';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { usePersistentState } from '../../hooks/usePersistentState';
+import { downloadTextFile } from '../../utils/download';
 import {
   analyzeJson,
   defaultJsonFormatOptions,
@@ -18,29 +23,18 @@ import {
   type JsonStats,
 } from '../../utils/tools/jsonFormatter';
 
-const { TextArea } = Input;
-
 const SAMPLE_JSON = `{"code":200,"message":"成功","data":{"total":236,"page":1,"list":[{"id":"01","name":"服务中心服务申请","enabled":true,"tags":["api","content"]},{"id":"02","name":"服务申请分页查询","enabled":false,"tags":[]}]}}`;
 
 const STORAGE_KEY = 'airetest.tools.json-formatter';
 
+const DEFAULT_STORED_STATE: StoredState = {
+  input: '',
+  options: defaultJsonFormatOptions,
+};
+
 interface StoredState {
   input: string;
   options: JsonFormatOptions;
-}
-
-function loadStored(): StoredState {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { input: '', options: defaultJsonFormatOptions };
-    const parsed = JSON.parse(raw) as Partial<StoredState>;
-    return {
-      input: typeof parsed.input === 'string' ? parsed.input : '',
-      options: { ...defaultJsonFormatOptions, ...(parsed.options ?? {}) },
-    };
-  } catch {
-    return { input: '', options: defaultJsonFormatOptions };
-  }
 }
 
 const rootTypeLabels: Record<JsonStats['rootType'], string> = {
@@ -59,56 +53,49 @@ function formatBytes(bytes: number): string {
 }
 
 export default function JsonFormatterPage() {
-  const stored = useMemo(loadStored, []);
-  const [input, setInput] = useState(stored.input);
-  const [options, setOptions] = useState<JsonFormatOptions>(stored.options);
+  // 输入与选项共用一条历史记录，选项缺省字段由 usePersistentState 自动补齐
+  const [stored, setStored] = usePersistentState<StoredState>(
+    STORAGE_KEY,
+    DEFAULT_STORED_STATE
+  );
+  const { copy } = useCopyToClipboard();
+  const input = stored.input;
+  const options = stored.options;
 
-  const { output, error, stats } = useMemo(() => {
+  const setInput = (value: string) =>
+    setStored((previous) => ({ ...previous, input: value }));
+
+  const { output, stats } = useMemo(() => {
     if (input.trim() === '') {
-      return { output: '', error: null as string | null, stats: null as JsonStats | null };
+      return { output: '', stats: null as JsonStats | null };
     }
     try {
       const formatted = formatJson(input, options);
-      return { output: formatted, error: null, stats: analyzeJson(input) };
-    } catch (formatError) {
-      return {
-        output: '',
-        error: formatError instanceof Error ? formatError.message : '格式化失败',
-        stats: null,
-      };
-    }
-  }, [input, options]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ input, options }));
+      return { output: formatted, stats: analyzeJson(input) };
     } catch {
-      // 本地存储不可用时忽略
+      // 语法错误交由 JsonEditor 内联提示（errorTestId="json-error"），输出区保持为空
+      return { output: '', stats: null };
     }
   }, [input, options]);
 
   const patchOptions = (patch: Partial<JsonFormatOptions>) =>
-    setOptions((prev) => ({ ...prev, ...patch }));
+    setStored((previous) => ({
+      ...previous,
+      options: { ...previous.options, ...patch },
+    }));
 
-  async function copyOutput() {
-    try {
-      await navigator.clipboard.writeText(output);
-      message.success('已复制格式化结果');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  const copyOutput = () =>
+    copy(output, {
+      successMessage: '已复制格式化结果',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
 
   function downloadOutput() {
-    const blob = new Blob([output], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = options.indent > 0 ? 'formatted.json' : 'minified.json';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadTextFile(
+      options.indent > 0 ? 'formatted.json' : 'minified.json',
+      output,
+      'application/json;charset=utf-8'
+    );
   }
 
   return (
@@ -190,61 +177,50 @@ export default function JsonFormatterPage() {
           </Space>
         </Card>
 
-        {error ? (
-          <Alert
-            type="error"
-            showIcon
-            title="JSON 解析失败"
-            description={error}
-            data-testid="json-error"
-          />
-        ) : null}
-
-        <div className="tools-two-column">
-          <Card size="small" title="输入">
-            <TextArea
-              className="tools-textarea"
+        <InputOutputPanel
+          inputNode={
+            <JsonEditor
               value={input}
-              onChange={(event) => setInput(event.target.value)}
+              onChange={setInput}
               rows={18}
               placeholder='粘贴 JSON，例如 {"code": 200}'
               data-testid="json-input"
+              errorTestId="json-error"
             />
-          </Card>
-          <Card
-            size="small"
-            title="格式化结果"
-            extra={
-              <Space>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={copyOutput}
-                  disabled={!output}
-                  data-testid="json-copy"
-                >
-                  复制
-                </Button>
-                <Button
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={downloadOutput}
-                  disabled={!output}
-                >
-                  导出
-                </Button>
-              </Space>
-            }
-          >
-            <TextArea
-              className="tools-textarea"
-              value={output}
-              readOnly
-              rows={18}
-              placeholder="格式化结果会实时显示在这里"
-              data-testid="json-output"
-            />
-            {stats ? (
+          }
+          inputValue={input}
+          onInputChange={setInput}
+          outputValue={output}
+          inputRows={18}
+          outputRows={18}
+          inputPlaceholder='粘贴 JSON，例如 {"code": 200}'
+          outputPlaceholder="格式化结果会实时显示在这里"
+          inputTestId="json-input"
+          outputTestId="json-output"
+          outputTitle="格式化结果"
+          outputActions={
+            <Space>
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={copyOutput}
+                disabled={!output}
+                data-testid="json-copy"
+              >
+                复制
+              </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={downloadOutput}
+                disabled={!output}
+              >
+                导出
+              </Button>
+            </Space>
+          }
+          outputFooter={
+            stats ? (
               <Space wrap size={16} style={{ marginTop: 12, color: '#6b7280', fontSize: 13 }}>
                 <span data-testid="json-stats-type">
                   根类型：{rootTypeLabels[stats.rootType]}
@@ -254,9 +230,9 @@ export default function JsonFormatterPage() {
                 <span>最大层级：{stats.maxDepth}</span>
                 <span>原始大小：{formatBytes(stats.bytes)}</span>
               </Space>
-            ) : null}
-          </Card>
-        </div>
+            ) : null
+          }
+        />
       </div>
     </ToolPage>
   );

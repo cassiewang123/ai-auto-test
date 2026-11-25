@@ -34,6 +34,9 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { MOD_ENTER_HINT, useModEnter } from '../../hooks/useHotkey';
+import { downloadTextFile } from '../../utils/download';
 import { serverConsoleApi } from '../../services/api';
 import type { ServerSavedRequest } from '../../types';
 
@@ -43,6 +46,7 @@ interface ConnectionForm {
   username: string;
   password: string;
   allowPrivate: boolean;
+  trustHostFingerprint: string;
 }
 
 interface KeyValueRow {
@@ -72,7 +76,8 @@ const DEFAULT_CONNECTION: ConnectionForm = {
   port: 22,
   username: 'yhztd',
   password: '',
-  allowPrivate: true,
+  allowPrivate: false,
+  trustHostFingerprint: '',
 };
 
 const DEFAULT_REQUEST: RequestForm = {
@@ -97,10 +102,11 @@ function loadSavedConnection(): ConnectionForm {
       port: parsed.port ?? DEFAULT_CONNECTION.port,
       username: parsed.username ?? DEFAULT_CONNECTION.username,
       password: '',
+      // 私网放行默认关闭；历史保存值不覆盖本轮安全默认值。
       allowPrivate:
-        typeof parsed.allowPrivate === 'boolean'
-          ? parsed.allowPrivate
-          : DEFAULT_CONNECTION.allowPrivate,
+        typeof parsed.allowPrivate === 'boolean' ? parsed.allowPrivate : false,
+      // 主机公钥指纹不持久化：每次会话显式填写。
+      trustHostFingerprint: '',
     };
   } catch {
     return DEFAULT_CONNECTION;
@@ -176,6 +182,11 @@ export default function ServerConsolePage() {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
+  // 知情层：仅 useState，不写 localStorage，刷新复位，不作为安全边界。
+  // 开关真值以后端最近一次响应为准；后端默认关闭 SSH_CONSOLE_ENABLED。
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [acknowledgeOpen, setAcknowledgeOpen] = useState(false);
+  const { copy } = useCopyToClipboard();
 
   const refreshSaved = async () => {
     try {
@@ -279,6 +290,7 @@ export default function ServerConsolePage() {
       username: values.username?.trim() ?? '',
       password: values.password ?? '',
       allowPrivate: Boolean(values.allowPrivate),
+      trustHostFingerprint: (values.trustHostFingerprint ?? '').trim(),
     };
     setConnection(next);
     return next;
@@ -286,7 +298,8 @@ export default function ServerConsolePage() {
 
   const saveConnection = () => {
     const next = readConnection();
-    // 密码仅在本次会话内存中使用，不写入 localStorage
+    // 密码与主机公钥指纹仅在本次会话内存中使用，绝不写入 localStorage。
+    // 密码仅本次会话内存使用、不写 localStorage；指纹每会话显式核对填写。
     localStorage.setItem(
       CONNECTION_STORAGE_KEY,
       JSON.stringify({
@@ -296,7 +309,7 @@ export default function ServerConsolePage() {
         allowPrivate: next.allowPrivate,
       })
     );
-    message.success('已保存服务器地址和账号，密码不会保存');
+    message.success('已保存服务器地址和账号，密码与主机公钥指纹不会保存');
   };
 
   const readRequest = (): RequestForm => {
@@ -317,6 +330,15 @@ export default function ServerConsolePage() {
     openSaveModal();
   };
 
+  const handleFailure = (exc: unknown) => {
+    const text = exc instanceof Error ? exc.message : String(exc);
+    // 后端权威闸返回未启用时，复位前端知情态并保留引导文案。
+    if (text.includes('服务器控制台未启用')) {
+      setAcknowledged(false);
+    }
+    setError(text);
+  };
+
   const testConnection = async () => {
     const next = readConnection();
     if (!next.host || !next.username || !next.password) {
@@ -332,13 +354,14 @@ export default function ServerConsolePage() {
         username: next.username,
         password: next.password,
         allow_private: next.allowPrivate,
+        trust_host_fingerprint: next.trustHostFingerprint || null,
         timeout: 20,
       });
       setTestBanner(response.data.server_banner ?? null);
       message.success('SSH 连接成功');
     } catch (exc) {
       setTestBanner(null);
-      setError(exc instanceof Error ? exc.message : String(exc));
+      handleFailure(exc);
     } finally {
       setTesting(false);
     }
@@ -364,6 +387,7 @@ export default function ServerConsolePage() {
         username: connectionValues.username,
         password: connectionValues.password,
         allow_private: connectionValues.allowPrivate,
+        trust_host_fingerprint: connectionValues.trustHostFingerprint || null,
         method: requestValues.method,
         url: requestValues.url,
         params: toRecord(requestValues.params),
@@ -385,7 +409,7 @@ export default function ServerConsolePage() {
       });
     } catch (exc) {
       setResult(null);
-      setError(exc instanceof Error ? exc.message : String(exc));
+      handleFailure(exc);
     } finally {
       setRunning(false);
     }
@@ -401,26 +425,23 @@ export default function ServerConsolePage() {
 
   const download = () => {
     if (!result) return;
-    const blob = new Blob([outputText], {
-      type: 'application/octet-stream;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = guessFileName(result);
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadTextFile(
+      guessFileName(result),
+      outputText,
+      'application/octet-stream;charset=utf-8'
+    );
   };
 
-  const copyOutput = async () => {
+  const copyOutput = () => {
     if (!outputText) return;
-    try {
-      await navigator.clipboard.writeText(outputText);
-      message.success('已复制返回数据');
-    } catch {
-      message.error('复制失败，请手动选择文本');
-    }
+    void copy(outputText, {
+      successMessage: '已复制返回数据',
+      errorMessage: '复制失败，请手动选择文本',
+    });
   };
+
+  // 主操作快捷键：Ctrl/Cmd + Enter 触发执行；未完成知情确认或执行中时不生效
+  useModEnter(execute, acknowledged && !running);
 
   const bodyEnabled = method !== 'GET' && method !== 'HEAD';
 
@@ -433,9 +454,30 @@ export default function ServerConsolePage() {
       <Alert
         type="warning"
         showIcon
-        message="安全说明"
-        description="密码仅用于本次连接，不写入数据库。请求由后端生成 curl 在服务器上执行，不接受任意 shell 命令。"
+        message="服务器控制台风险提示（默认关闭 · 需显式启用）"
+        description={
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <li>远程执行：请求经 SSH 在远程服务器上执行，可能影响目标系统。</li>
+            <li>主机密钥：不自动信任主机公钥，需核对并显式填写「主机公钥指纹」。</li>
+            <li>私网范围：访问私网地址默认关闭，需显式勾选。</li>
+            <li>命令由后端拼装：仅支持结构化参数拼装的受限 curl，不接受任意 shell 命令。</li>
+            <li>密码仅本次会话内存使用、不写 localStorage；任何本机登录账号均可调用 SSH 控制台，凭据勿共享。</li>
+          </ul>
+        }
       />
+      <Space wrap style={{ marginTop: 12, marginBottom: 4 }}>
+        <Button
+          type={acknowledged ? 'default' : 'primary'}
+          onClick={() => setAcknowledgeOpen(true)}
+        >
+          {acknowledged ? '重新查看风险并确认' : '知情确认后启用操作'}
+        </Button>
+        <span style={{ color: '#6b7280', fontSize: 13 }}>
+          {acknowledged
+            ? '已确认风险（仅前端知情层，刷新后复位；开关真值以后端响应为准）'
+            : '未确认：测试连接 / 执行并获取数据不可用'}
+        </span>
+      </Space>
 
       <Row gutter={[16, 16]} align="top">
         <Col xs={24} xl={8}>
@@ -478,17 +520,29 @@ export default function ServerConsolePage() {
                 <Input.Password placeholder="仅用于本次连接" autoComplete="current-password" />
               </Form.Item>
               <Form.Item
+                name="trustHostFingerprint"
+                label="主机公钥指纹"
+                tooltip="首次连接被拒绝时，后端会返回 SHA256: 开头的指纹；核对后填入此处再连接。仅本次后端进程内有效，重启后需重新确认。"
+              >
+                <Input placeholder="SHA256:..." autoComplete="off" />
+              </Form.Item>
+              <Form.Item
                 name="allowPrivate"
-                label="允许访问内网地址"
+                label="访问私网地址（默认关闭，需显式勾选）"
                 valuePropName="checked"
-                tooltip="开启后可以请求服务器所在内网的 http(s) 地址"
+                tooltip="访问私网地址（默认关闭，需显式勾选）；仅放行服务器所在内网的 http(s) 地址"
                 style={{ marginBottom: 16 }}
               >
                 <Switch size="small" />
               </Form.Item>
             </Form>
             <Space wrap>
-              <Button icon={<ReloadOutlined />} loading={testing} onClick={testConnection}>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={testing}
+                disabled={!acknowledged}
+                onClick={testConnection}
+              >
                 测试连接
               </Button>
               <Button icon={<SaveOutlined />} onClick={saveConnection}>
@@ -642,14 +696,23 @@ export default function ServerConsolePage() {
             </Form>
 
             <Space wrap>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                loading={running}
-                onClick={execute}
+              <Tooltip
+                title={
+                  acknowledged
+                    ? `快捷键：${MOD_ENTER_HINT}`
+                    : '请先完成知情确认后再执行'
+                }
               >
-                执行并获取数据
-              </Button>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  loading={running}
+                  disabled={!acknowledged}
+                  onClick={execute}
+                >
+                  执行并获取数据
+                </Button>
+              </Tooltip>
               <Button icon={<SaveOutlined />} onClick={saveRequest}>
                 保存参数
               </Button>
@@ -731,6 +794,33 @@ export default function ServerConsolePage() {
           </details>
         </Card>
       ) : null}
+
+      <Modal
+        title="启用服务器控制台（知情确认）"
+        open={acknowledgeOpen}
+        onCancel={() => setAcknowledgeOpen(false)}
+        onOk={() => {
+          setAcknowledged(true);
+          setAcknowledgeOpen(false);
+        }}
+        okText="我已了解并确认"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <p>请逐项确认以下风险后再使用：</p>
+        <ul>
+          <li>远程执行：请求将在远程服务器上执行受限 curl 命令。</li>
+          <li>主机密钥：不自动信任主机公钥，需显式核对并填写主机公钥指纹。</li>
+          <li>私网范围：访问私网地址默认关闭，需显式勾选。</li>
+          <li>命令由后端拼装：仅支持结构化参数拼装的受限 curl，不接受任意 shell 命令。</li>
+          <li>密码仅本次会话内存使用、不写 localStorage；凭据勿共享。</li>
+        </ul>
+        <p>
+          服务器控制台未启用：请在 .env 设置 SSH_CONSOLE_ENABLED=true 并重启后端服务。
+          本确认仅为前端知情层，不修改后端配置、不是安全边界，刷新页面后复位；
+          若后端返回未启用提示，页面会自动恢复为未确认状态。
+        </p>
+      </Modal>
 
       <Modal
         title={selectedId ? '更新接口' : '保存接口'}

@@ -123,6 +123,34 @@
   font-size: 13px;
 }
 
+.tools-hub-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.tools-hub-search {
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+
+.tools-hub-recent {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.tools-hub-recent-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .tools-two-column {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -193,6 +221,60 @@
 
 .tools-diff-line.is-removed .tools-diff-text {
   color: #b91c1c;
+}
+
+/* 行内字符级差异高亮（文本对比） */
+.tools-diff-char.is-changed {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.tools-diff-line.is-added .tools-diff-char.is-changed {
+  background: #bbf7d0;
+  color: #14532d;
+  font-weight: 600;
+}
+
+.tools-diff-line.is-removed .tools-diff-char.is-changed {
+  background: #fecaca;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+/* 正则命中高亮预览 */
+.tools-highlight-title {
+  margin-top: 10px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.tools-highlight {
+  max-height: 220px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tools-highlight mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #fde68a;
+  color: inherit;
+}
+
+/* 时间处理的时区提示 */
+.tools-timezone-hint {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .tools-code-block {

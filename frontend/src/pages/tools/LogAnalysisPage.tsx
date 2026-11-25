@@ -22,6 +22,8 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { downloadTextFile } from '../../utils/download';
 import {
   filterLogs,
   parseLogText,
@@ -51,6 +53,7 @@ export default function LogAnalysisPage() {
   const [keyword, setKeyword] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [useRegex, setUseRegex] = useState(false);
+  const { copy } = useCopyToClipboard();
 
   const entries = useMemo(() => parseLogText(logText), [logText]);
   const summary = useMemo(() => summarizeLogs(entries), [entries]);
@@ -65,27 +68,21 @@ export default function LogAnalysisPage() {
     [caseSensitive, entries, keyword, selectedLevels, useRegex]
   );
 
-  async function copyResults() {
+  function copyResults() {
     const content = filteredEntries.map((entry) => entry.raw).join('\n');
-    try {
-      await navigator.clipboard.writeText(content);
-      message.success('筛选结果已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
+    void copy(content, {
+      successMessage: '筛选结果已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
   }
 
   function downloadResults() {
     const content = filteredEntries.map((entry) => entry.raw).join('\n');
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `filtered-logs-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
+    downloadTextFile(
+      `filtered-logs-${new Date().toISOString().slice(0, 10)}.txt`,
+      content,
+      'text/plain;charset=utf-8'
+    );
   }
 
   return (

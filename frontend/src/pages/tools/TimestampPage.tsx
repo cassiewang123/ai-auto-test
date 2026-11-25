@@ -7,22 +7,39 @@ import {
   Descriptions,
   Input,
   Row,
+  Select,
   Space,
   Tabs,
-  message,
 } from 'antd';
 import {
   ClockCircleOutlined,
   CopyOutlined,
   FieldTimeOutlined,
+  GlobalOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { usePersistentState } from '../../hooks/usePersistentState';
 import {
   dateToTimestamp,
   formatLocalDate,
   timestampToDate,
 } from '../../utils/tools/timestampTool';
+
+/** 'local' 表示浏览器本地时区（不传 timeZone，保持历史默认行为）。 */
+const LOCAL_TIMEZONE = 'local';
+
+const timezoneOptions = [
+  { value: LOCAL_TIMEZONE, label: '本地时区（浏览器）' },
+  { value: 'UTC', label: 'UTC' },
+  { value: 'Asia/Shanghai', label: 'Asia/Shanghai（东八区）' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo（东九区）' },
+  { value: 'Europe/London', label: 'Europe/London' },
+  { value: 'America/New_York', label: 'America/New_York' },
+];
+
+const TIMEZONE_STORAGE_KEY = 'airetest.tools.timestamp.timezone';
 
 export default function TimestampPage() {
   const [now, setNow] = useState(() => new Date());
@@ -30,31 +47,44 @@ export default function TimestampPage() {
   const [timestampInput, setTimestampInput] = useState(() =>
     String(Math.floor(Date.now() / 1000))
   );
+  const [timezone, setTimezone] = usePersistentState<string>(
+    TIMEZONE_STORAGE_KEY,
+    LOCAL_TIMEZONE
+  );
+  const { copy } = useCopyToClipboard();
+
+  // 选中的 IANA 时区；'local' 时为 undefined，全部函数走默认本地行为
+  const timeZone = timezone === LOCAL_TIMEZONE ? undefined : timezone;
+  const timezoneLabel =
+    timezoneOptions.find((option) => option.value === timezone)?.label ?? timezone;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const dateResult = useMemo(() => dateToTimestamp(dateInput), [dateInput]);
+  const dateResult = useMemo(
+    () => dateToTimestamp(dateInput, timeZone),
+    [dateInput, timeZone]
+  );
   const timestampResult = useMemo(
-    () => timestampToDate(timestampInput),
-    [timestampInput]
+    () => timestampToDate(timestampInput, timeZone),
+    [timestampInput, timeZone]
   );
 
-  async function copy(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      message.success(`${label}已复制`);
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
+  function copyValue(value: string, label: string) {
+    void copy(value, {
+      successMessage: `${label}已复制`,
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
   }
 
   const currentDescriptions = (
     <Descriptions column={{ xs: 1, sm: 2, lg: 4 }} size="small">
-      <Descriptions.Item label="本地时间">{formatLocalDate(now)}</Descriptions.Item>
-      <Descriptions.Item label="ISO 时间">{now.toISOString()}</Descriptions.Item>
+      <Descriptions.Item label={timezone === LOCAL_TIMEZONE ? '本地时间' : `${timezoneLabel} 时间`}>
+        {formatLocalDate(now, timeZone)}
+      </Descriptions.Item>
+      <Descriptions.Item label="ISO 时间（UTC）">{now.toISOString()}</Descriptions.Item>
       <Descriptions.Item label="秒级时间戳">
         <Space>
           <span data-testid="current-seconds">{Math.floor(now.getTime() / 1000)}</span>
@@ -62,7 +92,7 @@ export default function TimestampPage() {
             type="link"
             size="small"
             icon={<CopyOutlined />}
-            onClick={() => copy(String(Math.floor(now.getTime() / 1000)), '秒级时间戳')}
+            onClick={() => copyValue(String(Math.floor(now.getTime() / 1000)), '秒级时间戳')}
           />
         </Space>
       </Descriptions.Item>
@@ -73,7 +103,7 @@ export default function TimestampPage() {
             type="link"
             size="small"
             icon={<CopyOutlined />}
-            onClick={() => copy(String(now.getTime()), '毫秒级时间戳')}
+            onClick={() => copyValue(String(now.getTime()), '毫秒级时间戳')}
           />
         </Space>
       </Descriptions.Item>
@@ -84,19 +114,30 @@ export default function TimestampPage() {
     <ToolPage
       icon={<FieldTimeOutlined />}
       title="时间处理"
-      description="日期与秒级、毫秒级时间戳互转，同时查看当前时间。"
+      description="日期与秒级、毫秒级时间戳互转，同时查看当前时间，支持按指定时区解析与展示。"
       extra={
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => {
-            const current = new Date();
-            setNow(current);
-            setDateInput(formatLocalDate(current));
-            setTimestampInput(String(Math.floor(current.getTime() / 1000)));
-          }}
-        >
-          使用当前时间
-        </Button>
+        <Space wrap>
+          <Select
+            style={{ width: 230 }}
+            value={timezone}
+            options={timezoneOptions}
+            onChange={(value) => setTimezone(value)}
+            suffixIcon={<GlobalOutlined />}
+            data-testid="timestamp-timezone"
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              const current = new Date();
+              setNow(current);
+              // 按当前选中时区生成可回读的日期串，保证「使用当前时间」在任意时区下都能往返
+              setDateInput(formatLocalDate(current, timeZone));
+              setTimestampInput(String(Math.floor(current.getTime() / 1000)));
+            }}
+          >
+            使用当前时间
+          </Button>
+        </Space>
       }
     >
       <div className="tools-page-body">
@@ -106,6 +147,7 @@ export default function TimestampPage() {
             <Space>
               <ClockCircleOutlined />
               <span>当前时间</span>
+              <span className="tools-timezone-hint">{timezoneLabel}</span>
             </Space>
           }
         >
@@ -126,6 +168,11 @@ export default function TimestampPage() {
                       placeholder="2026-10-08 13:47:59 或 2026-10-08T13:47:59+08:00"
                       data-testid="date-input"
                     />
+                    <Alert
+                      type="info"
+                      showIcon
+                      title={`不带时区的输入按「${timezoneLabel}」解析；带 Z / ±hh:mm 的 ISO 字符串按其自带偏移解析。`}
+                    />
                     {!dateResult.valid ? (
                       <Alert type="error" showIcon title={dateResult.error} />
                     ) : (
@@ -138,7 +185,7 @@ export default function TimestampPage() {
                                 type="link"
                                 size="small"
                                 icon={<CopyOutlined />}
-                                onClick={() => copy(String(dateResult.seconds), '秒级时间戳')}
+                                onClick={() => copyValue(String(dateResult.seconds), '秒级时间戳')}
                               />
                             </Space>
                           </Card>
@@ -176,7 +223,7 @@ export default function TimestampPage() {
                     ) : (
                       <Row gutter={[16, 16]}>
                         <Col xs={24} md={12}>
-                          <Card size="small" title="本地时间">
+                          <Card size="small" title={timezone === LOCAL_TIMEZONE ? '本地时间' : `${timezoneLabel} 时间`}>
                             <Space>
                               <span data-testid="converted-local">
                                 {timestampResult.local}
@@ -185,13 +232,13 @@ export default function TimestampPage() {
                                 type="link"
                                 size="small"
                                 icon={<CopyOutlined />}
-                                onClick={() => copy(timestampResult.local, '本地时间')}
+                                onClick={() => copyValue(timestampResult.local, '时间字符串')}
                               />
                             </Space>
                           </Card>
                         </Col>
                         <Col xs={24} md={12}>
-                          <Card size="small" title="ISO 时间">
+                          <Card size="small" title="ISO 时间（UTC）">
                             {timestampResult.iso}
                           </Card>
                         </Col>

@@ -3,10 +3,9 @@ import {
   Alert,
   Button,
   Card,
-  Input,
   Radio,
   Space,
-  message,
+  Tooltip,
 } from 'antd';
 import {
   BgColorsOutlined,
@@ -15,13 +14,15 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import InputOutputPanel from '../../components/tools/InputOutputPanel';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { MOD_ENTER_HINT, useModEnter } from '../../hooks/useHotkey';
+import { downloadTextFile } from '../../utils/download';
 import {
   transformText,
   type EncodingDirection,
   type EncodingKind,
 } from '../../utils/tools/encodingTool';
-
-const { TextArea } = Input;
 
 const kindOptions: Array<{ value: EncodingKind; label: string }> = [
   { value: 'base64', label: 'Base64' },
@@ -37,6 +38,7 @@ export default function EncodingPage() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const { copy } = useCopyToClipboard();
 
   function handleTransform() {
     try {
@@ -50,25 +52,21 @@ export default function EncodingPage() {
     }
   }
 
-  async function copyOutput() {
-    try {
-      await navigator.clipboard.writeText(output);
-      message.success('转换结果已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  // 主操作快捷键：Ctrl/Cmd + Enter 触发编码/解码
+  useModEnter(handleTransform, input !== '');
+
+  const copyOutput = () =>
+    copy(output, {
+      successMessage: '转换结果已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
 
   function downloadOutput() {
-    const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `${kind}-${direction}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
+    downloadTextFile(
+      `${kind}-${direction}.txt`,
+      output,
+      'text/plain;charset=utf-8'
+    );
   }
 
   return (
@@ -90,14 +88,16 @@ export default function EncodingPage() {
           >
             反向转换
           </Button>
-          <Button
-            type="primary"
-            onClick={handleTransform}
-            disabled={input === ''}
-            data-testid="encoding-transform"
-          >
-            {direction === 'encode' ? '编码' : '解码'}
-          </Button>
+          <Tooltip title={`快捷键：${MOD_ENTER_HINT}`}>
+            <Button
+              type="primary"
+              onClick={handleTransform}
+              disabled={input === ''}
+              data-testid="encoding-transform"
+            >
+              {direction === 'encode' ? '编码' : '解码'}
+            </Button>
+          </Tooltip>
         </Space>
       }
     >
@@ -131,51 +131,37 @@ export default function EncodingPage() {
 
         {error ? <Alert type="error" showIcon title="转换失败" description={error} /> : null}
 
-        <div className="tools-two-column">
-          <Card size="small" title="输入">
-            <TextArea
-              className="tools-textarea"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              rows={12}
-              placeholder="输入需要转换的内容"
-              data-testid="encoding-input"
-            />
-          </Card>
-          <Card
-            size="small"
-            title="输出"
-            extra={
-              <Space>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={copyOutput}
-                  disabled={!output}
-                >
-                  复制
-                </Button>
-                <Button
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={downloadOutput}
-                  disabled={!output}
-                >
-                  导出
-                </Button>
-              </Space>
-            }
-          >
-            <TextArea
-              className="tools-textarea"
-              value={output}
-              readOnly
-              rows={12}
-              placeholder="转换结果显示在这里"
-              data-testid="encoding-output"
-            />
-          </Card>
-        </div>
+        <InputOutputPanel
+          inputValue={input}
+          onInputChange={setInput}
+          outputValue={output}
+          inputRows={12}
+          outputRows={12}
+          inputPlaceholder="输入需要转换的内容"
+          outputPlaceholder="转换结果显示在这里"
+          inputTestId="encoding-input"
+          outputTestId="encoding-output"
+          outputActions={
+            <Space>
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={copyOutput}
+                disabled={!output}
+              >
+                复制
+              </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={downloadOutput}
+                disabled={!output}
+              >
+                导出
+              </Button>
+            </Space>
+          }
+        />
       </div>
     </ToolPage>
   );

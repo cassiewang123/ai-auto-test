@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Input, Select, Space, Tag, message } from 'antd';
+import { useState } from 'react';
+import { Alert, Button, Card, Select, Space, Tag, Tooltip } from 'antd';
 import {
   ClearOutlined,
   CompressOutlined,
@@ -10,6 +10,11 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import InputOutputPanel from '../../components/tools/InputOutputPanel';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { MOD_ENTER_HINT, useModEnter } from '../../hooks/useHotkey';
+import { usePersistentState } from '../../hooks/usePersistentState';
+import { downloadTextFile } from '../../utils/download';
 import {
   compactSql,
   defaultSqlFormatOptions,
@@ -17,8 +22,6 @@ import {
   sqlDialectOptions,
   type SqlFormatOptions,
 } from '../../utils/tools/sqlFormatter';
-
-const { TextArea } = Input;
 
 const SAMPLE_SQL = `select u.id,u.name,count(o.id) as order_count from users u left join orders o on o.user_id=u.id where u.status='active' and (o.amount>100 or o.vip=1) group by u.id,u.name having count(o.id)>2 order by order_count desc;`;
 
@@ -29,41 +32,34 @@ interface StoredState {
   options: SqlFormatOptions;
 }
 
-function loadStored(): StoredState {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { input: '', options: defaultSqlFormatOptions };
-    const parsed = JSON.parse(raw) as Partial<StoredState>;
-    return {
-      input: typeof parsed.input === 'string' ? parsed.input : '',
-      options: { ...defaultSqlFormatOptions, ...(parsed.options ?? {}) },
-    };
-  } catch {
-    return { input: '', options: defaultSqlFormatOptions };
-  }
-}
+const DEFAULT_STORED_STATE: StoredState = {
+  input: '',
+  options: defaultSqlFormatOptions,
+};
 
 function lineCount(text: string): number {
   return text === '' ? 0 : text.split('\n').length;
 }
 
 export default function SqlFormatterPage() {
-  const stored = useMemo(loadStored, []);
-  const [input, setInput] = useState(stored.input);
-  const [options, setOptions] = useState<SqlFormatOptions>(stored.options);
+  const [stored, setStored] = usePersistentState<StoredState>(
+    STORAGE_KEY,
+    DEFAULT_STORED_STATE
+  );
   const [output, setOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const { copy } = useCopyToClipboard();
+  const input = stored.input;
+  const options = stored.options;
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ input, options }));
-    } catch {
-      // 本地存储不可用时忽略
-    }
-  }, [input, options]);
+  const setInput = (value: string) =>
+    setStored((previous) => ({ ...previous, input: value }));
 
   const patchOptions = (patch: Partial<SqlFormatOptions>) =>
-    setOptions((prev) => ({ ...prev, ...patch }));
+    setStored((previous) => ({
+      ...previous,
+      options: { ...previous.options, ...patch },
+    }));
 
   function handleFormat() {
     try {
@@ -85,25 +81,17 @@ export default function SqlFormatterPage() {
     }
   }
 
-  async function copyOutput() {
-    try {
-      await navigator.clipboard.writeText(output);
-      message.success('已复制 SQL 结果');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  // 主操作快捷键：Ctrl/Cmd + Enter 触发格式化
+  useModEnter(handleFormat, input.trim() !== '');
+
+  const copyOutput = () =>
+    copy(output, {
+      successMessage: '已复制 SQL 结果',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
 
   function downloadOutput() {
-    const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'formatted.sql';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadTextFile('formatted.sql', output, 'text/plain;charset=utf-8');
   }
 
   const dialect = sqlDialectOptions.find((item) => item.value === options.language);
@@ -141,15 +129,17 @@ export default function SqlFormatterPage() {
           >
             压缩
           </Button>
-          <Button
-            type="primary"
-            icon={<SwapOutlined />}
-            onClick={handleFormat}
-            disabled={input.trim() === ''}
-            data-testid="sql-format"
-          >
-            格式化
-          </Button>
+          <Tooltip title={`快捷键：${MOD_ENTER_HINT}`}>
+            <Button
+              type="primary"
+              icon={<SwapOutlined />}
+              onClick={handleFormat}
+              disabled={input.trim() === ''}
+              data-testid="sql-format"
+            >
+              格式化
+            </Button>
+          </Tooltip>
         </Space>
       }
     >
@@ -242,58 +232,47 @@ export default function SqlFormatterPage() {
           />
         ) : null}
 
-        <div className="tools-two-column">
-          <Card size="small" title="输入">
-            <TextArea
-              className="tools-textarea"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              rows={20}
-              placeholder="粘贴需要格式化的 SQL 语句"
-              data-testid="sql-input"
-            />
-          </Card>
-          <Card
-            size="small"
-            title="格式化结果"
-            extra={
-              <Space>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={copyOutput}
-                  disabled={!output}
-                  data-testid="sql-copy"
-                >
-                  复制
-                </Button>
-                <Button
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={downloadOutput}
-                  disabled={!output}
-                >
-                  导出
-                </Button>
-              </Space>
-            }
-          >
-            <TextArea
-              className="tools-textarea"
-              value={output}
-              readOnly
-              rows={20}
-              placeholder="点击“格式化”后结果显示在这里"
-              data-testid="sql-output"
-            />
-            {output ? (
+        <InputOutputPanel
+          inputValue={input}
+          onInputChange={setInput}
+          outputValue={output}
+          inputRows={20}
+          outputRows={20}
+          inputPlaceholder="粘贴需要格式化的 SQL 语句"
+          outputPlaceholder="点击“格式化”后结果显示在这里"
+          outputTitle="格式化结果"
+          inputTestId="sql-input"
+          outputTestId="sql-output"
+          outputActions={
+            <Space>
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={copyOutput}
+                disabled={!output}
+                data-testid="sql-copy"
+              >
+                复制
+              </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={downloadOutput}
+                disabled={!output}
+              >
+                导出
+              </Button>
+            </Space>
+          }
+          outputFooter={
+            output ? (
               <Space wrap size={16} style={{ marginTop: 12, color: '#6b7280', fontSize: 13 }}>
                 <span>{lineCount(output)} 行</span>
                 <span>{output.length} 字符</span>
               </Space>
-            ) : null}
-          </Card>
-        </div>
+            ) : null
+          }
+        />
       </div>
     </ToolPage>
   );

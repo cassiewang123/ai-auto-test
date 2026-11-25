@@ -65,3 +65,44 @@ export function replaceRegex(
   const flagsWithoutG = flags.replace(/g/g, '');
   return text.replace(new RegExp(pattern, `${flagsWithoutG}g`), replacement);
 }
+
+/** 高亮预览片段：matched 为 true 的片段即命中部分。 */
+export interface RegexHighlightSegment {
+  text: string;
+  matched: boolean;
+}
+
+/**
+ * 依据 evaluateRegex 的匹配结果把原文切分为「命中 / 未命中」片段，
+ * 供正则测试页渲染高亮预览；片段顺序拼接后与原文完全一致。
+ *
+ * 对越界 / 零长度的历史匹配做了防御，保证任何输入都不抛错。
+ */
+export function buildHighlightSegments(
+  text: string,
+  matches: RegexMatch[]
+): RegexHighlightSegment[] {
+  const segments: RegexHighlightSegment[] = [];
+  let cursor = 0;
+
+  for (const match of matches) {
+    const start = Math.max(0, Math.min(match.index, text.length));
+    const end = Math.max(
+      start,
+      Math.min(match.index + match.value.length, text.length)
+    );
+    if (start > cursor) {
+      segments.push({ text: text.slice(cursor, start), matched: false });
+    }
+    if (end > start) {
+      segments.push({ text: text.slice(start, end), matched: true });
+    }
+    cursor = Math.max(cursor, end);
+  }
+
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor), matched: false });
+  }
+
+  return segments;
+}

@@ -3,13 +3,12 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
-  Input,
   Row,
   Space,
   Statistic,
   Tag,
-  message,
 } from 'antd';
 import {
   ClearOutlined,
@@ -18,16 +17,69 @@ import {
   SwapOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
-import { diffTextLines } from '../../utils/tools/textDiff';
-
-const { TextArea } = Input;
+import InputOutputPanel from '../../components/tools/InputOutputPanel';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { downloadTextFile } from '../../utils/download';
+import {
+  diffCharsInline,
+  diffTextLines,
+  type InlineCharDiff,
+} from '../../utils/tools/textDiff';
 
 export default function TextComparePage() {
   const [leftText, setLeftText] = useState('');
   const [rightText, setRightText] = useState('');
+  // 对比选项：实时生效，只改变比较输入，不改变输出渲染结构
+  const [ignoreTrailingWhitespace, setIgnoreTrailingWhitespace] = useState(false);
+  const [ignoreBlankLines, setIgnoreBlankLines] = useState(false);
+  const [ignoreCase, setIgnoreCase] = useState(false);
+  const { copy } = useCopyToClipboard();
 
-  const result = useMemo(() => diffTextLines(leftText, rightText), [leftText, rightText]);
+  const result = useMemo(
+    () =>
+      diffTextLines(leftText, rightText, {
+        ignoreTrailingWhitespace,
+        ignoreBlankLines,
+        ignoreCase,
+      }),
+    [leftText, rightText, ignoreTrailingWhitespace, ignoreBlankLines, ignoreCase]
+  );
   const hasInput = leftText !== '' || rightText !== '';
+
+  // 行内字符差异：把「一删一增」的成对修改行做字符级高亮（与 GitHub diff 的行内高亮一致）
+  const inlineDiffs = useMemo(() => {
+    const map = new Map<number, InlineCharDiff>();
+    const lines = result.lines;
+    let index = 0;
+    while (index < lines.length) {
+      if (lines[index].kind === 'same') {
+        index += 1;
+        continue;
+      }
+      let blockEnd = index;
+      while (blockEnd < lines.length && lines[blockEnd].kind !== 'same') {
+        blockEnd += 1;
+      }
+      const removedIndexes: number[] = [];
+      const addedIndexes: number[] = [];
+      for (let cursor = index; cursor < blockEnd; cursor += 1) {
+        if (lines[cursor].kind === 'removed') removedIndexes.push(cursor);
+        else addedIndexes.push(cursor);
+      }
+      const pairCount = Math.min(removedIndexes.length, addedIndexes.length);
+      for (let pair = 0; pair < pairCount; pair += 1) {
+        const inline = diffCharsInline(
+          lines[removedIndexes[pair]].text,
+          lines[addedIndexes[pair]].text,
+          { ignoreCase }
+        );
+        map.set(removedIndexes[pair], inline);
+        map.set(addedIndexes[pair], inline);
+      }
+      index = blockEnd;
+    }
+    return map;
+  }, [result, ignoreCase]);
 
   function clearAll() {
     setLeftText('');
@@ -48,25 +100,35 @@ export default function TextComparePage() {
       .join('\n');
   }
 
-  async function copyReport() {
-    try {
-      await navigator.clipboard.writeText(buildReport());
-      message.success('对比结果已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  const copyReport = () =>
+    copy(buildReport(), {
+      successMessage: '对比结果已复制',
+      errorMessage: '复制失败，请检查浏览器剪贴板权限',
+    });
 
   function downloadReport() {
-    const blob = new Blob([buildReport()], { type: 'text/plain;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `text-compare-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
+    downloadTextFile(
+      `text-compare-${new Date().toISOString().slice(0, 10)}.txt`,
+      buildReport(),
+      'text/plain;charset=utf-8'
+    );
+  }
+
+  function renderLineText(lineIndex: number, lineText: string) {
+    const inline = inlineDiffs.get(lineIndex);
+    if (!inline) return lineText || ' ';
+    const side = result.lines[lineIndex].kind === 'removed' ? inline.left : inline.right;
+    const joined = side.map((segment) => segment.text).join('');
+    if (joined === '') return ' ';
+    return side.map((segment, segmentIndex) =>
+      segment.changed ? (
+        <span key={`changed-${segmentIndex}`} className="tools-diff-char is-changed">
+          {segment.text}
+        </span>
+      ) : (
+        <span key={`plain-${segmentIndex}`}>{segment.text}</span>
+      )
+    );
   }
 
   return (
@@ -100,28 +162,47 @@ export default function TextComparePage() {
       }
     >
       <div className="tools-page-body">
-        <div className="tools-two-column">
-          <Card size="small" title="原始文本">
-            <TextArea
-              className="tools-textarea"
-              value={leftText}
-              onChange={(event) => setLeftText(event.target.value)}
-              rows={12}
-              placeholder="粘贴原始文本"
-              data-testid="text-compare-left"
-            />
-          </Card>
-          <Card size="small" title="目标文本">
-            <TextArea
-              className="tools-textarea"
-              value={rightText}
-              onChange={(event) => setRightText(event.target.value)}
-              rows={12}
-              placeholder="粘贴需要对比的文本"
-              data-testid="text-compare-right"
-            />
-          </Card>
-        </div>
+        <InputOutputPanel
+          inputTitle="原始文本"
+          outputTitle="目标文本"
+          inputValue={leftText}
+          onInputChange={setLeftText}
+          outputValue={rightText}
+          onOutputChange={setRightText}
+          outputReadOnly={false}
+          inputRows={12}
+          outputRows={12}
+          inputPlaceholder="粘贴原始文本"
+          outputPlaceholder="粘贴需要对比的文本"
+          inputTestId="text-compare-left"
+          outputTestId="text-compare-right"
+        />
+
+        <Card size="small" title="对比选项">
+          <Space wrap size={24}>
+            <Checkbox
+              checked={ignoreTrailingWhitespace}
+              onChange={(event) => setIgnoreTrailingWhitespace(event.target.checked)}
+              data-testid="text-compare-option-trailing"
+            >
+              忽略行尾空白
+            </Checkbox>
+            <Checkbox
+              checked={ignoreBlankLines}
+              onChange={(event) => setIgnoreBlankLines(event.target.checked)}
+              data-testid="text-compare-option-blank"
+            >
+              忽略空行
+            </Checkbox>
+            <Checkbox
+              checked={ignoreCase}
+              onChange={(event) => setIgnoreCase(event.target.checked)}
+              data-testid="text-compare-option-case"
+            >
+              忽略大小写
+            </Checkbox>
+          </Space>
+        </Card>
 
         <Card size="small" title="对比摘要">
           <Row gutter={[16, 16]}>
@@ -163,7 +244,7 @@ export default function TextComparePage() {
                   <span className="tools-diff-sign">
                     {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}
                   </span>
-                  <span className="tools-diff-text">{line.text || ' '}</span>
+                  <span className="tools-diff-text">{renderLineText(index, line.text)}</span>
                 </div>
               ))}
             </div>

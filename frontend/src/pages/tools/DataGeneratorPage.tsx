@@ -6,7 +6,7 @@ import {
   Select,
   Space,
   Table,
-  message,
+  Tooltip,
 } from 'antd';
 import {
   CopyOutlined,
@@ -15,6 +15,9 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import ToolPage from '../../components/ToolPage';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { MOD_ENTER_HINT, useModEnter } from '../../hooks/useHotkey';
+import { downloadTextFile } from '../../utils/download';
 import {
   generateData,
   type DataKind,
@@ -37,30 +40,23 @@ export default function DataGeneratorPage() {
   const [kind, setKind] = useState<DataKind>('name');
   const [count, setCount] = useState(10);
   const [rows, setRows] = useState<string[]>([]);
+  const { copy } = useCopyToClipboard();
 
   function handleGenerate() {
     setRows(generateData(kind, count));
   }
 
-  async function copyAll() {
-    try {
-      await navigator.clipboard.writeText(rows.join('\n'));
-      message.success('数据已复制');
-    } catch {
-      message.error('复制失败，请检查浏览器剪贴板权限');
-    }
-  }
+  // 主操作快捷键：Ctrl/Cmd + Enter 触发生成
+  useModEnter(handleGenerate);
+
+  const copyAll = () => copy(rows.join('\n'), { successMessage: '数据已复制' });
 
   function downloadAll() {
-    const blob = new Blob([rows.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `${kind}-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
+    downloadTextFile(
+      `${kind}-${new Date().toISOString().slice(0, 10)}.txt`,
+      rows.join('\n'),
+      'text/plain;charset=utf-8'
+    );
   }
 
   return (
@@ -104,14 +100,16 @@ export default function DataGeneratorPage() {
               addonBefore="数量"
               onChange={(value) => setCount(value ?? 1)}
             />
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              onClick={handleGenerate}
-              data-testid="data-generate"
-            >
-              生成数据
-            </Button>
+            <Tooltip title={`快捷键：${MOD_ENTER_HINT}`}>
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                onClick={handleGenerate}
+                data-testid="data-generate"
+              >
+                生成数据
+              </Button>
+            </Tooltip>
           </Space>
         </Card>
 
@@ -135,9 +133,8 @@ export default function DataGeneratorPage() {
                   <Button
                     type="link"
                     size="small"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(record.value);
-                      message.success('已复制');
+                    onClick={() => {
+                      void copy(record.value, { successMessage: '已复制' });
                     }}
                   >
                     复制
