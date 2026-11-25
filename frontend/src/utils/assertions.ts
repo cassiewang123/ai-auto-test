@@ -12,6 +12,8 @@ export const ASSERTION_TYPES: AssertionTypeMeta[] = [
   { value: 'header', label: '响应头', needsExpression: true },
   { value: 'response_time', label: '响应耗时(秒)', needsExpression: false },
   { value: 'json_schema', label: 'JSON Schema', needsExpression: false },
+  // 业务状态：检查 flag/success/errorCode/code 等业务标志，识别 HTTP 200 但业务失败
+  { value: 'business_status', label: '业务状态', needsExpression: false },
 ];
 
 export const ASSERTION_OPERATORS = [
@@ -49,6 +51,9 @@ export function assertionDefaults(type: string) {
         expression: '',
         expected_text: '{\n  "type": "object",\n  "required": ["code"]\n}',
       };
+    case 'business_status':
+      // 期望业务状态为「成功」；负向用例可改成 failed
+      return { operator: 'eq', expression: '', expected_text: 'passed' };
     default:
       return { operator: 'eq', expression: '', expected_text: '200' };
   }

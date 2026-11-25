@@ -68,6 +68,7 @@ import ExecutionResultView from '../components/ExecutionResultView';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { jsonFormValidator, parseJsonText } from '../utils/json';
 import { matchesGroupPath, splitGroupPath } from '../utils/groupPath';
+import { buildGroupSelectOptions } from '../utils/apiModules';
 import {
   ASSERTION_OPERATORS,
   ASSERTION_TYPES,
@@ -242,6 +243,8 @@ export default function ApiListPage() {
   // 行选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
+  // 批量执行弹窗里「按分组选择」的当前分组
+  const [batchGroupPath, setBatchGroupPath] = useState<string | undefined>();
   const [batchExecuting, setBatchExecuting] = useState(false);
   const [batchResults, setBatchResults] = useState<{
     visible: boolean;
@@ -721,6 +724,35 @@ export default function ApiListPage() {
     filtered,
     apiGroups.map((item: any) => item.path)
   );
+
+  // 批量执行弹窗：按分组选择接口（父级分组包含其下所有子分组）
+  const batchGroupOptions = useMemo(() => {
+    const options = buildGroupSelectOptions([
+      ...filtered.map((item) => item.group_path || ''),
+      ...apiGroups.map((item: any) => item.path),
+    ]);
+    return options.map((option) => ({
+      value: option.value,
+      label: `${option.display}（${
+        filtered.filter((item) => matchesGroupPath(item.group_path, option.value))
+          .length
+      }）`,
+    }));
+  }, [filtered, apiGroups]);
+
+  function selectCasesByGroup(groupPath: string) {
+    const ids = filtered
+      .filter((item) => matchesGroupPath(item.group_path, groupPath))
+      .map((item) => item.id);
+    setSelectedRowKeys(ids);
+    setBatchGroupPath(groupPath);
+    const label = splitGroupPath(groupPath).leaf || '未分组';
+    if (ids.length === 0) {
+      message.warning(`分组「${label}」下没有接口`);
+      return;
+    }
+    message.success(`已选中分组「${label}」下 ${ids.length} 个接口（含子分组）`);
+  }
 
   // 记录工作区实际宽度，用于限制目录最大宽度，避免把右侧详情挤没
   useEffect(() => {
@@ -2377,7 +2409,7 @@ export default function ApiListPage() {
         title="批量执行接口"
         open={batchModalOpen}
         onCancel={() => setBatchModalOpen(false)}
-        width={760}
+        width={820}
         destroyOnHidden
         footer={[
           <Button key="cancel" onClick={() => setBatchModalOpen(false)}>
@@ -2400,6 +2432,7 @@ export default function ApiListPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
             gap: 12,
             marginBottom: 12,
           }}
@@ -2407,14 +2440,40 @@ export default function ApiListPage() {
           <span style={{ color: '#64748b', fontSize: 13 }}>
             当前筛选 {filtered.length} 个接口，已选 {selectedRowKeys.length} 个
           </span>
-          <Space size={8}>
+          <Space size={8} wrap>
+            <Select
+              size="small"
+              showSearch
+              allowClear
+              placeholder="按分组选择（含子分组）"
+              style={{ width: 230 }}
+              value={batchGroupPath}
+              optionFilterProp="label"
+              options={batchGroupOptions}
+              onChange={(value) => {
+                if (!value) {
+                  setBatchGroupPath(undefined);
+                  return;
+                }
+                selectCasesByGroup(value);
+              }}
+            />
             <Button
               size="small"
-              onClick={() => setSelectedRowKeys(filtered.map((item) => item.id))}
+              onClick={() => {
+                setSelectedRowKeys(filtered.map((item) => item.id));
+                setBatchGroupPath(undefined);
+              }}
             >
               全选当前筛选
             </Button>
-            <Button size="small" onClick={() => setSelectedRowKeys([])}>
+            <Button
+              size="small"
+              onClick={() => {
+                setSelectedRowKeys([]);
+                setBatchGroupPath(undefined);
+              }}
+            >
               清空
             </Button>
           </Space>
@@ -2427,7 +2486,10 @@ export default function ApiListPage() {
           scroll={{ y: 320 }}
           rowSelection={{
             selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as string[]),
+            onChange: (keys) => {
+              setSelectedRowKeys(keys as string[]);
+              setBatchGroupPath(undefined);
+            },
           }}
           columns={[
             { title: '方法', dataIndex: 'method', width: 76 },
@@ -2437,7 +2499,16 @@ export default function ApiListPage() {
               dataIndex: 'group_path',
               width: 220,
               ellipsis: true,
-              render: (value: string) => (value ? splitGroupPath(value).leaf : '-'),
+              render: (value: string) =>
+                value ? (
+                  <Tooltip title="点击选中该分组下全部接口（含子分组）">
+                    <a onClick={() => selectCasesByGroup(value)}>
+                      {splitGroupPath(value).leaf}
+                    </a>
+                  </Tooltip>
+                ) : (
+                  '-'
+                ),
             },
           ]}
         />
