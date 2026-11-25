@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  Alert,
   Card,
   Input,
   Button,
@@ -17,8 +16,9 @@ import {
   Empty,
   Modal,
   Form,
-  Segmented,
   Divider,
+  Tooltip,
+  AutoComplete,
 } from 'antd';
 import {
   ThunderboltOutlined,
@@ -31,15 +31,27 @@ import {
   SaveOutlined,
   LockOutlined,
   CodeOutlined,
+  CopyOutlined,
+  ImportOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import { executionApi, testCaseApi, projectApi, applyAuth, type AuthConfig, type AuthType } from '../services/api';
-import type { ExecutionResultData, PreRequest } from '../services/api';
+import type { CallHistoryRecord, ExecutionResultData, PreRequest } from '../services/api';
 import type { Project } from '../types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ConsoleWindow, { type ConsoleHandle } from '../components/ConsoleWindow';
-import JsonEditor from '../components/JsonEditor';
+import JsonKeyValueEditor from '../components/quick-test/JsonKeyValueEditor';
+import HistoryPanel from '../components/quick-test/HistoryPanel';
+import CurlImportModal from '../components/quick-test/CurlImportModal';
+import RequestBodyEditor, { type BodyType } from '../components/quick-test/RequestBodyEditor';
+import ResponseViewer from '../components/quick-test/ResponseViewer';
+import VariablesPopover from '../components/quick-test/VariablesPopover';
+import { useQuickTestVariables } from '../components/quick-test/useQuickTestVariables';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { parseJsonText } from '../utils/json';
+import { toCurl, parseUrlEncodedBody } from '../utils/tools/curl';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { buildVariableSuggestions } from '../utils/variableSuggestions';
 import '../styles/quick-test-workspace.css';
 
 const { TextArea } = Input;
@@ -57,61 +69,61 @@ const statusColor: Record<string, string> = {
   passed: 'green', failed: 'red', error: 'orange',
 };
 
-interface KeyValueRow {
-  id: number;
+/** 断言模板：一键插入一条常用断言（插入后仍可编辑，不覆盖已有行） */
+interface AssertionTemplate {
   key: string;
-  value: string;
+  label: string;
+  hint: string;
+  assertion: {
+    assertion_type: string;
+    expression?: string;
+    operator?: string;
+    expected?: string;
+  };
 }
 
-let keyValueRowId = 0;
-
-function createKeyValueRow(key = '', value = ''): KeyValueRow {
-  keyValueRowId += 1;
-  return { id: keyValueRowId, key, value };
-}
-
-function parseDisplayValue(value: unknown) {
-  if (typeof value === 'string') return value;
-  if (value === null || value === undefined) return '';
-  return JSON.stringify(value) ?? String(value);
-}
-
-function parseInputValue(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
-}
-
-function jsonToRows(value: string): { rows: KeyValueRow[]; valid: boolean } {
-  try {
-    const parsed = value.trim() ? JSON.parse(value) : {};
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-      return { rows: [], valid: false };
-    }
-    return {
-      rows: Object.entries(parsed).map(([key, item]) => createKeyValueRow(key, parseDisplayValue(item))),
-      valid: true,
-    };
-  } catch {
-    return { rows: [], valid: false };
-  }
-}
-
-function rowsToJson(rows: KeyValueRow[], valueMode: 'json' | 'string') {
-  const value = rows.reduce<Record<string, unknown>>((result, row) => {
-    const key = row.key.trim();
-    if (key) {
-      result[key] =
-        valueMode === 'string' ? row.value : parseInputValue(row.value);
-    }
-    return result;
-  }, {});
-  return JSON.stringify(value, null, 2);
-}
+const ASSERTION_TEMPLATES: AssertionTemplate[] = [
+  {
+    key: 'status-200',
+    label: '状态码 = 200',
+    hint: '校验 HTTP 状态码等于 200',
+    assertion: { assertion_type: 'status_code', operator: 'eq', expected: '200' },
+  },
+  {
+    key: 'response-time',
+    label: '响应时间 < 1000ms',
+    hint: '校验响应耗时小于 1000 毫秒',
+    assertion: { assertion_type: 'response_time', operator: 'lt', expected: '1000' },
+  },
+  {
+    key: 'body-contains',
+    label: '响应包含指定文本',
+    hint: '在响应体根节点搜索文本，期望值待填写',
+    assertion: { assertion_type: 'json_path', expression: '$.', operator: 'contains', expected: '' },
+  },
+  {
+    key: 'biz-code',
+    label: '业务码 $.code = 0',
+    hint: '校验响应 JSON 的 code 字段等于 0',
+    assertion: { assertion_type: 'json_path', expression: '$.code', operator: 'eq', expected: '0' },
+  },
+  {
+    key: 'header-exists',
+    label: '响应头存在',
+    hint: '校验指定响应头（如 Content-Type）包含某文本，期望值待填写',
+    assertion: { assertion_type: 'header', expression: 'Content-Type', operator: 'contains', expected: '' },
+  },
+  {
+    key: 'json-schema',
+    label: 'JSON Schema 校验',
+    hint: '用 JSON Schema 校验响应体结构（预填对象骨架，operator 不参与校验）',
+    assertion: {
+      assertion_type: 'json_schema',
+      operator: 'eq',
+      expected: '{\n  "type": "object"\n}',
+    },
+  },
+];
 
 function parseJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed = value.trim() ? JSON.parse(value) : {};
@@ -135,133 +147,18 @@ function parseHeadersJson(value: string): Record<string, string> {
   );
 }
 
-interface JsonKeyValueEditorProps {
-  value: string;
-  onChange: (value: string) => void;
-  keyPlaceholder: string;
-  valuePlaceholder: string;
-  rawPlaceholder: string;
-  valueMode?: 'json' | 'string';
+/** 大小写不敏感地判断是否已存在某个 header */
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const target = name.toLowerCase();
+  return Object.keys(headers).some((key) => key.toLowerCase() === target);
 }
 
-function JsonKeyValueEditor({
-  value,
-  onChange,
-  keyPlaceholder,
-  valuePlaceholder,
-  rawPlaceholder,
-  valueMode = 'json',
-}: JsonKeyValueEditorProps) {
-  const initial = jsonToRows(value);
-  const [mode, setMode] = useState<'table' | 'raw'>('table');
-  const [rows, setRows] = useState<KeyValueRow[]>(initial.rows);
-  const [validJson, setValidJson] = useState(initial.valid);
-  const lastEmittedValue = useRef(value);
-
-  useEffect(() => {
-    if (value === lastEmittedValue.current) return;
-    const parsed = jsonToRows(value);
-    setRows(parsed.rows);
-    setValidJson(parsed.valid);
-    lastEmittedValue.current = value;
-  }, [value]);
-
-  function updateRows(nextRows: KeyValueRow[]) {
-    const nextValue = rowsToJson(nextRows, valueMode);
-    setRows(nextRows);
-    setValidJson(true);
-    lastEmittedValue.current = nextValue;
-    onChange(nextValue);
-  }
-
-  function updateRawValue(nextValue: string) {
-    onChange(nextValue);
-    lastEmittedValue.current = nextValue;
-    const parsed = jsonToRows(nextValue);
-    setValidJson(parsed.valid);
-    if (parsed.valid) setRows(parsed.rows);
-  }
-
-  return (
-    <div className="quick-test-key-value-editor">
-      <div className="quick-test-editor-toolbar">
-        <span className="quick-test-editor-summary">
-          {validJson ? `${rows.filter((row) => row.key.trim()).length} 项` : 'JSON 格式错误'}
-        </span>
-        <Segmented
-          size="small"
-          value={mode}
-          onChange={(nextMode) => setMode(nextMode as 'table' | 'raw')}
-          options={[
-            { label: '键值', value: 'table' },
-            { label: 'Raw JSON', value: 'raw' },
-          ]}
-        />
-      </div>
-
-      {mode === 'raw' ? (
-        <TextArea
-          rows={8}
-          value={value}
-          onChange={(event) => updateRawValue(event.target.value)}
-          placeholder={rawPlaceholder}
-          className="quick-test-raw-editor"
-        />
-      ) : !validJson ? (
-        <Alert
-          type="error"
-          showIcon
-          title="当前内容不是有效的 JSON 对象"
-          description="请切换到 Raw JSON 修正格式后，再使用键值视图。"
-          action={<Button size="small" onClick={() => setMode('raw')}>修正 JSON</Button>}
-        />
-      ) : (
-        <div className="quick-test-key-value-table">
-          <div className="quick-test-key-value-head" aria-hidden="true">
-            <span>键</span>
-            <span>值</span>
-            <span />
-          </div>
-          {rows.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无配置项" />
-          ) : rows.map((row) => (
-            <div className="quick-test-key-value-row" key={row.id}>
-              <Input
-                value={row.key}
-                onChange={(event) => updateRows(rows.map((item) => (
-                  item.id === row.id ? { ...item, key: event.target.value } : item
-                )))}
-                placeholder={keyPlaceholder}
-                aria-label="键"
-              />
-              <Input
-                value={row.value}
-                onChange={(event) => updateRows(rows.map((item) => (
-                  item.id === row.id ? { ...item, value: event.target.value } : item
-                )))}
-                placeholder={valuePlaceholder}
-                aria-label="值"
-              />
-              <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => updateRows(rows.filter((item) => item.id !== row.id))}
-                aria-label={`删除 ${row.key || '配置项'}`}
-              />
-            </div>
-          ))}
-          <Button
-            type="dashed"
-            icon={<PlusOutlined />}
-            onClick={() => setRows([...rows, createKeyValueRow()])}
-          >
-            添加一项
-          </Button>
-        </div>
-      )}
-    </div>
-  );
+/** 解析后的请求配置（执行与保存共用，保证两条链路 payload 一致） */
+interface ParsedRequestParts {
+  headers: Record<string, string>;
+  params: Record<string, unknown>;
+  body: unknown;
+  graphqlQuery?: string;
 }
 
 // 文件上传项
@@ -313,6 +210,11 @@ export default function QuickTestPage() {
   const [headers, setHeaders] = useState('{\n  "Content-Type": "application/json"\n}');
   const [params, setParams] = useState('{}');
   const [body, setBody] = useState('');
+  // Body 类型与各类型的独立编辑内容（切换类型不清空）
+  const [bodyType, setBodyType] = useState<BodyType>('json');
+  const [formBody, setFormBody] = useState('{}');
+  const [graphqlQuery, setGraphqlQuery] = useState('');
+  const [graphqlVariables, setGraphqlVariables] = useState('{}');
   const [timeout, setTimeoutVal] = useState(30);
   // 重试配置
   const [retryCount, setRetryCount] = useState(0);
@@ -350,12 +252,43 @@ export default function QuickTestPage() {
   // Console 窗口
   const consoleRef = useRef<ConsoleHandle>(null);
 
-  // 保存到接口列表
+  // 保存到接口列表 / 更新用例
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sourceCaseLoading, setSourceCaseLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [saveForm] = Form.useForm();
+  // 由 case_id 载入的用例 id：保存时走 update 而不是 create
+  const [loadedCaseId, setLoadedCaseId] = useState<string | null>(null);
+
+  // 页内历史面板
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  // cURL 导入弹窗
+  const [curlModalOpen, setCurlModalOpen] = useState(false);
+
+  // 高级设置（Collapse 与内层 Tabs 受控，便于从 form-data 一键展开文件上传）
+  const [advancedKeys, setAdvancedKeys] = useState<string[]>([]);
+  const [advancedTabKey, setAdvancedTabKey] = useState('files');
+
+  // 取消请求
+  const abortRef = useRef<AbortController | null>(null);
+
+  // A9：当前请求实际可用的全部变量（全局 → 环境 → 本页覆盖，与后端合并顺序一致）
+  const quickTestVariables = useQuickTestVariables({
+    environment: selectedEnvironment
+      ? {
+          id: selectedEnvironment.id,
+          name: selectedEnvironment.name,
+          base_url: selectedEnvironment.base_url,
+          variables: selectedEnvironment.variables,
+        }
+      : null,
+    pageVariablesText: envVariables,
+    projectId: selectedProjectId,
+  });
+  const variableNames = quickTestVariables.names;
+  const urlSuggestions = buildVariableSuggestions(url, variableNames);
 
   // 已保存用例仅通过 case_id 交接，避免请求头和认证信息进入浏览器历史。
   useEffect(() => {
@@ -367,6 +300,7 @@ export default function QuickTestPage() {
         .then((response) => {
           if (!active) return;
           const testCase = response.data;
+          setLoadedCaseId(testCase.id ?? sourceCaseId);
           setMethod(testCase.method);
           setUrl(testCase.url);
           setHeaders(JSON.stringify(testCase.headers || {}, null, 2));
@@ -376,6 +310,14 @@ export default function QuickTestPage() {
               ? ''
               : JSON.stringify(testCase.body, null, 2)
           );
+          // GraphQL 用例：query 走 graphql_query，body 即 variables
+          setGraphqlQuery(testCase.graphql_query || '');
+          setGraphqlVariables(
+            testCase.graphql_query && testCase.body
+              ? JSON.stringify(testCase.body, null, 2)
+              : '{}'
+          );
+          setBodyType(testCase.graphql_query ? 'graphql' : 'json');
           setAssertions(
             (testCase.assertions || []).map((assertion) => ({
               assertion_type: assertion.assertion_type,
@@ -425,6 +367,8 @@ export default function QuickTestPage() {
     const pHeaders = searchParams.get('headers');
     const pParams = searchParams.get('params');
     const pBody = searchParams.get('body');
+    // 无 case_id 时视为「新建请求」，保存走 create
+    setLoadedCaseId(null);
     if (pMethod) setMethod(pMethod);
     if (pUrl) setUrl(pUrl);
     if (pHeaders) {
@@ -520,6 +464,21 @@ export default function QuickTestPage() {
       assertion_type: 'status_code', expression: '', operator: 'eq', expected: '200',
     }]);
   }
+
+  /** A8：按模板追加一条断言（不覆盖已编辑的行，插入后字段仍可编辑） */
+  function applyAssertionTemplate(templateKey: string) {
+    const template = ASSERTION_TEMPLATES.find((item) => item.key === templateKey);
+    if (!template) return;
+    setAssertions([
+      ...assertions,
+      {
+        assertion_type: template.assertion.assertion_type,
+        expression: template.assertion.expression ?? '',
+        operator: template.assertion.operator ?? 'eq',
+        expected: template.assertion.expected ?? '',
+      },
+    ]);
+  }
   function updateAssertion(index: number, field: string, value: any) {
     const next = [...assertions];
     next[index] = { ...next[index], [field]: value };
@@ -548,32 +507,78 @@ export default function QuickTestPage() {
     setExtractRules(extractRules.filter((_, ruleIndex) => ruleIndex !== index));
   }
 
+  // ---- 请求配置解析（执行与保存共用，保证两条链路 payload 一致）----
+  function parseRequestParts(): ParsedRequestParts {
+    const parsedHeaders = parseHeadersJson(headers);
+    const parsedParams = parseJsonObject(params, 'Params');
+    let parsedBody: unknown;
+    let graphqlQueryValue: string | undefined;
+
+    if (bodyType === 'none') {
+      parsedBody = undefined;
+    } else if (bodyType === 'json') {
+      parsedBody = parseJsonText(body, 'Body', { allowEmpty: true });
+    } else if (bodyType === 'x-www-form-urlencoded') {
+      parsedBody = parseJsonObject(formBody, '表单 Body');
+      parsedHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
+    } else if (bodyType === 'graphql') {
+      if (!graphqlQuery.trim()) {
+        throw new Error('请填写 GraphQL query');
+      }
+      graphqlQueryValue = graphqlQuery.trim();
+      // 后端约定：graphql_query 为语句，body 为 variables 对象
+      parsedBody = parseJsonObject(graphqlVariables, 'GraphQL Variables');
+      if (!hasHeader(parsedHeaders, 'Content-Type')) {
+        parsedHeaders['Content-Type'] = 'application/json';
+      }
+    } else {
+      // form-data 由「高级设置 → 文件上传」接管，这里不组装 body
+      parsedBody = undefined;
+    }
+
+    return {
+      headers: parsedHeaders,
+      params: parsedParams,
+      body: parsedBody,
+      graphqlQuery: graphqlQueryValue,
+    };
+  }
+
+  /** 当前认证配置 */
+  function currentAuthConfig(): AuthConfig {
+    return {
+      type: authType,
+      token: authToken || undefined,
+      apiKeyName: apiKeyName || undefined,
+      apiKeyValue: apiKeyValue || undefined,
+      apiKeyIn,
+      username: basicUser || undefined,
+      password: basicPass || undefined,
+    };
+  }
+
+  // ---- 取消请求 ----
+  function handleCancelExecute() {
+    if (!abortRef.current) return;
+    abortRef.current.abort();
+    abortRef.current = null;
+    setExecuting(false);
+    consoleRef.current?.log({ type: 'error', message: '请求已取消' });
+    message.info('已取消本次请求');
+  }
+
   // ---- 执行 ----
   async function handleExecute() {
     if (!url.trim()) {
       message.warning('请输入请求 URL');
       return;
     }
-    let parsedHeaders: Record<string, string> = {};
-    let parsedParams: Record<string, unknown> = {};
-    let parsedBody: unknown;
+    let parts: ParsedRequestParts;
     let parsedVars: Record<string, unknown> = {};
     try {
-      parsedHeaders = parseHeadersJson(headers);
+      parts = parseRequestParts();
     } catch (error: any) {
-      message.error(error.message || 'Headers JSON 格式不正确');
-      return;
-    }
-    try {
-      parsedParams = parseJsonObject(params, 'Params');
-    } catch (error: any) {
-      message.error(error.message || 'Params JSON 格式不正确');
-      return;
-    }
-    try {
-      parsedBody = parseJsonText(body, 'Body', { allowEmpty: true });
-    } catch (error: any) {
-      message.error(error.message || 'Body JSON 格式不正确');
+      message.error(error.message || '请求配置解析失败');
       return;
     }
     try {
@@ -585,18 +590,14 @@ export default function QuickTestPage() {
     }
 
     // 应用认证配置（合并到 headers / params）
-    const authConfig: AuthConfig = {
-      type: authType,
-      token: authToken || undefined,
-      apiKeyName: apiKeyName || undefined,
-      apiKeyValue: apiKeyValue || undefined,
-      apiKeyIn,
-      username: basicUser || undefined,
-      password: basicPass || undefined,
-    };
-    const applied = applyAuth(authConfig, parsedHeaders, parsedParams);
-    parsedHeaders = applied.headers;
-    parsedParams = applied.params;
+    const applied = applyAuth(currentAuthConfig(), parts.headers, parts.params);
+    const parsedHeaders = applied.headers;
+    const parsedParams = applied.params;
+    const parsedBody = parts.body;
+    const graphqlQueryValue = parts.graphqlQuery;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setExecuting(true);
     setResult(null);
@@ -626,6 +627,7 @@ export default function QuickTestPage() {
         res = await executionApi.runMultipart({
           method, url,
           headers: parsedHeaders, params: parsedParams, body: parsedBody,
+          graphql_query: graphqlQueryValue,
           assertions, extract_rules: extractRules,
           variables: parsedVars, timeout,
           pre_requests: preRequests,
@@ -638,11 +640,12 @@ export default function QuickTestPage() {
           environment_id: selectedEnvironment?.id || undefined,
           fileList: fileItems.map((f) => f.file),
           fileFields: fileItems.map((f) => f.field),
-        });
+        }, { signal: controller.signal });
       } else {
         res = await executionApi.run({
           method, url,
           headers: parsedHeaders, params: parsedParams, body: parsedBody,
+          graphql_query: graphqlQueryValue,
           assertions, extract_rules: extractRules,
           variables: parsedVars, timeout,
           pre_requests: preRequests,
@@ -653,7 +656,7 @@ export default function QuickTestPage() {
           retry_interval: retryInterval,
           project_id: selectedProjectId || undefined,
           environment_id: selectedEnvironment?.id || undefined,
-        });
+        }, { signal: controller.signal });
       }
       setResult(res.data);
 
@@ -696,13 +699,29 @@ export default function QuickTestPage() {
       if (res.data.status === 'passed') message.success('测试通过');
       else if (res.data.status === 'failed') message.warning('断言未通过');
       else message.error('执行出错');
+
+      // 执行成功（后端已写入 history）：刷新页内历史面板
+      setHistoryRefreshKey((key) => key + 1);
     } catch (e: any) {
+      // 主动取消：不弹错误提示，仅恢复初始态
+      const cancelled =
+        controller.signal.aborted
+        || e?.code === 'ERR_CANCELED'
+        || e?.name === 'CanceledError'
+        || e?.message === 'canceled';
+      if (cancelled) {
+        consoleRef.current?.log({ type: 'error', message: '请求已取消' });
+        return;
+      }
       consoleRef.current?.log({
         type: 'error',
         message: e.message,
       });
       message.error(e.message);
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setExecuting(false);
     }
   }
@@ -737,50 +756,24 @@ export default function QuickTestPage() {
   async function handleSave() {
     try {
       const values: any = await saveForm.validateFields();
-      // 解析当前请求配置
-      let parsedHeaders: Record<string, string> = {};
-      let parsedParams: Record<string, unknown> = {};
-      let parsedBody: unknown;
+      // 解析当前请求配置（与执行共用同一套解析逻辑）
+      let parts: ParsedRequestParts;
       try {
-        parsedHeaders = parseHeadersJson(headers);
+        parts = parseRequestParts();
       } catch (error: any) {
-        message.error(error.message || 'Headers JSON 格式不正确');
+        message.error(error.message || '请求配置解析失败');
         return;
       }
-      try {
-        parsedParams = parseJsonObject(params, 'Params');
-      } catch (error: any) {
-        message.error(error.message || 'Params JSON 格式不正确');
-        return;
-      }
-      try {
-        parsedBody = parseJsonText(body, 'Body', { allowEmpty: true });
-      } catch (error: any) {
-        message.error(error.message || 'Body JSON 格式不正确');
-        return;
-      }
-      const appliedAuth = applyAuth(
-        {
-          type: authType,
-          token: authToken || undefined,
-          apiKeyName: apiKeyName || undefined,
-          apiKeyValue: apiKeyValue || undefined,
-          apiKeyIn,
-          username: basicUser || undefined,
-          password: basicPass || undefined,
-        },
-        parsedHeaders,
-        parsedParams
-      );
+      const appliedAuth = applyAuth(currentAuthConfig(), parts.headers, parts.params);
 
-      setSaving(true);
-      await testCaseApi.create({
+      const payload = {
         title: values.title,
         method,
         url,
         headers: appliedAuth.headers,
         params: appliedAuth.params,
-        body: parsedBody,
+        body: parts.body,
+        graphql_query: parts.graphqlQuery,
         group_path: values.group_path || undefined,
         project_id: values.project_id || selectedProjectId || undefined,
         environment_id: selectedEnvironment?.id || undefined,
@@ -804,7 +797,18 @@ export default function QuickTestPage() {
           priority: 'P0',
           order: 0,
         }],
-      });
+      };
+
+      setSaving(true);
+      if (loadedCaseId) {
+        // 由 case_id 载入的用例：原地更新，避免重复创建
+        await testCaseApi.update(loadedCaseId, payload);
+        message.success('已更新');
+        setSaveModalOpen(false);
+        return;
+      }
+
+      await testCaseApi.create(payload);
       message.success('已保存到接口列表');
       setSaveModalOpen(false);
       // 提示是否跳转
@@ -823,20 +827,114 @@ export default function QuickTestPage() {
     }
   }
 
+  // ---- cURL 互通 ----
+  /** 把导入/回填得到的 body 分派到对应 Body 类型 */
+  function applyIncomingBody(incoming: unknown) {
+    if (incoming === null || incoming === undefined || incoming === '') {
+      setBodyType('none');
+      return;
+    }
+    if (typeof incoming === 'string') {
+      const formValues = parseUrlEncodedBody(incoming);
+      if (formValues) {
+        setFormBody(JSON.stringify(formValues, null, 2));
+        setBodyType('x-www-form-urlencoded');
+        return;
+      }
+      setBody(incoming);
+      setBodyType('json');
+      return;
+    }
+    setBody(JSON.stringify(incoming, null, 2));
+    setBodyType('json');
+  }
+
+  async function handleCopyCurl() {
+    if (!url.trim()) {
+      message.warning('请先输入请求 URL');
+      return;
+    }
+    try {
+      const parts = parseRequestParts();
+      const applied = applyAuth(currentAuthConfig(), parts.headers, parts.params);
+      const command = toCurl({
+        method,
+        url,
+        headers: applied.headers,
+        params: applied.params,
+        body: parts.body,
+      });
+      await copyTextToClipboard(command);
+      message.success('cURL 已复制到剪贴板');
+    } catch (error: any) {
+      message.error(error?.message || '生成 cURL 失败');
+    }
+  }
+
+  function handleImportedCurl(parsed: { method: string; url: string; headers: Record<string, string>; body?: unknown }) {
+    setMethod(parsed.method || 'GET');
+    setUrl(parsed.url);
+    setHeaders(
+      Object.keys(parsed.headers).length > 0
+        ? JSON.stringify(parsed.headers, null, 2)
+        : '{}'
+    );
+    applyIncomingBody(parsed.body);
+    setCurlModalOpen(false);
+    message.success('已从 cURL 回填请求，可点击「发送」执行');
+  }
+
+  // ---- 历史面板回填 ----
+  function handleRestoreHistory(record: CallHistoryRecord) {
+    // 历史记录不是「已载入的用例」，保存时仍走 create
+    setLoadedCaseId(null);
+    if (record.method) setMethod(record.method);
+    if (record.url) setUrl(record.url);
+    setHeaders(JSON.stringify(record.headers || {}, null, 2));
+    setParams(JSON.stringify(record.params || {}, null, 2));
+    applyIncomingBody(record.body);
+    setResult(null);
+  }
+
   return (
-    <div className="quick-test-workspace">
+    <div className="quick-test-workspace" data-testid="quick-test-workspace">
+      <aside className="quick-test-history-pane" aria-label="历史调用记录">
+        <HistoryPanel
+          projectId={selectedProjectId}
+          refreshKey={historyRefreshKey}
+          onRestore={handleRestoreHistory}
+        />
+      </aside>
+
+      <div className="quick-test-main-pane">
       <Card
         className="quick-test-request-card"
         title={
           <Space>
             <ThunderboltOutlined /><span>快速测试</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
-              支持 Postman 式文件上传、前置条件、变量提取链
+              文件上传 · 前置条件 · 变量提取
             </span>
           </Space>
         }
         extra={
-          <Space>
+          <Space wrap size={8}>
+            <Tooltip title="把当前请求转换成 cURL 命令并复制">
+              <Button
+                icon={<CopyOutlined />}
+                onClick={handleCopyCurl}
+                data-testid="copy-curl-btn"
+              >
+                复制 cURL
+              </Button>
+            </Tooltip>
+            <Button
+              icon={<ImportOutlined />}
+              onClick={() => setCurlModalOpen(true)}
+              data-testid="import-curl-btn"
+            >
+              导入 cURL
+            </Button>
             <Button
               icon={<SaveOutlined />}
               onClick={openSaveModal}
@@ -844,18 +942,30 @@ export default function QuickTestPage() {
               data-testid="save-btn"
               disabled={sourceCaseLoading}
             >
-              保存到接口列表
+              {loadedCaseId ? '更新用例' : '保存到接口列表'}
             </Button>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              loading={executing || sourceCaseLoading}
-              onClick={handleExecute}
-              size="large"
-              data-testid="send-btn"
-            >
-              发送请求
-            </Button>
+            {executing ? (
+              <Button
+                danger
+                icon={<CloseCircleOutlined />}
+                onClick={handleCancelExecute}
+                size="large"
+                data-testid="cancel-btn"
+              >
+                取消
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                loading={sourceCaseLoading}
+                onClick={handleExecute}
+                size="large"
+                data-testid="send-btn"
+              >
+                发送请求
+              </Button>
+            )}
           </Space>
         }
       >
@@ -865,9 +975,11 @@ export default function QuickTestPage() {
               <Tag color="blue">当前环境</Tag>
               <strong>{selectedEnvironment.name}</strong>
               <code>{selectedEnvironment.base_url || '未配置 Base URL'}</code>
+              <span>仅用于相对 URL 前缀，不作为可引用变量</span>
             </div>
             <span className="quick-test-environment-summary">
-              自动提供 base_url 和 {Object.keys(selectedEnvironment.variables || {}).length} 个环境变量，本页变量可覆盖同名值
+              提供 {Object.keys(selectedEnvironment.variables || {}).length} 个环境变量（可用占位符引用，本页可覆盖同名值）；
+              <code>base_url</code> 仅用于相对 URL 前缀，不可引用
             </span>
           </div>
         )}
@@ -876,9 +988,21 @@ export default function QuickTestPage() {
         <div className="quick-test-request-row">
           <Select value={method} onChange={setMethod} data-testid="method-select"
             options={METHODS.map((m) => ({ label: m, value: m }))} />
-          <Input placeholder="https://api.example.com/users" value={url} data-testid="url-input"
-            onChange={(e) => setUrl(e.target.value)}
-            onPressEnter={handleExecute} />
+          {/* A9：URL 支持 {{ 变量提示；Input 作为 AutoComplete 的子元素，保留原 onPressEnter / testid */}
+          <AutoComplete
+            className="quick-test-url-input"
+            value={url}
+            options={urlSuggestions}
+            filterOption={false}
+            popupMatchSelectWidth={false}
+            onChange={(value) => setUrl(value ?? '')}
+          >
+            <Input
+              placeholder="https://api.example.com/users"
+              data-testid="url-input"
+              onPressEnter={handleExecute}
+            />
+          </AutoComplete>
           <span className="quick-test-timeout-label" style={{ color: '#6b7280' }}>超时(s):</span>
           <InputNumber value={timeout} onChange={(v) => setTimeoutVal(v || 30)} min={1} max={300} />
         </div>
@@ -1057,6 +1181,24 @@ export default function QuickTestPage() {
               label: `断言规则 (${assertions.length})`,
               children: (
                 <div>
+                  {/* A8：常用断言模板，点击插入一条新断言（不覆盖已有行） */}
+                  <div className="quick-test-assertion-templates">
+                    <span className="quick-test-editor-summary">常用断言：</span>
+                    <Space size={4} wrap>
+                      {ASSERTION_TEMPLATES.map((template) => (
+                        <Tooltip key={template.key} title={template.hint}>
+                          <Button
+                            size="small"
+                            onClick={() => applyAssertionTemplate(template.key)}
+                            data-testid={`assertion-template-${template.key}`}
+                          >
+                            {template.label}
+                          </Button>
+                        </Tooltip>
+                      ))}
+                    </Space>
+                  </div>
+
                   {assertions.map((a, idx) => (
                     <Space key={idx} align="baseline" wrap style={{ marginBottom: 8 }}>
                       <Select value={a.assertion_type}
@@ -1153,11 +1295,11 @@ export default function QuickTestPage() {
               children: (
                 <div>
                   <div style={{ marginBottom: 8, padding: 10, background: '#f0fdf4', borderRadius: 6, fontSize: 13, color: '#166534' }}>
-                    当前工作区环境的 <code>base_url</code> 与环境变量会自动作为默认值。
+                    当前工作区环境的环境变量会自动作为默认值，<code>base_url</code> 仅用于拼接相对 URL，不作为可引用变量。
                     此处填写的变量会覆盖同名环境变量，并与前置条件提取结果一起用于渲染 <code>{'{{var}}'}</code> 占位符。
                   </div>
                   <TextArea rows={6} value={envVariables} onChange={(e) => setEnvVariables(e.target.value)}
-                    placeholder='{"base_url": "https://api.example.com", "token": "xxx"}' />
+                    placeholder='{"token": "xxx", "timeout": "3000"}' />
                 </div>
               ),
             },
@@ -1329,6 +1471,18 @@ export default function QuickTestPage() {
             <>
               <Tabs
                 className="quick-test-core-tabs"
+                tabBarExtraContent={
+                  /* A9：当前可用变量查看入口（不阻塞请求区） */
+                  <VariablesPopover
+                    entries={quickTestVariables.entries}
+                    names={variableNames}
+                    loading={quickTestVariables.loading}
+                    error={quickTestVariables.error}
+                    pageVariablesValid={quickTestVariables.pageVariablesValid}
+                    environmentName={selectedEnvironment?.name}
+                    onReload={() => void quickTestVariables.reload()}
+                  />
+                }
                 items={[
                   {
                     key: 'params',
@@ -1340,6 +1494,7 @@ export default function QuickTestPage() {
                         keyPlaceholder="参数名"
                         valuePlaceholder="参数值"
                         rawPlaceholder='{"page": 1, "size": 20}'
+                        variableNames={variableNames}
                       />
                     ),
                   },
@@ -1354,6 +1509,7 @@ export default function QuickTestPage() {
                         valuePlaceholder="Header 值"
                         rawPlaceholder='{"Content-Type": "application/json"}'
                         valueMode="string"
+                        variableNames={variableNames}
                       />
                     ),
                   },
@@ -1361,19 +1517,23 @@ export default function QuickTestPage() {
                     key: 'body',
                     label: 'Body',
                     children: (
-                      <div className="quick-test-body-editor">
-                        <div className="quick-test-editor-toolbar">
-                          <span className="quick-test-editor-summary">JSON 请求体</span>
-                          <Tag bordered={false}>Raw JSON</Tag>
-                        </div>
-                        <JsonEditor
-                          value={body}
-                          onChange={setBody}
-                          rows={10}
-                          placeholder='{"name": "Ada", "email": "ada@example.com"}'
-                          data-testid="request-body-input"
-                        />
-                      </div>
+                      <RequestBodyEditor
+                        bodyType={bodyType}
+                        onBodyTypeChange={setBodyType}
+                        jsonBody={body}
+                        onJsonBodyChange={setBody}
+                        formBody={formBody}
+                        onFormBodyChange={setFormBody}
+                        graphqlQuery={graphqlQuery}
+                        onGraphqlQueryChange={setGraphqlQuery}
+                        graphqlVariables={graphqlVariables}
+                        onGraphqlVariablesChange={setGraphqlVariables}
+                        onOpenFileUpload={() => {
+                          setAdvancedKeys(['advanced']);
+                          setAdvancedTabKey('files');
+                        }}
+                        variableNames={variableNames}
+                      />
                     ),
                   },
                   {
@@ -1391,6 +1551,10 @@ export default function QuickTestPage() {
 
               <Collapse
                 className="quick-test-advanced-settings"
+                activeKey={advancedKeys}
+                onChange={(keys) =>
+                  setAdvancedKeys(Array.isArray(keys) ? keys.map(String) : [String(keys)])
+                }
                 items={[
                   {
                     key: 'advanced',
@@ -1406,6 +1570,8 @@ export default function QuickTestPage() {
                     children: (
                       <Tabs
                         size="small"
+                        activeKey={advancedTabKey}
+                        onChange={setAdvancedTabKey}
                         items={[
                           panelByKey.files,
                           panelByKey['pre-requests'],
@@ -1507,38 +1673,7 @@ export default function QuickTestPage() {
             </pre>
           ) : null}
 
-          {result.response && (
-            <Card type="inner" title={
-              <Space>
-                <span>响应</span>
-                <Tag color={methodColor[result.response.status_code.toString()] || 'blue'} data-testid="response-status">
-                  {result.response.status_code}
-                </Tag>
-                <span style={{ color: '#6b7280', fontWeight: 400 }}>{result.response.elapsed.toFixed(4)}s</span>
-              </Space>
-            } style={{ marginBottom: 16 }}>
-              <Tabs items={[
-                {
-                  key: 'body', label: 'Body',
-                  children: (
-                    <pre style={{ background: '#1a1a2e', color: '#e2e8f0', padding: 16, borderRadius: 8, fontSize: 13, lineHeight: 1.6, maxHeight: 400, overflow: 'auto' }} data-testid="response-body">
-                      {typeof result.response.body === 'object'
-                        ? JSON.stringify(result.response.body, null, 2)
-                        : result.response.text || '(空)'}
-                    </pre>
-                  ),
-                },
-                {
-                  key: 'headers', label: 'Headers',
-                  children: (
-                    <pre style={{ background: '#f9fafb', padding: 12, borderRadius: 6, fontSize: 13 }}>
-                      {JSON.stringify(result.response.headers, null, 2)}
-                    </pre>
-                  ),
-                },
-              ]} />
-            </Card>
-          )}
+          {result.response && <ResponseViewer response={result.response} />}
 
           {result.assertion_results && result.assertion_results.length > 0 && (
             <Card type="inner" title="断言结果" style={{ marginBottom: 16 }}>
@@ -1664,10 +1799,18 @@ export default function QuickTestPage() {
           ]}
         />
       </section>
+      </div>
 
-      {/* 保存到接口列表 Modal */}
+      {/* 导入 cURL */}
+      <CurlImportModal
+        open={curlModalOpen}
+        onCancel={() => setCurlModalOpen(false)}
+        onImport={handleImportedCurl}
+      />
+
+      {/* 保存到接口列表 / 更新用例 Modal */}
       <Modal
-        title="保存到接口列表"
+        title={loadedCaseId ? '更新用例' : '保存到接口列表'}
         open={saveModalOpen}
         onOk={handleSave}
         confirmLoading={saving}
@@ -1697,8 +1840,9 @@ export default function QuickTestPage() {
           </Form.Item>
         </Form>
         <div style={{ color: '#9ca3af', fontSize: 12 }}>
-          当前的 Headers、Params、Body、认证、提取规则和断言将一并保存。会话 Cookie
-          不会写入用例；长期 Cookie 请配置到当前环境。
+          {loadedCaseId
+            ? '将覆盖当前用例的 Headers、Params、Body、认证、提取规则和断言。会话 Cookie 不会写入用例。'
+            : '当前的 Headers、Params、Body、认证、提取规则和断言将一并保存。会话 Cookie 不会写入用例；长期 Cookie 请配置到当前环境。'}
         </div>
       </Modal>
     </div>
