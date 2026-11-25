@@ -72,6 +72,8 @@ class ApiCaseRecordStats(BaseModel):
     boundary: int = 0
     permission: int = 0
     p0: int = 0
+    # 模块（分组）数量：题库中出现过的模块路径数量
+    group_count: int = 0
 
 
 class ApiCaseBulkImportRequest(BaseModel):
@@ -98,3 +100,32 @@ class ApiCaseBulkImportResponse(BaseModel):
 
     created_count: int = 0
     case_ids: list[str] = Field(default_factory=list)
+
+
+class ApiCaseBatchIdsRequest(BaseModel):
+    """批量操作（移动/删除）选择的用例 ID 列表."""
+
+    case_ids: list[str] = Field(default_factory=list)
+    # 移动到指定模块（分组）；空或 null 表示移出模块
+    group_path: str | None = None
+
+    @field_validator("case_ids", mode="before")
+    @classmethod
+    def _require_list(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("case_ids 必须是数组")
+        return [str(item) for item in value if item]
+
+
+class ApiCaseGroupItem(BaseModel):
+    """模块（分组）条目：路径 + 用例数."""
+
+    path: str
+    name: str
+    parent_path: str | None = None
+    # 直属该模块的用例数
+    direct_count: int = 0
+    # 含子模块的累计用例数
+    total_count: int = 0

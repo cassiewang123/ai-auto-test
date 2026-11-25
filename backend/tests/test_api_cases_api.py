@@ -206,3 +206,205 @@ def test_export_route_not_shadowed_by_detail_route(client):
     detail = client.get(f"{BASE}/{created['id']}")
     assert detail.status_code == 200
     assert detail.json()["data"]["title"] == "详情路由"
+
+
+# ---------- 模块（分组）维度 ----------
+
+
+def test_bulk_import_keeps_per_case_group_path(client, db_session):
+    """按模块批量生成时，同批用例可以分属不同接口和模块."""
+    result = _bulk_import(
+        client,
+        cases=[
+            _case_payload(
+                title="A 接口用例",
+                interface_name="A 接口",
+                group_path="磐石关务/回执",
+            ),
+            _case_payload(
+                title="B 接口用例",
+                interface_name="B 接口",
+                group_path="磐石关务/报文",
+            ),
+        ],
+        interface_name="批量生成",
+        group_path="",
+    )
+    assert result["created_count"] == 2
+
+    stored = {
+        item.title: (item.interface_name, item.group_path)
+        for item in db_session.query(ApiCaseRecord).all()
+    }
+    assert stored["A 接口用例"] == ("A 接口", "磐石关务/回执")
+    assert stored["B 接口用例"] == ("B 接口", "磐石关务/报文")
+
+
+def test_bulk_import_falls_back_to_request_group_path(client, db_session):
+    """用例自身没带分组时才回落到请求级分组."""
+    _bulk_import(
+        client,
+        cases=[_case_payload(title="回落用例", interface_name=None, group_path=None)],
+        interface_name="重置指定码表缓存",
+        group_path="swgd-param/1. 码表",
+    )
+    item = db_session.query(ApiCaseRecord).one()
+    assert item.group_path == "swgd-param/1. 码表"
+    assert item.interface_name == "重置指定码表缓存"
+
+
+def test_list_filters_by_group_including_children(client):
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="父模块用例", group_path="磐石关务"),
+            _case_payload(title="子模块用例", group_path="磐石关务/回执"),
+            _case_payload(title="孙模块用例", group_path="磐石关务/回执/新增"),
+            _case_payload(title="其他模块用例", group_path="磐石关务二期"),
+        ],
+    )
+
+    parent = client.get(BASE, params={"group_path": "磐石关务"}).json()
+    assert parent["total"] == 3
+    assert {item["title"] for item in parent["data"]} == {
+        "父模块用例",
+        "子模块用例",
+        "孙模块用例",
+    }
+
+    child = client.get(BASE, params={"group_path": "磐石关务/回执"}).json()
+    assert child["total"] == 2
+
+    # 前缀相同的兄弟模块不能被误命中
+    other = client.get(BASE, params={"group_path": "磐石关务二期"}).json()
+    assert other["total"] == 1
+
+
+def test_list_filters_ungrouped(client):
+    # 请求级 group_path 置空，避免回落到 _bulk_import 的默认分组
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="有模块", group_path="磐石关务"),
+            _case_payload(title="无模块", group_path=None),
+        ],
+        group_path=None,
+    )
+    ungrouped = client.get(BASE, params={"group_path": ""}).json()
+    assert ungrouped["total"] == 1
+    assert ungrouped["data"][0]["title"] == "无模块"
+
+
+def test_groups_endpoint_returns_paths_with_counts(client):
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="a", group_path="磐石关务/回执"),
+            _case_payload(title="b", group_path="磐石关务/回执"),
+            _case_payload(title="c", group_path="磐石关务/回执/新增"),
+            _case_payload(title="d", group_path="swgd-param"),
+            _case_payload(title="e", group_path=None),
+        ],
+        group_path=None,
+    )
+    groups = client.get(f"{BASE}/groups").json()["data"]
+    by_path = {item["path"]: item for item in groups}
+
+    # 父级路径被补齐（磐石关务本身没有直属用例）
+    assert set(by_path) == {
+        "磐石关务",
+        "磐石关务/回执",
+        "磐石关务/回执/新增",
+        "swgd-param",
+    }
+    assert by_path["磐石关务"]["direct_count"] == 0
+    assert by_path["磐石关务"]["total_count"] == 3
+    assert by_path["磐石关务/回执"]["direct_count"] == 2
+    assert by_path["磐石关务/回执"]["total_count"] == 3
+    assert by_path["磐石关务/回执"]["parent_path"] == "磐石关务"
+    assert by_path["swgd-param"]["parent_path"] is None
+
+
+def test_stats_counts_modules(client):
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="a", group_path="磐石关务/回执"),
+            _case_payload(title="b", group_path="swgd-param"),
+            _case_payload(title="c", group_path=None),
+        ],
+        group_path=None,
+    )
+    stats = client.get(f"{BASE}/stats").json()["data"]
+    assert stats["total"] == 3
+    # 只统计实际登记在用例上的模块路径
+    assert stats["group_count"] == 2
+
+
+def test_update_moves_case_between_groups(client):
+    created = client.post(BASE, json=_case_payload(title="改模块")).json()["data"]
+    assert created["group_path"] == "swgd-param/1. 码表"
+
+    updated = client.put(
+        f"{BASE}/{created['id']}", json={"group_path": " 磐石关务 // 回执 "}
+    )
+    assert updated.status_code == 200
+    # 分组路径统一收紧斜杠与空白
+    assert updated.json()["data"]["group_path"] == "磐石关务/回执"
+
+    cleared = client.put(f"{BASE}/{created['id']}", json={"group_path": ""})
+    assert cleared.json()["data"]["group_path"] is None
+
+
+def test_update_rejects_invalid_case_type_on_edit(client):
+    created = client.post(BASE, json=_case_payload(title="非法场景")).json()["data"]
+    response = client.put(f"{BASE}/{created['id']}", json={"case_type": "unknown"})
+    assert response.status_code == 422
+
+
+def test_batch_move_to_group(client, db_session):
+    first = client.post(BASE, json=_case_payload(title="移动A")).json()["data"]
+    second = client.post(BASE, json=_case_payload(title="移动B")).json()["data"]
+
+    response = client.post(
+        f"{BASE}/batch-move",
+        json={"case_ids": [first["id"], second["id"]], "group_path": "磐石关务"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["moved"] == 2
+    db_session.expire_all()
+    assert (
+        db_session.query(ApiCaseRecord).filter_by(group_path="磐石关务").count() == 2
+    )
+
+
+def test_batch_move_requires_case_ids(client):
+    response = client.post(f"{BASE}/batch-move", json={"case_ids": []})
+    assert response.status_code == 422
+
+
+def test_batch_delete(client, db_session):
+    first = client.post(BASE, json=_case_payload(title="删除A")).json()["data"]
+    second = client.post(BASE, json=_case_payload(title="删除B")).json()["data"]
+
+    response = client.post(
+        f"{BASE}/batch-delete", json={"case_ids": [first["id"], second["id"]]}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["deleted"] == 2
+    assert db_session.query(ApiCaseRecord).count() == 0
+
+
+def test_export_respects_group_filter(client):
+    _bulk_import(
+        client,
+        cases=[
+            _case_payload(title="回执用例", group_path="磐石关务/回执"),
+            _case_payload(title="报文用例", group_path="磐石关务/报文"),
+        ],
+    )
+    response = client.get(f"{BASE}/export", params={"group_path": "磐石关务/回执"})
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook["接口用例"]
+    titles = [sheet.cell(row=r, column=2).value for r in range(2, sheet.max_row + 1)]
+    assert titles == ["回执用例"]

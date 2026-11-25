@@ -1219,25 +1219,74 @@ export const knowledgeBaseApi = {
 };
 
 // ========== 接口用例库（用例管理） ==========
+/** 接口用例库的一条用例（用例管理页/生成页共用） */
+export interface ApiCaseRecord {
+  id: string;
+  title: string;
+  method: string;
+  url: string;
+  headers?: Record<string, any>;
+  params?: Record<string, any>;
+  body?: any;
+  assertions?: any[];
+  case_type: string;
+  priority: string;
+  status: string;
+  source?: string;
+  description?: string | null;
+  interface_name?: string | null;
+  group_path?: string | null;
+  project_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** 用例管理页的模块（分组）条目 */
+export interface ApiCaseGroupItem {
+  path: string;
+  name: string;
+  parent_path: string | null;
+  direct_count: number;
+  total_count: number;
+}
+
 export const apiCaseRecordApi = {
   list: (params?: {
     page?: number;
     page_size?: number;
     project_id?: string;
+    /** 模块（分组）路径；传空串表示只看未分组 */
+    group_path?: string;
     method?: string;
     case_type?: string;
     priority?: string;
     status?: string;
     keyword?: string;
-  }) => api.get<unknown, PageResponse<any>>('/api-cases', { params }),
+  }) => api.get<unknown, PageResponse<ApiCaseRecord>>('/api-cases', { params }),
   stats: (params?: { project_id?: string }) =>
     api.get<unknown, ApiResponse<any>>('/api-cases/stats', { params }),
-  get: (id: string) => api.get<unknown, ApiResponse<any>>(`/api-cases/${id}`),
+  /** 模块（分组）列表，含直属与累计用例数 */
+  groups: (params?: { project_id?: string }) =>
+    api.get<unknown, ApiResponse<ApiCaseGroupItem[]>>('/api-cases/groups', {
+      params,
+    }),
+  get: (id: string) =>
+    api.get<unknown, ApiResponse<ApiCaseRecord>>(`/api-cases/${id}`),
   create: (data: any) => api.post<unknown, ApiResponse<any>>('/api-cases', data),
-  update: (id: string, data: any) =>
-    api.put<unknown, ApiResponse<any>>(`/api-cases/${id}`, data),
+  update: (id: string, data: Partial<ApiCaseRecord>) =>
+    api.put<unknown, ApiResponse<ApiCaseRecord>>(`/api-cases/${id}`, data),
   remove: (id: string) =>
     api.delete<unknown, ApiResponse<any>>(`/api-cases/${id}`),
+  /** 批量移动到指定模块；group_path 传 null 表示移出模块 */
+  batchMove: (caseIds: string[], groupPath: string | null) =>
+    api.post<unknown, ApiResponse<{ moved: number; group_path: string | null }>>(
+      '/api-cases/batch-move',
+      { case_ids: caseIds, group_path: groupPath }
+    ),
+  batchDelete: (caseIds: string[]) =>
+    api.post<unknown, ApiResponse<{ deleted: number }>>('/api-cases/batch-delete', {
+      case_ids: caseIds,
+    }),
   bulkImport: (data: {
     cases: any[];
     project_id?: string | null;
@@ -1250,6 +1299,7 @@ export const apiCaseRecordApi = {
     ),
   exportUrl: (params?: {
     project_id?: string;
+    group_path?: string;
     method?: string;
     case_type?: string;
     priority?: string;
@@ -1258,7 +1308,7 @@ export const apiCaseRecordApi = {
   }) => {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
+      if (value !== undefined && value !== null) {
         query.append(key, String(value));
       }
     });

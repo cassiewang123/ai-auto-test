@@ -1,17 +1,23 @@
 """接口用例库（用例管理）API.
 
 端点：
-    GET    /api-cases              — 列表（按项目/方法/场景/优先级/关键词筛选）
+    GET    /api-cases              — 列表（按项目/模块/方法/场景/优先级/关键词筛选）
     GET    /api-cases/stats        — 统计
+    GET    /api-cases/groups       — 模块（分组）列表及用例数量
     POST   /api-cases              — 手工创建
     POST   /api-cases/bulk-import  — 批量导入生成结果
+    POST   /api-cases/batch-move   — 批量移动到指定模块
+    POST   /api-cases/batch-delete — 批量删除
     GET    /api-cases/export       — 导出 Excel
     GET    /api-cases/{id}         — 详情
     PUT    /api-cases/{id}         — 更新
     DELETE /api-cases/{id}         — 删除
 
-注意：路由顺序上 ``/stats``、``/export``、``/bulk-import`` 必须声明在
-``/{case_id}`` 之前，避免被通配路由匹配。
+注意：路由顺序上 ``/stats``、``/groups``、``/export``、``/bulk-import`` 必须
+声明在 ``/{case_id}`` 之前，避免被通配路由匹配。
+
+模块（分组）通过 ``group_path`` 表达层级，例如 ``swgd-imap-content/ApiType 码表``；
+传入父级模块时应命中其下所有子模块，因此这里用「路径前缀」匹配而不是等值匹配。
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -32,8 +38,10 @@ from app.database import get_db
 from app.models.api_case_record import ApiCaseRecord
 from app.models.user import User
 from app.schemas.api_case_record import (
+    ApiCaseBatchIdsRequest,
     ApiCaseBulkImportRequest,
     ApiCaseBulkImportResponse,
+    ApiCaseGroupItem,
     ApiCaseRecordCreate,
     ApiCaseRecordResponse,
     ApiCaseRecordStats,
@@ -64,6 +72,29 @@ def _get_or_404(db: Session, case_id: str) -> ApiCaseRecord:
     return item
 
 
+def _normalize_path(value: str | None) -> str:
+    """规范化分组路径：去空白、去首尾/重复斜杠."""
+    parts = [part.strip() for part in (value or "").split("/")]
+    return "/".join(part for part in parts if part)
+
+
+def _group_filter_clause(group_path: str):
+    """构造「含本分组与全部子分组」的筛选条件.
+
+    空字符串表示「未分组」（group_path 为 NULL 或空串），这样前端选
+    「未分组」时也能正确筛选。
+    """
+    path = _normalize_path(group_path)
+    if not path:
+        return or_(
+            ApiCaseRecord.group_path.is_(None), ApiCaseRecord.group_path == ""
+        )
+    return or_(
+        ApiCaseRecord.group_path == path,
+        ApiCaseRecord.group_path.startswith(f"{path}/", autoescape=True),
+    )
+
+
 def _validate(
     method: str | None = None,
     case_type: str | None = None,
@@ -83,6 +114,9 @@ def _validate(
 def _apply_filters(query, params: dict):
     if params.get("project_id"):
         query = query.where(ApiCaseRecord.project_id == params["project_id"])
+    # group_path 为空字符串是有效筛选（未分组），因此判断 is not None
+    if params.get("group_path") is not None:
+        query = query.where(_group_filter_clause(params["group_path"]))
     if params.get("method"):
         query = query.where(ApiCaseRecord.method == params["method"].upper())
     if params.get("case_type"):
@@ -100,6 +134,9 @@ def _apply_filters(query, params: dict):
 @router.get("", response_model=PageResponse[ApiCaseRecordResponse])
 def list_api_cases(
     project_id: str | None = Query(None),
+    group_path: str | None = Query(
+        None, description="按模块筛选；父级模块包含其下所有子模块，空串表示未分组"
+    ),
     method: str | None = Query(None),
     case_type: str | None = Query(None),
     priority: str | None = Query(None),
@@ -112,6 +149,7 @@ def list_api_cases(
     """接口用例列表."""
     filters = {
         "project_id": project_id,
+        "group_path": group_path,
         "method": method,
         "case_type": case_type,
         "priority": priority,
@@ -153,6 +191,8 @@ def api_case_stats(
     if project_id:
         query = query.where(ApiCaseRecord.project_id == project_id)
     items = db.execute(query).scalars().all()
+    normalized_paths = {_normalize_path(item.group_path) for item in items}
+    normalized_paths.discard("")
     return DataResponse[ApiCaseRecordStats](
         data=ApiCaseRecordStats(
             total=len(items),
@@ -161,13 +201,114 @@ def api_case_stats(
             boundary=sum(1 for item in items if item.case_type == "boundary"),
             permission=sum(1 for item in items if item.case_type == "permission"),
             p0=sum(1 for item in items if item.priority == "P0"),
+            group_count=len(normalized_paths),
         )
     )
+
+
+@router.get("/groups", response_model=DataResponse[list[ApiCaseGroupItem]])
+def api_case_groups(
+    project_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """模块（分组）列表：返回题库中出现过的全部 group_path 及其父级路径.
+
+    每个模块带上直接用例数与「含子模块」的累计用例数，供用例管理页按模块
+    分组展示与筛选使用。用例引用了某个路径但父级尚未出现时，也会补齐父级，
+    保证前端能构建完整的模块树。
+    """
+    query = select(ApiCaseRecord.group_path).where(
+        ApiCaseRecord.is_active.is_(True), ApiCaseRecord.group_path.is_not(None)
+    )
+    if project_id:
+        query = query.where(ApiCaseRecord.project_id == project_id)
+    raw_paths = [path for path in db.execute(query).scalars().all() if path]
+
+    direct_counts: dict[str, int] = {}
+    for raw in raw_paths:
+        path = _normalize_path(raw)
+        if not path:
+            continue
+        direct_counts[path] = direct_counts.get(path, 0) + 1
+
+    all_paths: set[str] = set()
+    for path in direct_counts:
+        parts = path.split("/")
+        for index in range(1, len(parts) + 1):
+            all_paths.add("/".join(parts[:index]))
+
+    groups: list[ApiCaseGroupItem] = []
+    for path in sorted(all_paths):
+        total = sum(
+            count
+            for case_path, count in direct_counts.items()
+            if case_path == path or case_path.startswith(f"{path}/")
+        )
+        groups.append(
+            ApiCaseGroupItem(
+                path=path,
+                name=path.rsplit("/", 1)[-1],
+                parent_path=path.rsplit("/", 1)[0] if "/" in path else None,
+                direct_count=direct_counts.get(path, 0),
+                total_count=total,
+            )
+        )
+    return DataResponse[list[ApiCaseGroupItem]](data=groups)
+
+
+@router.post("/batch-move", response_model=DataResponse[dict])
+def batch_move_api_cases(
+    payload: ApiCaseBatchIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """把选中的用例批量移动到指定模块（分组）.
+
+    ``group_path`` 传空或 null 表示移出模块（未分组）。
+    """
+    if not payload.case_ids:
+        raise ValidationError("请选择要移动的用例")
+    target = _normalize_path(payload.group_path) or None
+
+    items = (
+        db.execute(
+            select(ApiCaseRecord).where(ApiCaseRecord.id.in_(payload.case_ids))
+        )
+        .scalars()
+        .all()
+    )
+    if not items:
+        raise NotFoundError("接口用例", ",".join(payload.case_ids[:3]))
+    for item in items:
+        item.group_path = target
+    db.commit()
+    return DataResponse[dict](data={"moved": len(items), "group_path": target})
+
+
+@router.post("/batch-delete", response_model=DataResponse[dict])
+def batch_delete_api_cases(
+    payload: ApiCaseBatchIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """批量删除选中的用例."""
+    if not payload.case_ids:
+        raise ValidationError("请选择要删除的用例")
+    items = (
+        db.execute(
+            select(ApiCaseRecord).where(ApiCaseRecord.id.in_(payload.case_ids))
+        )
+        .scalars()
+        .all()
+    )
+    for item in items:
+        db.delete(item)
+    db.commit()
+    return DataResponse[dict](data={"deleted": len(items)})
 
 
 @router.get("/export")
 def export_api_cases(
     project_id: str | None = Query(None),
+    group_path: str | None = Query(None),
     method: str | None = Query(None),
     case_type: str | None = Query(None),
     priority: str | None = Query(None),
@@ -178,6 +319,7 @@ def export_api_cases(
     """按当前筛选条件导出接口用例为 Excel（.xlsx）."""
     filters = {
         "project_id": project_id,
+        "group_path": group_path,
         "method": method,
         "case_type": case_type,
         "priority": priority,
@@ -296,6 +438,14 @@ def bulk_import_api_cases(
         method = str(case.get("method") or "GET").upper()
         case_type = str(case.get("case_type") or "normal")
         priority = str(case.get("priority") or "P1")
+        # 按模块批量生成时，同一次导入的用例来自多个接口，各带自己的
+        # 接口名与分组路径；单接口导入时回落到请求级字段。
+        interface_name = str(
+            case.get("interface_name") or payload.interface_name or ""
+        ).strip()
+        group_path = str(
+            case.get("group_path") or payload.group_path or ""
+        ).strip()
         item = ApiCaseRecord(
             title=title,
             method=method,
@@ -310,9 +460,9 @@ def bulk_import_api_cases(
             source="ai",
             description=case.get("description"),
             # 防御：接口名/分组可能来自超长标题，截断到字段上限避免 422
-            interface_name=(payload.interface_name or "")[:256] or None,
-            group_path=(payload.group_path or "")[:256] or None,
-            project_id=payload.project_id,
+            interface_name=interface_name[:256] or None,
+            group_path=group_path[:256] or None,
+            project_id=case.get("project_id") or payload.project_id,
             created_by=current_user.id,
         )
         db.add(item)
@@ -337,8 +487,10 @@ def create_api_case(
 ):
     """手工创建接口用例."""
     _validate(payload.method, payload.case_type, payload.priority, payload.status)
+    data = payload.model_dump()
+    data["group_path"] = _normalize_path(data.get("group_path")) or None
     item = ApiCaseRecord(
-        **payload.model_dump(),
+        **data,
         source="manual",
         created_by=current_user.id,
     )
@@ -365,7 +517,7 @@ def update_api_case(
     payload: ApiCaseRecordUpdate,
     db: Session = Depends(get_db),
 ):
-    """更新接口用例."""
+    """更新接口用例（编辑标题/方法/URL/模块/参数/请求体/断言等）."""
     item = _get_or_404(db, case_id)
     changes = payload.model_dump(exclude_unset=True)
     _validate(
@@ -374,6 +526,11 @@ def update_api_case(
         changes.get("priority"),
         changes.get("status"),
     )
+    if "group_path" in changes:
+        # 允许显式置空（把用例移出模块）
+        changes["group_path"] = _normalize_path(changes["group_path"]) or None
+    if "interface_name" in changes and changes["interface_name"] is not None:
+        changes["interface_name"] = str(changes["interface_name"])[:256] or None
     for field, value in changes.items():
         setattr(item, field, value)
     db.commit()
