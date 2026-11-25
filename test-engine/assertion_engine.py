@@ -86,6 +86,19 @@ _ERROR_MESSAGE_FIELDS = ("errorinfo", "error_info", "errmsg", "err_msg",
                          "errormessage", "error_message", "errordesc",
                          "error_desc")
 
+# 业务码不是 0/200 时，还需要旁证才判失败：消息文本像错误，或 data 为空。
+# 这样 {code: 1, data: {...}} 这类「1 表示成功」的接口不会被误判。
+_ERROR_TEXT_FIELDS = _ERROR_MESSAGE_FIELDS + ("message", "msg", "bizmessage",
+                                              "biz_message", "errortext")
+_ERROR_KEYWORDS = ("error", "fail", "invalid", "not found", "denied",
+                   "forbidden", "exception", "错误", "失败", "异常",
+                   "不存在", "未找到", "无权限", "超时")
+
+
+def _looks_like_error_text(text: str) -> bool:
+    lowered = text.strip().lower()
+    return bool(lowered) and any(key in lowered for key in _ERROR_KEYWORDS)
+
 
 def _normalized_key_map(body: dict) -> dict[str, Any]:
     """把 body 的键统一成小写，便于匹配不同命名风格（errorCode / error_code）."""
@@ -163,16 +176,28 @@ def inspect_business_status(body: Any) -> dict[str, Any] | None:
                     "message": f"错误码 {field}={lower[field]!r} 非 0",
                 }
 
-    # 3) 通用业务码：0 / 200 视为成功
+    # 3) 通用业务码：0 / 200 视为成功；其它值需要旁证才判失败，
+    #    避免把「1 表示成功」这类接口误判。
     for field in _CODE_FIELDS:
         if field in lower:
             value = lower[field]
             number = _as_number(value)
-            if number is not None and value not in _SUCCESS_CODES:
+            if number is None or value in _SUCCESS_CODES:
+                continue
+            error_text = ""
+            for text_field in _ERROR_TEXT_FIELDS:
+                candidate = lower.get(text_field)
+                if isinstance(candidate, str) and candidate.strip():
+                    if _looks_like_error_text(candidate):
+                        error_text = candidate.strip()
+                        break
+            empty_data = "data" in body and body.get("data") is None
+            if error_text or empty_data:
+                detail = f"，message={error_text!r}" if error_text else "，data 为空"
                 return {
                     "status": "failed",
                     "signal": field,
-                    "message": f"业务码 {field}={value!r} 不为 0/200",
+                    "message": f"业务码 {field}={value!r} 不为 0/200{detail}",
                 }
 
     # 4) 文本状态字段

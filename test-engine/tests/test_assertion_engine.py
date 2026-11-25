@@ -303,11 +303,23 @@ class TestInspectBusinessStatus:
         assert info is None  # 成功码不足以断言业务成功，只排除失败
 
     @pytest.mark.parametrize("code", [100, 500, "9999", 1])
-    def test_business_code_non_success_means_failure(self, code):
-        info = inspect_business_status({"code": code})
+    def test_business_code_non_success_with_empty_data_means_failure(self, code):
+        info = inspect_business_status({"code": code, "data": None})
         assert info is not None
         assert info["status"] == "failed"
         assert info["signal"] == "code"
+
+    @pytest.mark.parametrize("code", [1, 100])
+    def test_non_standard_code_with_data_present_is_not_failure(self, code):
+        """「1 表示成功」的接口：有数据返回时不因 code 非 0/200 判失败."""
+        assert inspect_business_status({"code": code, "data": {"id": 1}}) is None
+
+    def test_non_standard_code_with_error_message_means_failure(self):
+        info = inspect_business_status(
+            {"code": 500, "msg": "系统异常，请稍后重试", "data": {"x": 1}}
+        )
+        assert info is not None
+        assert info["status"] == "failed"
 
     def test_status_text_field(self):
         failed = inspect_business_status({"status": "failed"})
