@@ -7,6 +7,8 @@
     POST /api/v1/import/har/import       — 将选中的 HAR 接口创建为用例
     POST /api/v1/import/postman/preview  — 预览 Postman Collection 解析结果
     POST /api/v1/import/postman/import   — 将选中的 Postman 请求创建为用例
+    POST /api/v1/import/document/preview — 上传 Word/Excel 并预览解析结果
+    POST /api/v1/import/document/import  — 将选中的 Word/Excel 接口创建为用例
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,12 @@ from app.core.exceptions import AppException
 from app.database import get_db
 from app.models.test_case import AssertionRule, TestCase
 from app.schemas.common import DataResponse
+from app.services.document_importer import (
+    HTTP_METHODS,
+    MAX_DOCUMENT_BYTES,
+    UnsupportedDocumentError,
+    parse_interface_document,
+)
 
 router = APIRouter()
 
@@ -613,5 +621,115 @@ def import_postman(payload: PostmanImportRequest, db: Session = Depends(get_db))
             "created_count": len(created_ids),
             "case_ids": created_ids,
             "imported_variables": imported_variables,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Word / Excel 文档导入
+# ---------------------------------------------------------------------------
+class DocumentImportRequest(BaseModel):
+    selected_interfaces: list[dict]
+    project_id: str | None = None
+
+
+def _document_case_kwargs(iface: dict, project_id: str | None) -> dict:
+    """将 Word/Excel 预览项转换为 TestCase 字段."""
+    method = str(iface.get("method", "")).upper()
+    if method not in HTTP_METHODS:
+        raise AppException(status_code=422, message=f"不支持的请求方法: {method or '空'}")
+    url = str(iface.get("url") or iface.get("path") or "").strip()
+    if not url:
+        raise AppException(status_code=422, message="导入接口缺少 URL")
+
+    return {
+        "title": str(iface.get("suggested_name") or f"{method} {url}")[:256],
+        "description": iface.get("description") or f"Word/Excel 文档导入：{method} {url}",
+        "group_path": iface.get("group_path") or None,
+        "method": method,
+        "url": url,
+        "headers": iface.get("headers") or {},
+        "params": iface.get("params") or {},
+        "body": iface.get("body"),
+        "project_id": project_id,
+        "markers": ["api", "document_imported"],
+    }
+
+
+@router.post("/document/preview", response_model=DataResponse[dict])
+async def preview_document(
+    file: UploadFile = File(...),
+    base_url: str = Form(""),
+    path_prefix: str = Form(""),
+):
+    """上传 .docx/.xlsx 文档，返回可勾选导入的接口列表."""
+    data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    await file.close()
+    try:
+        interfaces, warnings = parse_interface_document(
+            file.filename or "",
+            data,
+            base_url=base_url,
+            path_prefix=path_prefix,
+        )
+    except UnsupportedDocumentError as exc:
+        raise AppException(status_code=422, message=str(exc)) from exc
+    except Exception as exc:
+        raise AppException(
+            status_code=422,
+            message=f"文档解析失败: {exc}",
+        ) from exc
+
+    groups = sorted({item.get("group_path") or "未分组" for item in interfaces})
+    methods: dict[str, int] = {}
+    for interface in interfaces:
+        method = interface["method"]
+        methods[method] = methods.get(method, 0) + 1
+
+    extension = (file.filename or "").rsplit(".", 1)[-1].lower()
+    return DataResponse(
+        data={
+            "interfaces": interfaces,
+            "total": len(interfaces),
+            "file_type": extension,
+            "groups": groups,
+            "methods": methods,
+            "warnings": warnings,
+        }
+    )
+
+
+@router.post("/document/import", response_model=DataResponse[dict])
+def import_document(payload: DocumentImportRequest, db: Session = Depends(get_db)):
+    """将用户勾选的 Word/Excel 接口批量创建为 TestCase."""
+    created_ids: list[str] = []
+    for iface in payload.selected_interfaces:
+        case = TestCase(**_document_case_kwargs(iface, payload.project_id))
+        db.add(case)
+        db.flush()
+
+        expected_status = iface.get("expected_status", 200)
+        try:
+            expected = str(int(expected_status))
+        except (TypeError, ValueError):
+            expected = "200"
+        db.add(
+            AssertionRule(
+                test_case_id=case.id,
+                assertion_type="status_code",
+                expression=None,
+                operator="eq",
+                expected=expected,
+                priority="P0",
+                order=0,
+            )
+        )
+        created_ids.append(case.id)
+
+    db.commit()
+    return DataResponse(
+        data={
+            "created_count": len(created_ids),
+            "case_ids": created_ids,
         }
     )

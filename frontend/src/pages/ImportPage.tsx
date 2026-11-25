@@ -27,6 +27,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   InboxOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { importApi, captureApi, projectApi, apiGroupApi } from '../services/api';
@@ -93,6 +94,23 @@ export default function ImportPage() {
     warnings: string[];
     unresolved: string[];
     uploadCount: number;
+  } | null>(null);
+
+  // Word / Excel 文档导入相关状态
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentFileName, setDocumentFileName] = useState('');
+  const [documentBaseUrl, setDocumentBaseUrl] = useState('http://localhost:8000');
+  const [documentPathPrefix, setDocumentPathPrefix] = useState('');
+  const [documentProjectId, setDocumentProjectId] = useState<string | undefined>(undefined);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentImporting, setDocumentImporting] = useState(false);
+  const [documentInterfaces, setDocumentInterfaces] = useState<any[]>([]);
+  const [documentSelectedKeys, setDocumentSelectedKeys] = useState<Key[]>([]);
+  const [documentSummary, setDocumentSummary] = useState<{
+    fileType: string;
+    groups: string[];
+    methods: Record<string, number>;
+    warnings: string[];
   } | null>(null);
 
   // 项目相关
@@ -434,6 +452,76 @@ export default function ImportPage() {
     }
   }
 
+  // Word / Excel：预览解析
+  async function handleDocumentPreview() {
+    if (!documentFile) {
+      message.warning('请先上传 Word 或 Excel 文件');
+      return;
+    }
+    setDocumentLoading(true);
+    setDocumentInterfaces([]);
+    setDocumentSelectedKeys([]);
+    setDocumentSummary(null);
+    try {
+      const res = await importApi.previewDocument({
+        file: documentFile,
+        base_url: documentBaseUrl.trim(),
+        path_prefix: documentPathPrefix.trim(),
+      });
+      const data = res.data;
+      setDocumentInterfaces(data.interfaces || []);
+      setDocumentSelectedKeys((data.interfaces || []).map((_, index) => index));
+      setDocumentSummary({
+        fileType: data.file_type,
+        groups: data.groups || [],
+        methods: data.methods || {},
+        warnings: data.warnings || [],
+      });
+      message.success(
+        `解析到 ${data.total} 个接口，覆盖 ${data.groups?.length || 0} 个分组`
+      );
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setDocumentLoading(false);
+    }
+  }
+
+  // Word / Excel：导入选中接口
+  async function handleDocumentImport() {
+    if (documentSelectedKeys.length === 0) {
+      message.warning('请至少选择一个接口');
+      return;
+    }
+    setDocumentImporting(true);
+    try {
+      const selected = documentSelectedKeys.map(
+        (key) => documentInterfaces[key as number]
+      );
+      const res = await importApi.importDocument({
+        selected_interfaces: selected,
+        project_id: documentProjectId,
+      });
+      message.success(`成功导入 ${res.data.created_count} 个测试用例`);
+      Modal.success({
+        title: '导入完成',
+        content: (
+          <div>
+            <p>成功创建 {res.data.created_count} 个测试用例</p>
+            <p style={{ marginTop: 16 }}>
+              可前往接口列表查看，或在用例管理中批量执行。
+            </p>
+          </div>
+        ),
+        onOk: () => navigate('/api-list'),
+      });
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setDocumentImporting(false);
+    }
+  }
+
   // 新建项目
   async function handleCreateProject() {
     try {
@@ -467,7 +555,7 @@ export default function ImportPage() {
             <ImportOutlined />
             <span>接口导入</span>
             <span style={{ color: '#6b7280', fontSize: 13, fontWeight: 400 }}>
-              从 OpenAPI/Swagger、页面抓取、HAR 抓包或 Postman Collection 自动解析接口并生成测试用例
+              从 OpenAPI/Swagger、页面抓取、HAR、Postman、Word 或 Excel 自动解析接口并生成测试用例
             </span>
           </Space>
         }
@@ -826,6 +914,125 @@ export default function ImportPage() {
                   >
                     将集合变量写入所选项目的工作区变量（同名变量不覆盖）
                   </Checkbox>
+                </div>
+              ),
+            },
+            {
+              key: 'document',
+              label: (
+                <Space size={6}>
+                  <FileTextOutlined />
+                  <span>Word / Excel</span>
+                </Space>
+              ),
+              children: (
+                <div>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    title="上传 Word（.docx）或 Excel（.xlsx），自动提取接口并生成可勾选的测试用例"
+                    description="Excel 首行需包含“请求方法、请求URL”；Word 支持同样表头，或正文中的“POST /path”以及“请求方法 + 请求URL”格式。"
+                  />
+                  <Upload.Dragger
+                    accept=".docx,.xlsx"
+                    maxCount={1}
+                    beforeUpload={(file) => {
+                      const extension = file.name.split('.').pop()?.toLowerCase();
+                      if (!['docx', 'xlsx'].includes(extension || '')) {
+                        message.error('仅支持 .docx 和 .xlsx 文件');
+                        return Upload.LIST_IGNORE;
+                      }
+                      setDocumentFile(file);
+                      setDocumentFileName(file.name);
+                      setDocumentInterfaces([]);
+                      setDocumentSelectedKeys([]);
+                      setDocumentSummary(null);
+                      message.success(`已加载文档：${file.name}`);
+                      return false;
+                    }}
+                    onRemove={() => {
+                      setDocumentFile(null);
+                      setDocumentFileName('');
+                      setDocumentInterfaces([]);
+                      setDocumentSelectedKeys([]);
+                      setDocumentSummary(null);
+                    }}
+                  >
+                    <p className="ant-upload-drag-icon">
+                      <FileTextOutlined />
+                    </p>
+                    <p className="ant-upload-text">点击或拖拽 Word / Excel 文档到此处</p>
+                    <p className="ant-upload-hint">
+                      支持单个 .docx / .xlsx，最大 10 MB；旧版 .doc / .xls 请先另存为新格式
+                    </p>
+                  </Upload.Dragger>
+                  {documentFileName && (
+                    <div style={{ marginTop: 8, color: '#6b7280' }}>
+                      已加载文件：<Tag color="blue">{documentFileName}</Tag>
+                    </div>
+                  )}
+                  <Row gutter={16} style={{ marginTop: 16 }}>
+                    <Col xs={24} md={7}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        Base URL（可选）
+                      </label>
+                      <Input
+                        value={documentBaseUrl}
+                        onChange={(event) => setDocumentBaseUrl(event.target.value)}
+                        placeholder="http://localhost:8000"
+                      />
+                    </Col>
+                    <Col xs={24} md={5}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        路径前缀（可选）
+                      </label>
+                      <Input
+                        value={documentPathPrefix}
+                        onChange={(event) => setDocumentPathPrefix(event.target.value)}
+                        placeholder="/api/v1"
+                      />
+                    </Col>
+                    <Col xs={24} md={6}>
+                      <label style={{ fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                        导入到项目（可选）
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Select
+                          value={documentProjectId}
+                          onChange={(value) => setDocumentProjectId(value)}
+                          placeholder="选择导入到的项目"
+                          showSearch
+                          optionFilterProp="label"
+                          style={{ flex: 1 }}
+                          options={projects.map((project) => ({
+                            value: project.id,
+                            label: project.name,
+                          }))}
+                        />
+                        <Button
+                          icon={<PlusOutlined />}
+                          onClick={() => setProjectModalOpen(true)}
+                        />
+                      </div>
+                    </Col>
+                    <Col
+                      xs={24}
+                      md={6}
+                      style={{ display: 'flex', alignItems: 'flex-end' }}
+                    >
+                      <Button
+                        type="primary"
+                        icon={<EyeOutlined />}
+                        loading={documentLoading}
+                        onClick={handleDocumentPreview}
+                        size="large"
+                        disabled={!documentFile}
+                      >
+                        预览解析结果
+                      </Button>
+                    </Col>
+                  </Row>
                 </div>
               ),
             },
@@ -1244,6 +1451,120 @@ export default function ImportPage() {
                       dataIndex: 'has_upload',
                       width: 70,
                       render: (value: boolean) => (value ? <Tag color="gold">需文件</Tag> : '-'),
+                    },
+                  ]}
+                />
+              </>
+            )}
+          </Card>
+        </>
+      )}
+
+      {/* Word / Excel 文档预览结果 */}
+      {activeTab === 'document' && documentLoading && (
+        <Card style={{ marginTop: 16, textAlign: 'center' }}>
+          <Spin size="large" description="正在解析 Word / Excel 文档..." />
+        </Card>
+      )}
+
+      {activeTab === 'document' && documentSummary && !documentLoading && (
+        <>
+          {documentSummary.warnings.length > 0 && (
+            <Alert
+              style={{ marginTop: 16 }}
+              type="warning"
+              showIcon
+              title={`有 ${documentSummary.warnings.length} 条解析提示`}
+              description={documentSummary.warnings.join('；')}
+            />
+          )}
+          <Card
+            style={{ marginTop: 16 }}
+            title={
+              <Space wrap>
+                <span>解析结果</span>
+                <Tag color="blue">{documentInterfaces.length} 个接口</Tag>
+                <Tag>{documentSummary.groups.length} 个分组</Tag>
+                <Tag color="cyan">{documentSummary.fileType.toUpperCase()}</Tag>
+                <span style={{ color: '#6b7280', fontWeight: 400 }}>
+                  已选择 {documentSelectedKeys.length} 个
+                </span>
+              </Space>
+            }
+            extra={
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                loading={documentImporting}
+                onClick={handleDocumentImport}
+                size="large"
+                disabled={documentSelectedKeys.length === 0}
+              >
+                导入选中的 {documentSelectedKeys.length} 个接口
+              </Button>
+            }
+          >
+            {documentInterfaces.length === 0 ? (
+              <Empty description="未解析到接口，请检查文档表头或正文格式" />
+            ) : (
+              <>
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  {Object.entries(documentSummary.methods).map(([method, count]) => (
+                    <Col xs={12} sm={8} md={6} lg={4} key={method}>
+                      <Card size="small">
+                        <Statistic
+                          title={<Tag color={methodColor[method] || 'default'}>{method}</Tag>}
+                          value={count}
+                        />
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+                <Table
+                  dataSource={documentInterfaces.map((iface, index) => ({
+                    ...iface,
+                    key: index,
+                  }))}
+                  rowSelection={{
+                    selectedRowKeys: documentSelectedKeys,
+                    onChange: setDocumentSelectedKeys,
+                  }}
+                  pagination={{ pageSize: 50, showTotal: (total) => `共 ${total} 条` }}
+                  scroll={{ x: 1050 }}
+                  columns={[
+                    {
+                      title: '方法',
+                      dataIndex: 'method',
+                      width: 80,
+                      render: (method: string) => (
+                        <Tag color={methodColor[method] || 'default'}>{method}</Tag>
+                      ),
+                    },
+                    {
+                      title: '名称',
+                      dataIndex: 'suggested_name',
+                      width: 200,
+                      ellipsis: true,
+                    },
+                    { title: 'URL', dataIndex: 'url', ellipsis: true },
+                    {
+                      title: '分组',
+                      dataIndex: 'group_path',
+                      width: 180,
+                      ellipsis: true,
+                      render: (value: string) => (value ? <Tag>{value}</Tag> : '-'),
+                    },
+                    {
+                      title: '来源',
+                      dataIndex: 'source',
+                      width: 160,
+                      ellipsis: true,
+                    },
+                    {
+                      title: 'Body',
+                      dataIndex: 'body',
+                      width: 70,
+                      render: (value: any) => (value ? <Tag color="cyan">有</Tag> : '-'),
                     },
                   ]}
                 />
