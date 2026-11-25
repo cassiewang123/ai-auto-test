@@ -1,10 +1,24 @@
 """服务器连接工具：结构化 HTTP 请求生成 curl 与执行接口测试."""
 from __future__ import annotations
 
+import paramiko
 import pytest
 
 from app.api.v1.server_console import SSHCurlRequest, build_curl_command
 from app.core.exceptions import ValidationError
+from app.services.quality_gate_service import normalize_gate_mode
+
+
+@pytest.fixture(autouse=True)
+def enable_ssh_console(monkeypatch):
+    """SSH 控制台默认关闭；测试环境显式启用以覆盖既有端点用例.
+
+    生产语义由 SSH_CONSOLE_ENABLED 决定，此处仅让已有 200/422 用例继续有效；
+    未启用的行为由 test_console_disabled_returns_403 单独覆盖。
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "SSH_CONSOLE_ENABLED", True)
 
 
 @pytest.fixture(autouse=True)
@@ -226,3 +240,80 @@ def test_saved_request_rejects_header_injection(client):
         json=_saved_payload(headers={"X-Test": "a\r\nB: c"}),
     )
     assert response.status_code in (400, 422)
+
+
+# ---------------------------------------------------------------------------
+# 功能治理：后端启用闸 / 显式主机指纹 / 最小审计 / 门禁 mode 归一化
+# ---------------------------------------------------------------------------
+def test_console_disabled_returns_403(client, monkeypatch):
+    """未启用时两端点均 403，且携带 .env 引导文案."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "SSH_CONSOLE_ENABLED", False)
+    test_resp = client.post("/api/v1/tools/ssh/test", json=_connection_payload())
+    assert test_resp.status_code == 403
+    assert "SSH_CONSOLE_ENABLED" in test_resp.json()["message"]
+
+    req_resp = client.post(
+        "/api/v1/tools/ssh/request",
+        json=_connection_payload(url="https://api.example.com"),
+    )
+    assert req_resp.status_code == 403
+
+
+def test_ssh_audit_payload_excludes_password(client, db_session, fake_ssh):
+    """每次调用恰 1 条审计，白名单载荷不含 password."""
+    from sqlalchemy import select
+
+    from app.models.audit_log import AuditLog
+
+    response = client.post("/api/v1/tools/ssh/test", json=_connection_payload())
+    assert response.status_code == 200
+
+    rows = db_session.execute(select(AuditLog)).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.action == "ssh.test"
+    assert row.resource_type == "server_console"
+    assert row.result == "success"
+    assert "password" not in (row.after or "")
+    assert "secret" not in (row.after or "")
+
+
+class _FakeHostKey:
+    """测试用最小 PKey 替身，仅需 asbytes()."""
+
+    def asbytes(self) -> bytes:
+        return b"airetest-test-host-key"
+
+
+def test_untrusted_host_key_is_rejected_with_fingerprint():
+    """未提供显式指纹时拒绝连接，异常信息携带 SHA256: 指纹."""
+    from app.api.v1 import server_console as sc
+
+    sc._TRUSTED_HOST_KEYS.clear()
+    policy = sc._ExplicitTrustPolicy("example.com", 22)
+    with pytest.raises(paramiko.SSHException) as excinfo:
+        policy.missing_host_key(None, "example.com", _FakeHostKey())
+    assert "SHA256:" in str(excinfo.value)
+
+
+def test_explicit_fingerprint_is_trusted_in_memory():
+    """显式指纹一致时接受，并写入进程内白名单."""
+    from app.api.v1 import server_console as sc
+
+    sc._TRUSTED_HOST_KEYS.clear()
+    fingerprint = sc._key_fingerprint(_FakeHostKey())
+    policy = sc._ExplicitTrustPolicy("example.com", 22, fingerprint)
+    policy.missing_host_key(None, "example.com", _FakeHostKey())
+    assert sc._TRUSTED_HOST_KEYS["example.com:22"] == fingerprint
+    sc._TRUSTED_HOST_KEYS.clear()
+
+
+def test_normalize_gate_mode():
+    """历史 block / 未知值读时归一化为 log；warn 原样保留."""
+    assert normalize_gate_mode("block") == "log"
+    assert normalize_gate_mode("unknown") == "log"
+    assert normalize_gate_mode(None) == "log"
+    assert normalize_gate_mode("warn") == "warn"
+    assert normalize_gate_mode("log") == "log"

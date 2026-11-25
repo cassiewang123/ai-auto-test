@@ -13,9 +13,13 @@ curl 命令后执行，不接受任意 shell 命令。
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import logging
 import re
 import shlex
 import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -26,14 +30,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.database import get_db
 from app.models.server_saved_request import ServerSavedRequest
 from app.models.user import User
 from app.services.auth_service import get_current_user
+from app.services.security.audit_service import log_audit
 from app.services.security.url_policy import URLPolicy
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_METHODS = {
     "GET",
@@ -47,6 +53,102 @@ ALLOWED_METHODS = {
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
 _MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 
+# 进程内主机公钥白名单：key = "host:port"，value = 主机公钥指纹。
+# 重启后端即清空，需重新显式信任一次；不落盘、不建 known_hosts 文件。
+_TRUSTED_HOST_KEYS: dict[str, str] = {}
+
+
+def _key_fingerprint(key: paramiko.PKey) -> str:
+    """用标准库计算主机公钥的 SHA256 指纹（与 OpenSSH 展示口径一致）."""
+    digest = hashlib.sha256(key.asbytes()).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+class _ExplicitTrustPolicy(paramiko.MissingHostKeyPolicy):
+    """默认拒绝自动信任主机密钥，仅接受显式指纹或进程内已信任指纹.
+
+    未提供指纹且内存白名单未命中时，语义等价于 paramiko.RejectPolicy()。
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        expected_fingerprint: str | None = None,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.expected_fingerprint = (expected_fingerprint or "").strip() or None
+
+    def missing_host_key(
+        self,
+        client: paramiko.SSHClient,
+        hostname: str,
+        key: paramiko.PKey,
+    ) -> None:
+        """校验主机公钥指纹，拒绝未信任或已变更的主机密钥."""
+        fingerprint = _key_fingerprint(key)
+        host_key = f"{self.host}:{self.port}"
+        trusted = _TRUSTED_HOST_KEYS.get(host_key)
+
+        if trusted is not None and trusted != fingerprint:
+            raise paramiko.SSHException(
+                f"主机 {self.host}:{self.port} 的公钥指纹与已信任值不一致"
+                f"（已信任 {trusted}，当前 {fingerprint}），已拒绝连接。"
+                "请核对服务器是否变更或存在中间人攻击。"
+            )
+        if self.expected_fingerprint == fingerprint or trusted == fingerprint:
+            _TRUSTED_HOST_KEYS[host_key] = fingerprint
+            return
+        raise paramiko.SSHException(
+            f"目标主机 {self.host}:{self.port} 的公钥未被信任。"
+            f"服务器返回指纹 {fingerprint}；请核对该指纹后填入「主机公钥指纹」"
+            "再连接，避免中间人攻击。信任仅在本次后端进程内有效，重启后需重新确认。"
+        )
+
+
+def _require_console_enabled() -> None:
+    """SSH 控制台后端权威闸：未启用时直接 403 并给出引导文案."""
+    if not get_settings().SSH_CONSOLE_ENABLED:
+        raise ForbiddenError(
+            "服务器控制台未启用：请在 .env 设置 SSH_CONSOLE_ENABLED=true 并重启后端服务"
+        )
+
+
+def _write_ssh_audit(
+    db: Session,
+    current_user: User,
+    action: str,
+    req: SSHConnection,
+    result: str,
+    result_code: int | None,
+) -> None:
+    """为一次 SSH 调用写入 1 条最小审计（显式白名单，绝不含 password）.
+
+    仅传入白名单字段，禁止 req.model_dump() 整体传入；审计失败不阻断主流程。
+    """
+    payload = {
+        "host": req.host,
+        "port": req.port,
+        "method": getattr(req, "method", None),
+        "url": getattr(req, "url", None),
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "result_code": result_code,
+    }
+    try:
+        log_audit(
+            db,
+            actor_id=current_user.id,
+            actor_name=current_user.username,
+            action=action,
+            resource_type="server_console",
+            resource_id=None,
+            after=payload,
+            result=result,
+        )
+    except Exception:  # noqa: BLE001 - 审计写入失败不影响主流程
+        logger.exception("SSH 控制台审计写入失败")
+
 
 class SSHConnection(BaseModel):
     host: str = Field(..., min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._-]+$")
@@ -55,6 +157,8 @@ class SSHConnection(BaseModel):
     password: str = Field(..., min_length=1, max_length=512)
     # 是否允许访问私有/内网地址；默认沿用系统 URL_ALLOW_PRIVATE 配置
     allow_private: bool | None = None
+    # 显式信任的主机公钥指纹（SHA256:...）；不落盘，仅在本次后端进程内有效
+    trust_host_fingerprint: str | None = None
 
 
 class SSHTestRequest(SSHConnection):
@@ -178,7 +282,14 @@ class _SSHClient:
         self.request = request
         self.timeout = timeout
         self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # 默认拒绝自动信任主机密钥：仅接受显式指纹或进程内已信任指纹。
+        self.client.set_missing_host_key_policy(
+            _ExplicitTrustPolicy(
+                host=request.host,
+                port=request.port,
+                expected_fingerprint=request.trust_host_fingerprint,
+            )
+        )
 
     def connect(self) -> None:
         self.client.connect(
@@ -214,35 +325,67 @@ class _SSHClient:
 
 
 @router.post("/ssh/test", response_model=dict[str, Any])
-def test_ssh_connection(req: SSHTestRequest) -> dict[str, Any]:
+def test_ssh_connection(
+    req: SSHTestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
     """测试 SSH 连接是否可用（不会执行任何命令）."""
-    client = _SSHClient(req, req.timeout)
+    audit_result = "failed"
+    result_code: int | None = None
+    client: _SSHClient | None = None
     try:
+        # 后端权威闸：首个执行语句，未启用时直接 403（仍写 1 条失败审计）。
+        _require_console_enabled()
+        client = _SSHClient(req, req.timeout)
         client.connect()
         banner = client.get_banner()
+        audit_result = "success"
+        result_code = 0
         return {
             "code": 0,
             "message": "连接成功",
             "data": {"ok": True, "message": "连接成功", "server_banner": banner},
         }
+    except ForbiddenError:
+        raise
     except paramiko.AuthenticationException as exc:
         raise ValidationError("SSH 认证失败，请检查用户名和密码") from exc
     except Exception as exc:  # noqa: BLE001 - 统一转换为可读错误
         raise ValidationError(f"SSH 连接失败: {exc}") from exc
     finally:
-        client.close()
+        if client is not None:
+            client.close()
+        _write_ssh_audit(
+            db=db,
+            current_user=current_user,
+            action="ssh.test",
+            req=req,
+            result=audit_result,
+            result_code=result_code,
+        )
 
 
 @router.post("/ssh/request", response_model=dict[str, Any])
-def execute_request(req: SSHCurlRequest) -> dict[str, Any]:
+def execute_request(
+    req: SSHCurlRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
     """通过 SSH 在远程服务器执行一条由结构化参数生成的 curl 请求."""
-    command = build_curl_command(req)
-
-    started = time.perf_counter()
-    client = _SSHClient(req, req.timeout)
+    audit_result = "failed"
+    result_code: int | None = None
+    client: _SSHClient | None = None
     try:
+        # 后端权威闸：首个执行语句，未启用时直接 403（仍写 1 条失败审计）。
+        _require_console_enabled()
+        command = build_curl_command(req)
+        started = time.perf_counter()
+        client = _SSHClient(req, req.timeout)
         client.connect()
         exit_code, stdout, stderr, truncated = client.run(command, _MAX_OUTPUT_BYTES)
+        audit_result = "success"
+        result_code = exit_code
         return {
             "code": 0,
             "message": "执行完成",
@@ -255,12 +398,25 @@ def execute_request(req: SSHCurlRequest) -> dict[str, Any]:
                 "command": command,
             },
         }
+    except ForbiddenError:
+        raise
+    except ValidationError:
+        raise
     except paramiko.AuthenticationException as exc:
         raise ValidationError("SSH 认证失败，请检查用户名和密码") from exc
     except Exception as exc:  # noqa: BLE001
         raise ValidationError(f"SSH 执行失败: {exc}") from exc
     finally:
-        client.close()
+        if client is not None:
+            client.close()
+        _write_ssh_audit(
+            db=db,
+            current_user=current_user,
+            action="ssh.request",
+            req=req,
+            result=audit_result,
+            result_code=result_code,
+        )
 
 
 # ---------- 保存的接口 ----------
