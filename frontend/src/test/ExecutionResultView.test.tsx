@@ -173,4 +173,79 @@ describe('ExecutionResultView', () => {
     expect(text).not.toContain('business_status');
     expect(text).toContain("业务标志 flag='f' 表示失败");
   });
+
+  /** 切到「实际请求」标签页（Tabs 内容懒渲染） */
+  function openRequestTab() {
+    const tab = Array.from(
+      container.querySelectorAll<HTMLElement>('.ant-tabs-tab')
+    ).find((el) => el.textContent?.includes('实际请求'));
+    expect(tab).toBeTruthy();
+    act(() => {
+      tab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
+
+  it('实际请求展示请求行、查询参数、请求头与请求体', () => {
+    act(() => {
+      root.render(
+        <ExecutionResultView
+          result={makeResult({
+            status: 'passed',
+            request: {
+              method: 'POST',
+              url: 'http://gateway.example.com/apiService/queryPage',
+              headers: { 'Content-Type': 'application/json', epToken: '****' },
+              params: { page: 1, size: 20 },
+              body: { offset: 1, keyword: 'abc' },
+            },
+          })}
+        />
+      );
+    });
+
+    openRequestTab();
+    const text = container.textContent || '';
+
+    // 请求行
+    expect(text).toContain('请求行');
+    expect(text).toContain('http://gateway.example.com/apiService/queryPage');
+    // 查询参数：既给出拼好的完整地址，也给出结构化参数
+    expect(text).toContain('完整地址（含查询参数）');
+    expect(text).toContain('page=1');
+    expect(text).toContain('size=20');
+    expect(text).toContain('查询参数 (2)');
+    // 请求头
+    expect(text).toContain('请求头 (2)');
+    expect(text).toContain('Content-Type');
+    // 请求体
+    expect(text).toContain('请求体');
+    expect(text).toContain('"keyword": "abc"');
+  });
+
+  it('没有参数/请求头/请求体时给出明确说明而不是留白', () => {
+    act(() => {
+      root.render(
+        <ExecutionResultView
+          result={makeResult({
+            status: 'passed',
+            request: {
+              method: 'GET',
+              url: 'http://gateway.example.com/ping',
+              headers: {},
+              params: {},
+              body: null,
+            },
+          })}
+        />
+      );
+    });
+
+    openRequestTab();
+    const text = container.textContent || '';
+    expect(text).toContain('未携带查询参数');
+    expect(text).toContain('未携带自定义请求头');
+    expect(text).toContain('无请求体');
+    // 没有查询参数时不展示「完整地址」小节
+    expect(text).not.toContain('完整地址（含查询参数）');
+  });
 });

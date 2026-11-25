@@ -130,6 +130,116 @@ function CodeBlock({ children }: { children: string }) {
   );
 }
 
+/** 把查询参数拼到 URL 上展示，便于直接复制成一个完整请求地址 */
+function withQuery(url: string, params: unknown): string {
+  if (!params || typeof params !== 'object') return url;
+  const entries = Object.entries(params as Record<string, unknown>).filter(
+    ([, value]) => value !== undefined && value !== null
+  );
+  if (entries.length === 0) return url;
+  const search = entries
+    .map(([key, value]) => {
+      const text =
+        typeof value === 'object' ? JSON.stringify(value) : String(value);
+      return `${encodeURIComponent(key)}=${encodeURIComponent(text)}`;
+    })
+    .join('&');
+  return url.includes('?') ? `${url}&${search}` : `${url}?${search}`;
+}
+
+/** 判断请求体是否为空（undefined / null / 空字符串 / 空对象 / 空数组） */
+function isEmptyBody(body: unknown): boolean {
+  if (body === undefined || body === null) return true;
+  if (typeof body === 'string') return body.trim() === '';
+  if (Array.isArray(body)) return body.length === 0;
+  if (typeof body === 'object') return Object.keys(body as object).length === 0;
+  return false;
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        fontWeight: 600,
+        color: '#475569',
+        margin: '12px 0 6px',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * 「实际请求」内容：真正发出去的请求长什么样。
+ *
+ * 之前这里只渲染了请求头，看不出传了什么参数、请求体是什么，
+ * 排查失败用例时信息不够。现在按 请求行 → 查询参数 → 请求头 → 请求体
+ * 完整展示，并对空值给出明确说明而不是留白。
+ */
+function RequestDetail({ request }: { request: any }) {
+  if (!request) {
+    return <Typography.Text type="secondary">本次执行没有记录请求信息</Typography.Text>;
+  }
+
+  const method: string = request.method || 'GET';
+  const url: string = request.url || '';
+  const params = request.params;
+  const hasParams =
+    params && typeof params === 'object' && Object.keys(params).length > 0;
+  const headers = request.headers;
+  const hasHeaders =
+    headers && typeof headers === 'object' && Object.keys(headers).length > 0;
+
+  return (
+    <div>
+      <SectionLabel>请求行</SectionLabel>
+      <CodeBlock>{`${method} ${url}`}</CodeBlock>
+      {/* 带上查询参数的完整地址，可直接复制去复现 */}
+      {hasParams && (
+        <>
+          <SectionLabel>完整地址（含查询参数）</SectionLabel>
+          <CodeBlock>{withQuery(url, params)}</CodeBlock>
+        </>
+      )}
+
+      <SectionLabel>
+        查询参数
+        {hasParams ? ` (${Object.keys(params).length})` : ''}
+      </SectionLabel>
+      {hasParams ? (
+        <CodeBlock>{pretty(params)}</CodeBlock>
+      ) : (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          未携带查询参数
+        </Typography.Text>
+      )}
+
+      <SectionLabel>
+        请求头
+        {hasHeaders ? ` (${Object.keys(headers).length})` : ''}
+      </SectionLabel>
+      {hasHeaders ? (
+        <CodeBlock>{pretty(headers)}</CodeBlock>
+      ) : (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          未携带自定义请求头
+        </Typography.Text>
+      )}
+
+      <SectionLabel>请求体</SectionLabel>
+      {isEmptyBody(request.body) ? (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          无请求体
+        </Typography.Text>
+      ) : (
+        <CodeBlock>{pretty(request.body)}</CodeBlock>
+      )}
+    </div>
+  );
+}
+
 export default function ExecutionResultView({ result }: ExecutionResultViewProps) {
   const [tab, setTab] = useState('body');
   const response = result.response;
@@ -317,16 +427,7 @@ export default function ExecutionResultView({ result }: ExecutionResultViewProps
               {
                 key: 'request',
                 label: '实际请求',
-                children: (
-                  <div>
-                    <Typography.Text type="secondary">
-                      {result.request?.method} {result.request?.url}
-                    </Typography.Text>
-                    <div style={{ marginTop: 8 }}>
-                      <CodeBlock>{pretty(result.request?.headers)}</CodeBlock>
-                    </div>
-                  </div>
-                ),
+                children: <RequestDetail request={result.request} />,
               },
             ]}
           />
