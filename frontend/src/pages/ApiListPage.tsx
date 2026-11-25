@@ -247,6 +247,8 @@ export default function ApiListPage() {
   const [batchSelectionMode, setBatchSelectionMode] = useState<'append' | 'replace'>(
     'append'
   );
+  // 弹窗里当前筛选展示的模块（只影响下方列表显示哪些接口，不影响已选）
+  const [batchViewGroupPath, setBatchViewGroupPath] = useState<string | undefined>();
   const [batchExecuting, setBatchExecuting] = useState(false);
   const [batchResults, setBatchResults] = useState<{
     visible: boolean;
@@ -750,48 +752,28 @@ export default function ApiListPage() {
   }, [filtered, apiGroups, selectedRowKeys]);
 
   /**
-   * 按分组选择接口（父级分组包含其下所有子分组）.
+   * 弹窗里表格实际展示的接口.
    *
-   * 默认「追加」：把该分组下的接口并进当前勾选，方便先选分组 A、再选分组 B；
-   * 若该分组已全部选中，再点一次则取消它们（分组级开关）。切到「替换」时
-   * 用分组内容覆盖当前勾选。
+   * 选了模块就只列该模块（含子模块）下的接口，让「看到的」和「选中的」
+   * 保持一致，避免在 319 条里翻找；清空模块选择后恢复展示全部筛选结果。
+   * 已勾选的接口即使不在当前模块下也仍然保留在 selectedRowKeys 里，
+   * 底部按钮的数量与提示都按真实选中数计算。
    */
-  function selectCasesByGroup(groupPath: string) {
-    const groupIds = filtered
-      .filter((item) => matchesGroupPath(item.group_path, groupPath))
-      .map((item) => item.id);
-    const label = splitGroupPath(groupPath).leaf || '未分组';
-
-    if (groupIds.length === 0) {
-      message.warning(`分组「${label}」下没有接口`);
-      return;
-    }
-
-    if (batchSelectionMode === 'replace') {
-      setSelectedRowKeys(groupIds);
-      message.success(
-        `已按分组「${label}」替换选择，共 ${groupIds.length} 个接口（含子分组）`
-      );
-      return;
-    }
-
-    const groupIdSet = new Set(groupIds);
-    const alreadyAllSelected = groupIds.every((id) => selectedRowKeys.includes(id));
-    if (alreadyAllSelected) {
-      const next = selectedRowKeys.filter((id) => !groupIdSet.has(id));
-      setSelectedRowKeys(next);
-      message.info(
-        `已取消分组「${label}」下的 ${groupIds.length} 个接口，当前共选 ${next.length} 个`
-      );
-      return;
-    }
-
-    const merged = Array.from(new Set([...selectedRowKeys, ...groupIds]));
-    const added = merged.length - selectedRowKeys.length;
-    setSelectedRowKeys(merged);
-    message.success(
-      `已追加分组「${label}」下的 ${added} 个接口，当前共选 ${merged.length} 个`
+  const batchVisibleCases = useMemo(() => {
+    if (!batchViewGroupPath) return filtered;
+    return filtered.filter((item) =>
+      matchesGroupPath(item.group_path, batchViewGroupPath)
     );
+  }, [filtered, batchViewGroupPath]);
+
+  /**
+   * 切换下方列表展示的模块（只影响可见范围，不改动已选）.
+   *
+   * 「看哪个模块」和「选中哪些接口」是两件事：用户可能想先收窄列表看清
+   * 内容，再逐条勾选或点「全选本模块」。分组下拉与表格里的分组名都走这里。
+   */
+  function focusGroupPath(groupPath: string) {
+    setBatchViewGroupPath(groupPath || undefined);
   }
 
   // 记录工作区实际宽度，用于限制目录最大宽度，避免把右侧详情挤没
@@ -2478,7 +2460,10 @@ export default function ApiListPage() {
           }}
         >
           <span style={{ color: '#64748b', fontSize: 13 }}>
-            当前筛选 {filtered.length} 个接口，已选 {selectedRowKeys.length} 个
+            {batchViewGroupPath
+              ? `模块「${splitGroupPath(batchViewGroupPath).leaf}」下 ${batchVisibleCases.length} 个接口`
+              : `当前筛选 ${filtered.length} 个接口`}
+            ，已选 {selectedRowKeys.length} 个
           </span>
           <Space size={8} wrap>
             <Segmented
@@ -2491,25 +2476,35 @@ export default function ApiListPage() {
                 { label: '追加', value: 'append' },
                 { label: '替换', value: 'replace' },
               ]}
-              title="按分组选择时：追加到当前勾选，或替换当前勾选"
+              title="「全选本模块」时：追加到当前勾选，或替换当前勾选"
             />
             <Select
               size="small"
               showSearch
-              placeholder="按分组选择（含子分组）"
-              style={{ width: 230 }}
-              value={undefined}
+              allowClear
+              placeholder="选择模块（含子分组）"
+              style={{ width: 240 }}
+              value={batchViewGroupPath}
               optionFilterProp="label"
               options={batchGroupOptions}
               onChange={(value) => {
-                if (value) selectCasesByGroup(value);
+                // 只切换下方展示的模块；勾选用复选框或「全选本模块」
+                setBatchViewGroupPath(value || undefined);
               }}
             />
             <Button
               size="small"
-              onClick={() => setSelectedRowKeys(filtered.map((item) => item.id))}
+              onClick={() => {
+                const ids = batchVisibleCases.map((item) => item.id);
+                if (batchSelectionMode === 'replace') {
+                  setSelectedRowKeys(ids);
+                  return;
+                }
+                // 追加：并进已有勾选，且不产生重复
+                setSelectedRowKeys(Array.from(new Set([...selectedRowKeys, ...ids])));
+              }}
             >
-              全选当前筛选
+              {batchViewGroupPath ? '全选本模块' : '全选当前筛选'}
             </Button>
             <Button size="small" onClick={() => setSelectedRowKeys([])}>
               清空
@@ -2519,12 +2514,14 @@ export default function ApiListPage() {
         <Table<TestCase>
           rowKey="id"
           size="small"
-          dataSource={filtered}
+          dataSource={batchVisibleCases}
           pagination={false}
           scroll={{ y: 320 }}
           rowSelection={{
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys as string[]),
+            // 保留跨模块的已选项，勾选框只反映当前可见行
+            preserveSelectedRowKeys: true,
           }}
           columns={[
             { title: '方法', dataIndex: 'method', width: 76 },
@@ -2538,12 +2535,21 @@ export default function ApiListPage() {
                 value ? (
                   <Tooltip
                     title={
-                      batchSelectionMode === 'append'
-                        ? '点击追加该分组下全部接口（含子分组），再点一次取消'
-                        : '点击用该分组下全部接口替换当前选择'
+                      batchViewGroupPath === value
+                        ? '当前已只看该模块，点击取消筛选'
+                        : '点击只看该模块下的接口（含子分组）'
                     }
                   >
-                    <a onClick={() => selectCasesByGroup(value)}>
+                    <a
+                      onClick={() => {
+                        // 点分组名只收窄列表，勾选交给复选框/全选，语义更清楚
+                        focusGroupPath(batchViewGroupPath === value ? '' : value);
+                      }}
+                      style={{
+                        color: batchViewGroupPath === value ? '#1677ff' : undefined,
+                        fontWeight: batchViewGroupPath === value ? 600 : undefined,
+                      }}
+                    >
                       {splitGroupPath(value).leaf}
                     </a>
                   </Tooltip>
