@@ -471,6 +471,8 @@ export interface ServerConnectionInput {
   password: string;
   timeout?: number;
   allow_private?: boolean;
+  // 显式信任的主机公钥指纹（SHA256:...）；不落 localStorage，仅当前会话使用
+  trust_host_fingerprint?: string | null;
 }
 
 export interface ServerConnectionTestResult {

@@ -5,13 +5,38 @@ import axios, {
 
 interface ErrorPayload {
   message?: string;
-  detail?: string;
+  // FastAPI 校验错误时 detail 是数组（每条含 loc/msg/type）
+  detail?: string | Array<{ msg?: string; loc?: Array<string | number> }> | Record<string, unknown>;
+}
+
+export function formatDetail(detail: ErrorPayload['detail']): string | null {
+  if (!detail) return null;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    // 把 Pydantic 校验错误渲染成可读文本，避免出现 "[object Object]"
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        const field = Array.isArray(item?.loc)
+          ? item.loc.filter((part) => part !== 'body' && part !== 'query').join('.')
+          : '';
+        const msg = item?.msg || '';
+        return field && msg ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    return messages.length > 0 ? messages.join('；') : null;
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return null;
+  }
 }
 
 function extractErrorMessage(error: AxiosError<ErrorPayload>): string {
   return (
     error.response?.data?.message ||
-    error.response?.data?.detail ||
+    formatDetail(error.response?.data?.detail) ||
     error.message ||
     '请求失败'
   );

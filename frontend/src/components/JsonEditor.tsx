@@ -21,6 +21,8 @@ interface JsonEditorProps {
   disabled?: boolean;
   autoSize?: boolean | { minRows?: number; maxRows?: number };
   'data-testid'?: string;
+  /** 内联错误提示元素的 data-testid，便于页面级测试定位。 */
+  errorTestId?: string;
 }
 
 export default function JsonEditor({
@@ -33,6 +35,7 @@ export default function JsonEditor({
   disabled = false,
   autoSize,
   'data-testid': testId,
+  errorTestId,
 }: JsonEditorProps) {
   const validation = useMemo(
     () => validateJsonText(value, { expectedType, allowEmpty }),
@@ -107,7 +110,10 @@ export default function JsonEditor({
         style={{ fontFamily: 'Consolas, "Courier New", monospace' }}
       />
       {!validation.valid && value.trim() && (
-        <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>
+        <div
+          style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}
+          data-testid={errorTestId}
+        >
           {validation.error}
         </div>
       )}
