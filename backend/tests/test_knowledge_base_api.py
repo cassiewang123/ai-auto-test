@@ -114,7 +114,8 @@ def test_upload_document_builds_index(client, db_session):
 
 def test_upload_unsupported_extension_is_rejected(client):
     kb = _create_kb(client)
-    response = _upload(client, kb["id"], filename="data.xls", content=b"binary")
+    # .xls 现已支持（返回告警而非拒绝），这里改用确实不支持的扩展名
+    response = _upload(client, kb["id"], filename="data.exe", content=b"binary")
     assert response.status_code == 422
 
 

@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import html as html_module
 import io
 import json
 import re
@@ -27,13 +28,39 @@ MAX_TEXT_CHARS = 2_000_000
 MAX_WARNINGS = 50
 
 TEXT_EXTENSIONS = {".md", ".markdown", ".txt", ".log", ".json", ".csv", ".yaml", ".yml"}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", *TEXT_EXTENSIONS, *IMAGE_EXTENSIONS}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+# 表格类：openpyxl 可直接读取 .xlsx/.xlsm；.xls 需额外依赖，暂以告警提示
+SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm"}
+# OpenDocument / 其它压缩包格式：尝试按 XML 抽取文本
+ARCHIVE_TEXT_EXTENSIONS = {".odt", ".ods", ".odp", ".rtf"}
+OTHER_TEXT_EXTENSIONS = {".html", ".htm", ".xml", ".ini", ".conf", ".sql", ".properties"}
+
+SUPPORTED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".xls",
+    *SPREADSHEET_EXTENSIONS,
+    *ARCHIVE_TEXT_EXTENSIONS,
+    *OTHER_TEXT_EXTENSIONS,
+    *TEXT_EXTENSIONS,
+    *IMAGE_EXTENSIONS,
+}
+
+# 供前端展示的「可上传」清单，与 SUPPORTED_EXTENSIONS 保持一致
+SUPPORTED_EXTENSIONS_LABEL = ", ".join(sorted(SUPPORTED_EXTENSIONS))
 
 _IMAGE_OCR_WARNING = "图片格式文档本地不做 OCR，请补充正文文本或改用文本格式文档"
 _PDF_LIB_WARNING = (
     "未安装 PDF 解析库（pypdf / pdfplumber），无法解析 PDF 正文；"
     "请执行 pip install pypdf 后重新上传"
+)
+_LEGACY_DOC_WARNING = (
+    "旧版 .doc 为二进制格式，无法直接解析正文；建议另存为 .docx 后重新上传"
+)
+_LEGACY_XLS_WARNING = (
+    "旧版 .xls 需要额外依赖（xlrd），当前仅支持 .xlsx/.xlsm；"
+    "建议另存为 .xlsx 后重新上传"
 )
 
 
@@ -339,15 +366,104 @@ def _parse_image(data: bytes, filename: str, warnings: list[str]) -> str:
     return f"{IMAGE_CONTENT_PREFIX}{url}"
 
 
+def _parse_spreadsheet(data: bytes, warnings: list[str]) -> str:
+    """解析 Excel（.xlsx/.xlsm）为「工作表 + 行」的文本.
+
+    需求里常有「必填项一览」「字段对照」这类表格，按行展开比丢给模型一堆
+    逗号更易读；单元格为空时用空串占位，保持列对齐。
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        _add_warning(warnings, "未安装 openpyxl，无法解析 Excel")
+        return ""
+    try:
+        buffer = io.BytesIO(data)
+        workbook = load_workbook(buffer, read_only=True, data_only=True)
+    except Exception as exc:
+        raise DocumentParseError(f"Excel 解析失败: {exc}") from exc
+
+    blocks: list[str] = []
+    for sheet in workbook.worksheets:
+        lines: list[str] = [f"【工作表：{sheet.title}】"]
+        row_count = 0
+        for row in sheet.iter_rows(values_only=True):
+            cells = ["" if cell is None else str(cell).strip() for cell in row]
+            if not any(cells):
+                continue
+            lines.append(" | ".join(cells).rstrip(" |"))
+            row_count += 1
+            if row_count >= 5000:
+                _add_warning(warnings, f"工作表 {sheet.title} 超过 5000 行，已截断")
+                break
+        if row_count:
+            blocks.append("\n".join(lines))
+    workbook.close()
+    return "\n\n".join(blocks)
+
+
+def _parse_archive_text(data: bytes, warnings: list[str]) -> str:
+    """从 .odt/.ods/.odp/.rtf 等容器里尽量抽取可读文本.
+
+    这些格式本质是 zip（rtf 除外），正文在 XML 中。用最宽松的方式剥离标签，
+    目标是「能读懂」，不是精确还原排版。
+    """
+    if data[:5] == b"{\\rtf":
+        text = data.decode("latin-1", errors="ignore")
+        text = re.sub(r"\\[a-zA-Z]+-?\d* ?", " ", text)
+        text = text.replace("{", " ").replace("}", " ")
+        return re.sub(r"\s+", " ", text).strip()
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        _add_warning(warnings, "文件不是有效的压缩文档，无法解析正文")
+        return ""
+
+    chunks: list[str] = []
+    for name in archive.namelist():
+        if not name.endswith(".xml"):
+            continue
+        try:
+            raw = archive.read(name).decode("utf-8", errors="ignore")
+        except Exception:  # noqa: BLE001
+            continue
+        # 段落与表格单元格之间补换行，避免所有文字粘成一行
+        raw = raw.replace("</text:p>", "\n").replace("</text:h>", "\n")
+        raw = raw.replace("</table:table-cell>", " | ")
+        chunks.append(re.sub(r"<[^>]+>", "", raw))
+    if not chunks:
+        _add_warning(warnings, "未在文档中找到可提取的文本")
+    return "\n".join(chunks)
+
+
+def _parse_html_like(data: bytes, warnings: list[str]) -> str:
+    """HTML/XML 等标记文本：剥离标签后保留可读内容."""
+    text = data.decode("utf-8", errors="ignore")
+    if not text.strip():
+        text = data.decode("gbk", errors="ignore")
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
+    text = text.replace("</p>", "\n").replace("</tr>", "\n").replace("</td>", " | ")
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html_module.unescape(text)
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
 def parse_document(filename: str, data: bytes) -> ParsedDocument:
-    """把上传文件解析为纯文本，返回内容与告警."""
+    """把上传文件解析为纯文本，返回内容与告警.
+
+    支持范围见 ``SUPPORTED_EXTENSIONS``：PDF、Word、Excel、OpenDocument、
+    纯文本、代码/配置、HTML 与常见图片。无法解析出正文的格式（旧版 .doc 等）
+    不报错，而是返回空正文 + 明确告警，避免用户上传失败却不明白原因。
+    """
     extension = _extension(filename)
     if not extension:
-        raise DocumentParseError("无法识别文件类型，请使用 .pdf/.docx/.md/.txt 等格式")
-    if extension not in SUPPORTED_EXTENSIONS:
-        supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise DocumentParseError(
-            f"不支持的文件类型 {extension}，仅支持: {supported}"
+            f"无法识别文件类型，支持: {SUPPORTED_EXTENSIONS_LABEL}"
+        )
+    if extension not in SUPPORTED_EXTENSIONS:
+        raise DocumentParseError(
+            f"不支持的文件类型 {extension}，支持: {SUPPORTED_EXTENSIONS_LABEL}"
         )
     if not data:
         raise DocumentParseError("文件内容为空")
@@ -357,8 +473,20 @@ def parse_document(filename: str, data: bytes) -> ParsedDocument:
     warnings: list[str] = []
     if extension == ".docx":
         content = _parse_docx(data, warnings)
+    elif extension == ".doc":
+        _add_warning(warnings, _LEGACY_DOC_WARNING)
+        content = ""
     elif extension == ".pdf":
         content = _parse_pdf(data, warnings)
+    elif extension in SPREADSHEET_EXTENSIONS:
+        content = _parse_spreadsheet(data, warnings)
+    elif extension == ".xls":
+        _add_warning(warnings, _LEGACY_XLS_WARNING)
+        content = ""
+    elif extension in ARCHIVE_TEXT_EXTENSIONS:
+        content = _parse_archive_text(data, warnings)
+    elif extension in OTHER_TEXT_EXTENSIONS:
+        content = _parse_html_like(data, warnings)
     elif extension in IMAGE_EXTENSIONS:
         content = _parse_image(data, filename, warnings)
     else:

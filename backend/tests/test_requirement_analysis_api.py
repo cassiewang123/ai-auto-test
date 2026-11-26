@@ -47,7 +47,8 @@ def test_upload_and_list_requirement_documents(client):
 
 def test_upload_requirement_document_rejects_bad_type(client):
     requirement = _create_requirement(client)
-    response = _upload(client, requirement["id"], filename="需求.xls", content=b"bin")
+    # .xls 现已支持（返回告警而非拒绝），这里改用确实不支持的扩展名
+    response = _upload(client, requirement["id"], filename="需求.exe", content=b"bin")
     assert response.status_code == 422
 
 

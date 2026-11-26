@@ -37,6 +37,10 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { knowledgeBaseApi, requirementApi } from '../services/api';
+import {
+  DOCUMENT_ACCEPT_PATTERN,
+  DOCUMENT_SUPPORT_HINT,
+} from '../utils/documentTypes';
 
 const { TextArea } = Input;
 const { Text, Title } = Typography;
@@ -102,8 +106,7 @@ const PRIORITY_COLOR: Record<string, string> = {
   P3: 'default',
 };
 
-const ACCEPT_PATTERN =
-  '.pdf,.docx,.md,.markdown,.txt,.log,.json,.csv,.png,.jpg,.jpeg,.webp,.bmp';
+const ACCEPT_PATTERN = DOCUMENT_ACCEPT_PATTERN;
 
 function formatBytes(size: number): string {
   if (!size) return '0 B';
@@ -587,8 +590,7 @@ export default function RequirementsPage() {
               style={{ marginBottom: 12 }}
             >
               <Text type="secondary">
-                支持图片（页面原型截图）、PDF、DOCX、txt/md/log/json、csv，单文件 &lt;20MB；
-                图片不做 OCR，启用大模型后会作为页面原型随需求一起交给 AI 理解
+                {DOCUMENT_SUPPORT_HINT}；图片不做 OCR，启用大模型后会作为页面原型随需求一起交给 AI 理解
               </Text>
               <Spin spinning={documentsLoading}>
                 {documents.length === 0 ? (

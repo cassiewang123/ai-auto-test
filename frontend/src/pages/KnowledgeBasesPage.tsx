@@ -20,6 +20,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -37,6 +38,10 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { knowledgeBaseApi } from '../services/api';
+import {
+  DOCUMENT_ACCEPT_PATTERN,
+  DOCUMENT_SUPPORT_HINT,
+} from '../utils/documentTypes';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -80,7 +85,7 @@ const STRATEGY_OPTIONS = [
   { label: '按段落', value: 'paragraph' },
 ];
 
-const ACCEPT_PATTERN = '.pdf,.docx,.md,.markdown,.txt,.log,.json,.csv,.png,.jpg,.jpeg';
+const ACCEPT_PATTERN = DOCUMENT_ACCEPT_PATTERN;
 
 const STATUS_COLOR: Record<string, string> = {
   indexed: 'success',
@@ -516,9 +521,11 @@ export default function KnowledgeBasesPage() {
                 beforeUpload={handleUpload}
                 disabled={uploading}
               >
-                <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-                  上传文档
-                </Button>
+                <Tooltip title={DOCUMENT_SUPPORT_HINT}>
+                  <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
+                    上传文档
+                  </Button>
+                </Tooltip>
               </Upload>
             )
           }

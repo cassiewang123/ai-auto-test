@@ -160,8 +160,9 @@ def test_pdf_scanned_document_warns_about_missing_text(monkeypatch):
 
 
 def test_parse_unsupported_extension_raises():
+    # 用一个确实不支持的扩展名；.xls 已改为「支持但告警」，见下方专门用例
     with pytest.raises(DocumentParseError):
-        parse_document("data.xls", b"binary")
+        parse_document("data.exe", b"binary")
 
 
 def test_parse_missing_extension_raises():
@@ -254,3 +255,89 @@ def test_clean_pdf_layout_does_not_merge_new_items():
     cleaned = _clean_pdf_layout(pages)
     assert "轨迹序号1" in cleaned
     assert "上一句还没有结束轨迹序号1" not in cleaned
+
+
+# ---------------------------------------------------------------------------
+# 更多文档格式：Excel / HTML / OpenDocument / 旧版 Office
+# ---------------------------------------------------------------------------
+def _build_xlsx(rows: list[list[str]], sheet_title: str = "Sheet1") -> bytes:
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = sheet_title
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def test_parse_xlsx_keeps_table_structure():
+    """Excel 按「工作表 + 行」展开，保留列对齐，便于模型理解必填项表."""
+    data = _build_xlsx(
+        [
+            ["字段", "是否必填", "校验规则"],
+            ["分单号", "是", "唯一"],
+            ["生产日期", "是", "8位数字"],
+        ],
+        sheet_title="必填项",
+    )
+    parsed = parse_document("必填项.xlsx", data)
+
+    assert parsed.file_type == "xlsx"
+    assert not parsed.warnings
+    assert "【工作表：必填项】" in parsed.content
+    assert "字段 | 是否必填 | 校验规则" in parsed.content
+    assert "生产日期 | 是 | 8位数字" in parsed.content
+
+
+def test_parse_xlsx_handles_multiple_sheets():
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "校验规则"
+    first.append(["规则名", "说明"])
+    second = workbook.create_sheet("字段清单")
+    second.append(["字段", "类型"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+
+    parsed = parse_document("多表.xlsx", buffer.getvalue())
+    assert "【工作表：校验规则】" in parsed.content
+    assert "【工作表：字段清单】" in parsed.content
+
+
+def test_parse_xlsx_raises_on_corrupt_file():
+    with pytest.raises(DocumentParseError):
+        parse_document("损坏.xlsx", b"not-a-zip")
+
+
+def test_parse_html_strips_tags_and_keeps_text():
+    data = "<html><body><h1>需求说明</h1><p>分单号必须唯一</p></body></html>".encode()
+    parsed = parse_document("需求.html", data)
+    assert "需求说明" in parsed.content
+    assert "分单号必须唯一" in parsed.content
+    # 标签必须被剥离
+    assert "<h1>" not in parsed.content
+
+
+def test_parse_legacy_doc_returns_warning_not_error():
+    """旧版 .doc 无法解析时给出告警而不是抛错，用户能看到原因."""
+    parsed = parse_document("旧文档.doc", b"\xd0\xcf\x11\xe0binary")
+    assert parsed.content == ""
+    assert any("另存为" in w for w in parsed.warnings)
+
+
+def test_parse_legacy_xls_returns_warning():
+    parsed = parse_document("旧表格.xls", b"\xd0\xcf\x11\xe0binary")
+    assert parsed.content == ""
+    assert any(".xlsx" in w for w in parsed.warnings)
+
+
+def test_supported_extensions_cover_common_office_formats():
+    from app.services.requirement_document_parser import SUPPORTED_EXTENSIONS
+
+    for ext in (".pdf", ".docx", ".xlsx", ".csv", ".png", ".md", ".html"):
+        assert ext in SUPPORTED_EXTENSIONS
