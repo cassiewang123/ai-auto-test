@@ -52,6 +52,11 @@ class TestDesignSession(Base):
     status: Mapped[str] = mapped_column(String(16), default="clarifying", index=True)
     # 分析引擎：rule / llm
     engine: Mapped[str] = mapped_column(String(16), default="rule")
+    # 最近一次生成使用的具体模型名（engine=llm 时有值，便于区分是哪个模型）
+    engine_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # 回退到规则引擎的原因（engine=rule 时说明「为什么没用上大模型」，
+    # 例如「未启用外部模型」「调用失败：超时」「输出被截断」）
+    engine_fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 评审维度权重：{"覆盖完整性": 3, "正确性": 3, ...}
     review_dimensions: Mapped[dict] = mapped_column(JSONText, default=dict)
     # 用户补充描述

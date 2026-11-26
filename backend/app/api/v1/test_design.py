@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.database import get_db
 from app.models.api_case_record import ApiCaseRecord
@@ -58,6 +59,8 @@ from app.services.requirement_document_parser import (
 )
 from app.services.test_design_service import (
     DEFAULT_REVIEW_DIMENSIONS,
+    ENGINE_LLM,
+    ENGINE_RULE,
     MODE_API,
     MODE_MANUAL,
     VALID_OUTPUT_MODES,
@@ -88,6 +91,41 @@ _API_CASE_TYPE_BY_CATEGORY = {
 # ===========================================================================
 # 内部辅助
 # ===========================================================================
+def _record_engine(
+    db: Session,
+    session: TestDesignSession,
+    engine: str,
+    fallback_reason: list[str] | None = None,
+) -> None:
+    """记录本次生成由哪个引擎完成，以及（回退时）具体原因.
+
+    用户需要能自己判断「这条结果是大模型生成的还是规则引擎生成的」，
+    仅靠会话上一个标签不够：同一次生成可能因超时/截断回退，需要看到原因。
+    """
+    session.engine = engine
+    if engine == ENGINE_LLM:
+        session.engine_model = get_settings().LLM_MODEL
+        session.engine_fallback_reason = None
+        return
+
+    session.engine_model = None
+    reason = (fallback_reason or [None])[-1]
+    session.engine_fallback_reason = reason or "未使用大模型"
+
+
+def _engine_message(engine: str, count: int) -> str:
+    """生成一条可读的引擎说明，写入对话流便于回溯."""
+    if engine == ENGINE_LLM:
+        return (
+            f"已由大模型（{get_settings().LLM_MODEL}）生成 {count} 条内容。"
+        )
+    return (
+        f"已由规则引擎（未调用大模型）生成 {count} 条内容。"
+        "规则引擎只做关键词推断，步骤与测试数据较笼统；"
+        "要获得贴合需求的可执行用例，请检查 AI 模型配置。"
+    )
+
+
 def _get_session_or_404(db: Session, session_id: str) -> TestDesignSession:
     item = db.get(TestDesignSession, session_id)
     if not item:
@@ -559,6 +597,7 @@ def generate_points(
     ]
     # 需求附件里的页面原型图：交给多模态模型，让它看到真实界面
     prototype_images = extract_image_data_urls(requirement_text)
+    fallback_reason: list[str] = []
     drafts, engine = generate_test_points(
         title=session.title or (session.prompt or "测试范围"),
         requirement_text=strip_image_markers(requirement_text or (session.prompt or "")),
@@ -566,6 +605,7 @@ def generate_points(
         descriptions=descriptions,
         knowledge_context=knowledge_context,
         prototype_images=prototype_images,
+        fallback_reason=fallback_reason,
     )
     if prototype_images:
         _append_message(
@@ -576,13 +616,14 @@ def generate_points(
         )
 
     _replace_points(db, session, drafts)
-    session.engine = engine
+    _record_engine(db, session, engine, fallback_reason)
     session.status = "points_ready"
+    # 把「用了哪个引擎」写进对话流，用户回到会话即可看到，无需猜
     _append_message(
         session,
         "assistant",
-        f"已生成 {len(drafts)} 个待确认测试点，确认后将据此生成用例。",
-        kind="points",
+        _engine_message(engine, len(drafts)),
+        kind="engine",
     )
     db.commit()
     db.refresh(session)
@@ -690,6 +731,7 @@ def generate_cases_endpoint(
     else:
         session.output_mode = output_mode
 
+    fallback_reason: list[str] = []
     case_drafts, engine = generate_cases(
         points=drafts,
         requirement_title=session.title or "需求",
@@ -697,6 +739,7 @@ def generate_cases_endpoint(
         knowledge_context=knowledge_context,
         output_mode=output_mode,
         prototype_images=extract_image_data_urls(requirement_text),
+        fallback_reason=fallback_reason,
     )
 
     point_by_title = {point.point: point.id for point in chosen}
@@ -707,12 +750,16 @@ def generate_cases_endpoint(
         point_id = point_by_title.get(drafts_title)
         if point_id:
             case.test_point_id = point_id
-    session.engine = engine
+    _record_engine(db, session, engine, fallback_reason)
     session.status = "cases_ready"
+    engine_label = (
+        f"大模型（{get_settings().LLM_MODEL}）" if engine == ENGINE_LLM else "规则引擎"
+    )
     _append_message(
         session,
         "assistant",
-        f"已根据 {len(chosen)} 个测试点生成 {len(created)} 条用例草稿",
+        f"已根据 {len(chosen)} 个测试点，由{engine_label}生成 "
+        f"{len(created)} 条用例草稿。",
         kind="cases",
     )
     db.commit()

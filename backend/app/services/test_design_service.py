@@ -383,6 +383,26 @@ def _balanced_slice(text: str, opener: str, closer: str) -> str | None:
     return None
 
 
+def _client_disabled_reason(client: LLMClient) -> str:
+    """说明「为什么没用上大模型」，用于界面提示与排查."""
+    enabled = getattr(client.settings, "LLM_EXTERNAL_ENABLED", False)
+    has_key = bool(getattr(client.settings, "OPENAI_API_KEY", ""))
+    if not enabled and not has_key:
+        return "未启用外部模型（LLM_EXTERNAL_ENABLED=false 且未配置 API Key）"
+    if not enabled:
+        return "外部模型总闸关闭（LLM_EXTERNAL_ENABLED=false）"
+    if not has_key:
+        return "未配置 API Key（OPENAI_API_KEY 为空）"
+    return "大模型客户端不可用"
+
+
+def _llm_failure_reason(content: str | None) -> str:
+    """模型返回了但结果不可用时的原因说明."""
+    if not content:
+        return "大模型调用失败或返回空内容（详见后端日志）"
+    return "大模型返回的内容不是有效 JSON（可能被 max_tokens 截断）"
+
+
 def generate_test_points(
     title: str,
     requirement_text: str,
@@ -392,21 +412,22 @@ def generate_test_points(
     ai_service: Any | None = None,
     max_points: int = 60,
     prototype_images: list[str] | None = None,
+    fallback_reason: list[str] | None = None,
 ) -> tuple[list[TestPointDraft], str]:
     """生成测试点，返回 ``(测试点列表, 引擎标识)``.
 
     ``ai_service`` 参数保留为可注入依赖（测试用），实际调用走 LLMClient。
     ``prototype_images`` 是页面原型图的 data URL 列表，会以多模态方式
     随提示词一起发送，让模型看到真实页面而不是只读文字。
+    ``fallback_reason``：传入一个 list 时，若回退到规则引擎，会往里写入
+    原因说明，供接口返回给界面展示（避免用户只看到「规则引擎」却不知为何）。
     """
     client: LLMClient = ai_service or get_llm_client()
     if not client.enabled():
-        logger.info(
-            "AI 用例生成未启用外部模型，使用规则引擎"
-            "（LLM_EXTERNAL_ENABLED=%s，Key 已配置=%s）",
-            getattr(client.settings, "LLM_EXTERNAL_ENABLED", "?"),
-            bool(getattr(client.settings, "OPENAI_API_KEY", "")),
-        )
+        reason = _client_disabled_reason(client)
+        logger.info("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
         return (
             generate_test_points_by_rules(
                 title, requirement_text, function_items, descriptions, max_points
@@ -419,6 +440,10 @@ def generate_test_points(
     payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
+        reason = _llm_failure_reason(content)
+        logger.warning("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
         return (
             generate_test_points_by_rules(
                 title, requirement_text, function_items, descriptions, max_points
@@ -640,6 +665,7 @@ def generate_cases(
     max_cases: int = 200,
     output_mode: str = MODE_MANUAL,
     prototype_images: list[str] | None = None,
+    fallback_reason: list[str] | None = None,
 ) -> tuple[list[CaseDraft], str]:
     """为已确认的测试点生成用例草稿，返回 ``(用例列表, 引擎标识)``.
 
@@ -654,6 +680,10 @@ def generate_cases(
 
     client: LLMClient = ai_service or get_llm_client()
     if not client.enabled():
+        reason = _client_disabled_reason(client)
+        logger.info("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
         return (
             generate_cases_by_rules(points, requirement_title, max_cases),
             ENGINE_RULE,
@@ -671,6 +701,10 @@ def generate_cases(
     payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
+        reason = _llm_failure_reason(content)
+        logger.warning("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
         return generate_cases_by_rules(points, requirement_title, max_cases), ENGINE_RULE
 
     cases: list[CaseDraft] = []

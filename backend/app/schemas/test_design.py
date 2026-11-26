@@ -192,6 +192,10 @@ class TestDesignSessionResponse(BaseModel):
     mode: str = "quick"
     status: str = "clarifying"
     engine: str = "rule"
+    # engine=llm 时的具体模型名；engine=rule 时说明回退原因，便于用户判断
+    # 本次结果是「大模型生成」还是「规则引擎兜底」
+    engine_model: str | None = None
+    engine_fallback_reason: str | None = None
     output_mode: str = "manual"
     review_dimensions: dict[str, int] = Field(default_factory=dict)
     prompt: str | None = None

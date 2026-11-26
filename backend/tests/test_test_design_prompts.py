@@ -16,6 +16,12 @@ class FakeClient:
         self._enabled = enabled
         self.prompts: list[str] = []
         self.images: list[list[str]] = []
+        # 回退原因诊断会读这两个字段，真实 LLMClient 上有同名属性
+        from types import SimpleNamespace
+
+        self.settings = SimpleNamespace(
+            LLM_EXTERNAL_ENABLED=enabled, OPENAI_API_KEY="sk-fake" if enabled else ""
+        )
 
     def enabled(self) -> bool:
         return self._enabled

@@ -514,3 +514,61 @@ def test_import_skips_api_case_without_request(client, db_session):
     data = response.json()["data"]
     assert data["api_case_ids"] == []
     assert data["created_count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 引擎可辨识：用户要能判断是大模型还是规则引擎
+# ---------------------------------------------------------------------------
+def test_rule_engine_records_fallback_reason(client):
+    """未启用大模型时，会话应记录回退原因，供界面展示."""
+    requirement = _create_requirement(client)
+    session = _create_session(client, requirement_id=requirement["id"])
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-points")
+
+    detail = client.get(f"/api/v1/test-design/sessions/{session['id']}").json()["data"]
+    assert detail["engine"] == "rule"
+    assert detail["engine_fallback_reason"]
+    assert detail["engine_model"] is None
+    # 回退原因要能说明具体缺什么
+    reason = detail["engine_fallback_reason"]
+    assert ("未启用" in reason) or ("API Key" in reason)
+
+
+def test_engine_message_explains_which_engine_used(client):
+    """对话流里要有明确的引擎说明，便于事后回溯."""
+    requirement = _create_requirement(client)
+    session = _create_session(client, requirement_id=requirement["id"])
+    detail = client.post(
+        f"/api/v1/test-design/sessions/{session['id']}/generate-points"
+    ).json()["data"]
+
+    engine_msgs = [
+        m for m in detail["messages"] if m.get("kind") == "engine"
+    ]
+    assert engine_msgs
+    content = engine_msgs[0]["content"]
+    assert "规则引擎" in content or "大模型" in content
+
+
+def test_llm_engine_clears_fallback_reason(client, monkeypatch):
+    """大模型成功时不应残留回退原因."""
+    from app.services import test_design_service as svc
+
+    class _Client:
+        enabled = staticmethod(lambda: True)
+
+        @staticmethod
+        def complete_with_images(prompt, images=None):
+            return '[{"module":"m","point":"p","category":"功能","priority":"P0"}]'
+
+    monkeypatch.setattr(svc, "get_llm_client", lambda: _Client())
+
+    requirement = _create_requirement(client)
+    session = _create_session(client, requirement_id=requirement["id"])
+    detail = client.post(
+        f"/api/v1/test-design/sessions/{session['id']}/generate-points"
+    ).json()["data"]
+
+    assert detail["engine"] == "llm"
+    assert detail["engine_fallback_reason"] is None
+    assert detail["engine_model"]

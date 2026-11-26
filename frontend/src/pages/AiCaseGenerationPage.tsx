@@ -34,6 +34,7 @@ import {
   RobotOutlined,
   SaveOutlined,
   SendOutlined,
+  WarningOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
@@ -92,6 +93,10 @@ type Session = {
   mode: string;
   status: string;
   engine: string;
+  /** engine=llm 时的具体模型名 */
+  engine_model?: string | null;
+  /** engine=rule 时的回退原因，用于向用户解释为何没走大模型 */
+  engine_fallback_reason?: string | null;
   /** manual 人工执行 / api 接口自动化 */
   output_mode?: string;
   prompt?: string | null;
@@ -702,9 +707,29 @@ export default function AiCaseGenerationPage() {
                 <Tag color={STATUS_COLOR[session.status]}>
                   {STATUS_LABEL[session.status] || session.status}
                 </Tag>
-                <Tag color={session.engine === 'llm' ? 'green' : 'blue'}>
-                  {session.engine === 'llm' ? 'LLM' : '规则引擎'}
-                </Tag>
+                {session.engine === 'llm' ? (
+                  <Tooltip
+                    title={`由大模型 ${session.engine_model || ''} 生成，步骤与测试数据为模型产出`}
+                  >
+                    <Tag color="green" icon={<RobotOutlined />}>
+                      {session.engine_model
+                        ? `大模型 · ${session.engine_model}`
+                        : '大模型生成'}
+                    </Tag>
+                  </Tooltip>
+                ) : (
+                  <Tooltip
+                    title={
+                      session.engine_fallback_reason
+                        ? `未使用大模型：${session.engine_fallback_reason}`
+                        : '未使用大模型，内容由内置模板生成，步骤较笼统'
+                    }
+                  >
+                    <Tag color="orange" icon={<WarningOutlined />}>
+                      规则引擎（未用大模型）
+                    </Tag>
+                  </Tooltip>
+                )}
               </Space>
             }
             extra={
@@ -739,6 +764,34 @@ export default function AiCaseGenerationPage() {
               </Space>
             }
           >
+            {/* 明确告知本次结果由哪个引擎产出：规则引擎的步骤与测试数据
+                只有模板级别，用户需要知道并据此决定是否重新生成 */}
+            {session.engine === 'llm' ? (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={`本会话内容由大模型生成${
+                  session.engine_model ? `（${session.engine_model}）` : ''
+                }，步骤与测试数据来自模型对需求的理解`}
+              />
+            ) : (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="本会话内容由规则引擎生成，未调用大模型"
+                description={
+                  <span>
+                    规则引擎只做关键词推断，操作步骤和测试数据会比较笼统。
+                    {session.engine_fallback_reason
+                      ? `未使用大模型的原因：${session.engine_fallback_reason}。`
+                      : ''}
+                    修复配置后点「重新拆解测试点」即可用大模型重新生成。
+                  </span>
+                }
+              />
+            )}
             <Tabs
               activeKey={detailTab}
               onChange={setDetailTab}
