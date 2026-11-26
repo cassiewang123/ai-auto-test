@@ -1398,6 +1398,14 @@ export const functionalTestCaseApi = {
 };
 
 // ========== AI 测试用例生成 ==========
+/**
+ * AI 生成类接口的超时（毫秒）。
+ *
+ * 这类接口背后是一次真实的大模型调用：7 个测试点实测约 90 秒，需求更长时
+ * 更久。全局 axios 超时是 30 秒，直接套用会让前端先报
+ * 「timeout of 30000ms exceeded」，而服务端其实还在正常生成。
+ */
+const AI_GENERATION_TIMEOUT_MS = 300000;
 export const testDesignApi = {
   listSessions: (params?: {
     page?: number;
@@ -1425,9 +1433,13 @@ export const testDesignApi = {
     api.post<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/messages`, {
       message,
     }),
+  // 生成测试点会调用大模型：需求长、要点多时可能耗时一两分钟，
+  // 远超过全局 30s 超时，因此按请求单独放宽。
   generatePoints: (id: string) =>
     api.post<unknown, ApiResponse<any>>(
-      `/test-design/sessions/${id}/generate-points`
+      `/test-design/sessions/${id}/generate-points`,
+      null,
+      { timeout: AI_GENERATION_TIMEOUT_MS }
     ),
   updatePoints: (
     id: string,
@@ -1443,10 +1455,12 @@ export const testDesignApi = {
     api.put<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/points`, {
       points,
     }),
+  // 生成用例同样走大模型，且一次可能产出上百条，超时更长
   generateCases: (id: string, pointIds?: string[], outputMode?: 'manual' | 'api') =>
     api.post<unknown, ApiResponse<any>>(
       `/test-design/sessions/${id}/generate-cases`,
-      { point_ids: pointIds || null, output_mode: outputMode || null }
+      { point_ids: pointIds || null, output_mode: outputMode || null },
+      { timeout: AI_GENERATION_TIMEOUT_MS }
     ),
   review: (id: string, dimensions?: Record<string, number>) =>
     api.post<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/review`, {
@@ -1455,6 +1469,7 @@ export const testDesignApi = {
   importCases: (id: string, caseIds?: string[], projectId?: string | null) =>
     api.post<unknown, ApiResponse<any>>(
       `/test-design/sessions/${id}/import-cases`,
-      { case_ids: caseIds || null, project_id: projectId || null }
+      { case_ids: caseIds || null, project_id: projectId || null },
+      { timeout: 120000 }
     ),
 };

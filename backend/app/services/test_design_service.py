@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.llm_client import LLMClient, get_llm_client
+
+logger = logging.getLogger(__name__)
 
 ENGINE_RULE = "rule"
 ENGINE_LLM = "llm"
@@ -398,6 +401,12 @@ def generate_test_points(
     """
     client: LLMClient = ai_service or get_llm_client()
     if not client.enabled():
+        logger.info(
+            "AI 用例生成未启用外部模型，使用规则引擎"
+            "（LLM_EXTERNAL_ENABLED=%s，Key 已配置=%s）",
+            getattr(client.settings, "LLM_EXTERNAL_ENABLED", "?"),
+            bool(getattr(client.settings, "OPENAI_API_KEY", "")),
+        )
         return (
             generate_test_points_by_rules(
                 title, requirement_text, function_items, descriptions, max_points
