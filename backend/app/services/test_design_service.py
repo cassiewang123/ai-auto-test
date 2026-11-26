@@ -403,6 +403,83 @@ def _llm_failure_reason(content: str | None) -> str:
     return "大模型返回的内容不是有效 JSON（可能被 max_tokens 截断）"
 
 
+def _generate_test_points_in_batches(
+    client: LLMClient,
+    title: str,
+    requirement_text: str,
+    function_items: list[dict[str, Any]] | None,
+    knowledge_context: str,
+    max_points: int,
+    prototype_images: list[str] | None,
+) -> list[TestPointDraft] | None:
+    """分批生成测试点，绕开单次输出被 max_tokens 截断的问题.
+
+    思路：一次性要 60 个点时，模型输出往往超出 token 上限，JSON 在中间被
+    切断，导致整批作废。改为每批只要求少量条目，并告诉模型「这是第 N 批，
+    跳过已列出的点」，多轮累积。
+
+    只要有一批成功，就不算失败；全部批次都失败才返回 None（交由调用方回退）。
+    """
+    collected: list[TestPointDraft] = []
+    seen_points: set[str] = set()
+    # 每批条数不宜过大——输出越长越容易再次被截断
+    per_batch = max(3, min(8, max_points))
+    max_batches = 8
+
+    for batch_index in range(max_batches):
+        remaining = max_points - len(collected)
+        if remaining <= 0:
+            break
+        want = min(per_batch, remaining)
+        already = "、".join(sorted(seen_points)[:20]) or "无"
+
+        batch_prompt = build_points_prompt(
+            title, requirement_text, function_items, knowledge_context,
+            has_prototype=bool(prototype_images),
+        )
+        batch_prompt += (
+            f"\n\n【分批要求】这是第 {batch_index + 1} 批，"
+            f"本次只需输出 {want} 条**新的**测试点，不要重复以下已产出的点：\n"
+            f"{already}\n"
+            f"请尽量覆盖需求中尚未涉及的部分。只返回 JSON 数组。"
+        )
+
+        content = client.complete_with_images(batch_prompt, prototype_images)
+        payload = _parse_json_payload(content or "")
+        if not isinstance(payload, list) or not payload:
+            # 这一批失败：若此前已有结果就用已有的，否则继续尝试下一批
+            logger.info("第 %d 批测试点生成失败，已累计 %d 条",
+                        batch_index + 1, len(collected))
+            continue
+
+        added = 0
+        for entry in payload[:want]:
+            if not isinstance(entry, dict):
+                continue
+            point_text = str(entry.get("point") or "").strip()
+            if not point_text or point_text in seen_points:
+                continue
+            seen_points.add(point_text)
+            collected.append(
+                TestPointDraft(
+                    module=str(entry.get("module") or title or "通用功能")[:32],
+                    point=point_text[:256],
+                    category=normalize_category(entry.get("category")),
+                    priority=normalize_priority(entry.get("priority")),
+                    trace_source=str(entry.get("trace_source") or "")[:256] or None,
+                )
+            )
+            added += 1
+            if len(collected) >= max_points:
+                break
+
+        if added == 0:
+            # 模型已无新点可给，提前结束，避免空转
+            break
+
+    return collected or None
+
+
 def generate_test_points(
     title: str,
     requirement_text: str,
@@ -440,6 +517,23 @@ def generate_test_points(
     payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
+        # 一次性生成太多点数时，JSON 很容易被 max_tokens 截断。改为分批：
+        # 让模型每次只产出一部分，逐批累积，避免「全部作废」。
+        retry = _generate_test_points_in_batches(
+            client,
+            title,
+            requirement_text,
+            function_items,
+            knowledge_context,
+            max_points,
+            prototype_images,
+        )
+        if retry is not None:
+            logger.info(
+                "一次性生成被截断，改用分批生成成功，共 %d 个测试点", len(retry)
+            )
+            return retry, ENGINE_LLM
+
         reason = _llm_failure_reason(content)
         logger.warning("AI 用例生成回退规则引擎：%s", reason)
         if fallback_reason is not None:
@@ -656,6 +750,100 @@ def _case_from_point(
     )
 
 
+def _normalize_case_entry(entry: dict) -> CaseDraft | None:
+    """把模型返回的一条 JSON 转成 CaseDraft；缺标题则丢弃."""
+    title = str(entry.get("title") or "").strip()
+    if not title:
+        return None
+    steps = entry.get("steps") or []
+    if isinstance(steps, str):
+        steps = [steps]
+    return CaseDraft(
+        title=title[:256],
+        module=str(entry.get("module") or "通用功能")[:128],
+        category=normalize_category(entry.get("category")),
+        priority=normalize_priority(entry.get("priority")),
+        preconditions=str(entry.get("preconditions") or ""),
+        steps=[str(step) for step in steps][:20],
+        expected=str(entry.get("expected") or ""),
+        trace_source=str(entry.get("trace_source") or "")[:256] or None,
+        point_title=str(entry.get("point_title") or title)[:256],
+        test_data=_normalize_test_data(entry.get("test_data")),
+        request_method=_normalize_method(entry.get("request_method")),
+        request_url=_normalize_url(entry.get("request_url")),
+        request_headers=_normalize_dict(entry.get("request_headers")),
+        request_body=entry.get("request_body"),
+        assertions=_normalize_assertions(entry.get("assertions")),
+    )
+
+
+def _generate_cases_in_batches(
+    client: LLMClient,
+    points: list[TestPointDraft],
+    requirement_title: str,
+    requirement_text: str,
+    knowledge_context: str,
+    output_mode: str,
+    prototype_images: list[str] | None,
+    max_cases: int,
+) -> list[CaseDraft] | None:
+    """分批生成用例，绕开单次输出被 max_tokens 截断的问题.
+
+    把测试点切成小批，每批单独一次模型调用。一批失败不影响其它批，
+    已成功的用例照常保留——这比「一次失败全盘回退规则引擎」更接近用户预期。
+
+    用例本身比测试点长得多（含前置条件、步骤、预期、测试数据），因此每批
+    点数要比测试点更少。
+    """
+    if not points:
+        return None
+    # 每条用例的输出远长于测试点，每批只放少量测试点
+    points_per_batch = 3
+    collected: list[CaseDraft] = []
+    seen_titles: set[str] = set()
+
+    for start in range(0, len(points), points_per_batch):
+        batch = points[start : start + points_per_batch]
+        if len(collected) >= max_cases:
+            break
+
+        batch_prompt = build_cases_prompt(
+            batch,
+            requirement_title,
+            requirement_text,
+            knowledge_context,
+            output_mode=output_mode,
+            has_prototype=bool(prototype_images),
+        )
+        batch_prompt += (
+            f"\n\n【分批要求】本次只针对上面 {len(batch)} 个测试点生成用例，"
+            "每个测试点 1 条用例即可，保证 JSON 完整闭合。只返回 JSON 数组。"
+        )
+
+        content = client.complete_with_images(batch_prompt, prototype_images)
+        payload = _parse_json_payload(content or "")
+        if not isinstance(payload, list) or not payload:
+            logger.info(
+                "用例分批生成：第 %d 批失败，已累计 %d 条",
+                start // points_per_batch + 1,
+                len(collected),
+            )
+            continue
+
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            draft = _normalize_case_entry(entry)
+            if draft is None or draft.title in seen_titles:
+                continue
+            seen_titles.add(draft.title)
+            collected.append(draft)
+            if len(collected) >= max_cases:
+                break
+
+    return collected or None
+
+
 def generate_cases(
     points: list[TestPointDraft],
     requirement_title: str,
@@ -701,6 +889,21 @@ def generate_cases(
     payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
+        # 同上：命中数多时单次输出易被截断，改为分批生成，避免整批作废
+        retry = _generate_cases_in_batches(
+            client,
+            points,
+            requirement_title,
+            requirement_text,
+            knowledge_context,
+            output_mode,
+            prototype_images,
+            max_cases,
+        )
+        if retry is not None:
+            logger.info("一次性生成被截断，改用分批生成成功，共 %d 条用例", len(retry))
+            return retry, ENGINE_LLM
+
         reason = _llm_failure_reason(content)
         logger.warning("AI 用例生成回退规则引擎：%s", reason)
         if fallback_reason is not None:
@@ -711,31 +914,9 @@ def generate_cases(
     for entry in payload[:max_cases]:
         if not isinstance(entry, dict):
             continue
-        title = str(entry.get("title") or "").strip()
-        if not title:
-            continue
-        steps = entry.get("steps") or []
-        if isinstance(steps, str):
-            steps = [steps]
-        cases.append(
-            CaseDraft(
-                title=title[:256],
-                module=str(entry.get("module") or "通用功能")[:128],
-                category=normalize_category(entry.get("category")),
-                priority=normalize_priority(entry.get("priority")),
-                preconditions=str(entry.get("preconditions") or ""),
-                steps=[str(step) for step in steps][:20],
-                expected=str(entry.get("expected") or ""),
-                trace_source=str(entry.get("trace_source") or "")[:256] or None,
-                point_title=str(entry.get("point_title") or title)[:256],
-                test_data=_normalize_test_data(entry.get("test_data")),
-                request_method=_normalize_method(entry.get("request_method")),
-                request_url=_normalize_url(entry.get("request_url")),
-                request_headers=_normalize_dict(entry.get("request_headers")),
-                request_body=entry.get("request_body"),
-                assertions=_normalize_assertions(entry.get("assertions")),
-            )
-        )
+        draft = _normalize_case_entry(entry)
+        if draft is not None:
+            cases.append(draft)
     if not cases:
         return generate_cases_by_rules(points, requirement_title, max_cases), ENGINE_RULE
     return cases, ENGINE_LLM

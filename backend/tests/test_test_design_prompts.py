@@ -310,3 +310,94 @@ def test_extract_quoted_terms_handles_multiple_quote_styles():
 def test_extract_quoted_terms_returns_empty_without_quotes():
     assert svc._extract_quoted_terms("没有任何引号的普通句子") == []
     assert svc._extract_quoted_terms(None) == []
+
+
+# ---------------------------------------------------------------------------
+# 分批生成：单次输出被截断时不应整批作废
+# ---------------------------------------------------------------------------
+class _StubClient:
+    """按调用次数返回不同结果的假客户端."""
+
+    def __init__(self, responses: list[str]) -> None:
+        from types import SimpleNamespace
+
+        self.responses = responses
+        self.calls = 0
+        self.settings = SimpleNamespace(
+            LLM_EXTERNAL_ENABLED=True, OPENAI_API_KEY="sk-fake"
+        )
+
+    def enabled(self) -> bool:
+        return True
+
+    def complete(self, prompt: str):
+        return self._next()
+
+    def complete_with_images(self, prompt: str, image_paths=None):
+        return self._next()
+
+    def _next(self):
+        index = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return self.responses[index]
+
+
+def test_points_batch_fallback_recovers_from_truncation():
+    """首轮返回被截断的 JSON 时，应改用分批继续生成而不是回退规则引擎."""
+    truncated = '[{"module": "m", "point": "被截断的点"'  # 故意不闭合
+    batch_ok = '[{"module":"m","point":"分批点 A","category":"功能","priority":"P0"}]'
+
+    client = _StubClient([truncated, batch_ok])
+    points, engine = svc.generate_test_points(
+        "需求", "需求正文", ai_service=client, max_points=3
+    )
+
+    assert engine == svc.ENGINE_LLM
+    assert points
+    # 分批确实发生了：首轮之外还有后续调用
+    assert client.calls > 1
+
+
+def test_points_batch_returns_none_when_all_fail():
+    client = _StubClient(["不是 JSON"])
+    points, engine = svc.generate_test_points(
+        "需求", "需求正文", ai_service=client, max_points=3
+    )
+    assert engine == svc.ENGINE_RULE
+    assert points
+
+
+def test_cases_batch_fallback_recovers_from_truncation():
+    truncated = '[{"title": "被截断"'
+    batch_ok = (
+        '[{"title":"分批用例","steps":["a"],"expected":"b",'
+        '"test_data":[{"field":"F","value":"V"}]}]'
+    )
+    client = _StubClient([truncated, batch_ok])
+
+    cases, engine = svc.generate_cases(
+        [svc.TestPointDraft("m", "p", "功能", "P0")],
+        "需求",
+        "需求正文",
+        ai_service=client,
+    )
+    assert engine == svc.ENGINE_LLM
+    assert cases
+    assert cases[0].test_data
+
+
+def test_cases_batch_deduplicates_titles():
+    same = (
+        '[{"title":"同一条","steps":["a"],"expected":"b"}]'
+    )
+    client = _StubClient(['broken', same])
+    cases, engine = svc.generate_cases(
+        [svc.TestPointDraft("m", "p1", "功能", "P0"),
+         svc.TestPointDraft("m", "p2", "功能", "P0")],
+        "需求",
+        "正文",
+        ai_service=client,
+    )
+    assert engine == svc.ENGINE_LLM
+    titles = [c.title for c in cases]
+    assert len(titles) == len(set(titles))
