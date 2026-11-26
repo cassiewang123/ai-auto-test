@@ -45,7 +45,12 @@ def image_mime_type(path: str | Path) -> str:
 
 
 class LLMClient:
-    """封装一次 LLM 调用的最小客户端."""
+    """封装一次 LLM 调用的最小客户端.
+
+    配置来源：本地 ``.env``（LLM_EXTERNAL_ENABLED / OPENAI_API_KEY /
+    LLM_MODEL / LLM_BASE_URL）。Key 只存在本机配置文件中，不进入代码仓库，
+    也不通过任何接口回传。
+    """
 
     def __init__(self) -> None:
         self.settings = get_settings()

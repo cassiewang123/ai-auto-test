@@ -1,0 +1,38 @@
+#!/bin/sh
+# 提交前拦截敏感信息泄漏。
+#
+# 背景：LLM 的 API Key 写在本地 .env 里（已被 .gitignore 忽略），但如果有人
+# 执行 `git add -f .env` 或把 Key 抄进被跟踪的文件，Key 就会进入仓库并推到
+# GitHub。这里做两道检查：
+#   1. 暂存区里不允许出现 .env / .env.* 等本地配置；
+#   2. 暂存的文本改动里不允许出现常见 Key 形态（sk-... 等）。
+#
+# 跳过方式（确认无风险时）：
+#   git commit --no-verify
+
+set -e
+
+# ---- 1. 禁止提交本地环境文件 -------------------------------------------------
+blocked=$(git diff --cached --name-only --diff-filter=ACM | \
+  grep -E '(^|/)\.env($|\.[^/]*$)' | grep -v '\.example$' || true)
+if [ -n "$blocked" ]; then
+  echo "[pre-commit] 拒绝提交本地环境文件（可能包含密钥）:" >&2
+  echo "$blocked" | sed 's/^/  - /' >&2
+  echo "请执行 git reset HEAD <文件> 取消暂存；密钥应只保存在本机 .env。" >&2
+  exit 1
+fi
+
+# ---- 2. 禁止提交疑似 API Key 的明文 -----------------------------------------
+# 只扫描暂存区里新增/修改的行，避免因历史内容误报。
+secret_hits=$(git diff --cached -U0 -- . ':(exclude)*.md' ':(exclude)*.lock' | \
+  grep -E '^\+' | \
+  grep -Ei '(sk-[A-Za-z0-9_-]{16,}|api[_-]?key[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_-]{16,})' | \
+  grep -viE '(example|placeholder|your[_-]?key|xxxx|<.*>|\$\{|os\.environ|getenv)' || true)
+if [ -n "$secret_hits" ]; then
+  echo "[pre-commit] 拒绝提交疑似明文密钥:" >&2
+  echo "$secret_hits" | head -5 | sed 's/^/  /' >&2
+  echo "请把密钥移到本机 .env（已在 .gitignore 中），代码里改为读取配置。" >&2
+  exit 1
+fi
+
+exit 0

@@ -97,6 +97,35 @@ python -m pip install -r backend\requirements.txt
 python -m pip install .\test-engine
 ```
 
+### 启用 AI 用例生成（可选）
+
+「AI 用例生成」默认使用内置规则引擎，产出偏模板化。要让它结合需求原文与
+页面原型生成可执行用例，需要接入真实大模型。
+
+在**本机** `.env` 中填写（`.env` 已被 `.gitignore` 忽略，不会进入仓库）：
+
+```dotenv
+LLM_EXTERNAL_ENABLED=true
+OPENAI_API_KEY=sk-你的密钥
+LLM_MODEL=gpt-4o          # 需识别页面原型图，请用支持视觉输入的模型
+LLM_BASE_URL=             # 走中转/私有网关时填写，官方接口留空
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=8000
+```
+
+改完重启后端生效：
+
+```powershell
+powershell -File scripts\stop-detached.ps1
+powershell -File scripts\start-detached.ps1
+```
+
+`LLM_EXTERNAL_ENABLED=false` 或 Key 为空时，任何需求都不会被外发。
+
+**密钥安全**：仓库已配置 `core.hooksPath=.githooks`，提交时会自动拦截
+`.env` 与疑似明文密钥（详见 `.githooks/README.md`）。不要把 Key 贴进对话、
+提交说明或任何被跟踪的文件。
+
 首次准备前端依赖时：
 
 ```powershell
