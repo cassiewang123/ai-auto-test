@@ -90,6 +90,38 @@ class LLMClient:
         return kwargs
 
     # ---------------- 调用 ----------------
+    @staticmethod
+    def _extract_content(response, *, prompt_hint: str = "") -> str | None:
+        """取出回复正文；被 max_tokens 截断导致空内容时明确告警.
+
+        推理类模型会先输出思考过程，占满 max_tokens 后正文为空、finish_reason
+        为 ``length``。这种情况若静默返回 None，调用方只会看到一个没有解释的
+        「回落到规则引擎」，很难排查；这里把原因写进日志。
+        """
+        choice = response.choices[0]
+        content = (choice.message.content or "").strip()
+        if not content:
+            reason = getattr(choice, "finish_reason", None)
+            if reason == "length":
+                logger.warning(
+                    "LLM 输出被 max_tokens 截断（finish_reason=length），"
+                    "正文为空；请调大 LLM_MAX_TOKENS。%s",
+                    prompt_hint,
+                )
+            else:
+                logger.warning(
+                    "LLM 返回空内容（finish_reason=%s）。%s", reason, prompt_hint
+                )
+            return None
+        if getattr(choice, "finish_reason", None) == "length":
+            # 有内容但可能被截断（JSON 会解析失败），同样提示
+            logger.warning(
+                "LLM 输出可能不完整（finish_reason=length），建议调大 "
+                "LLM_MAX_TOKENS。%s",
+                prompt_hint,
+            )
+        return content
+
     def complete(self, prompt: str) -> str | None:
         """纯文本补全；失败返回 None."""
         client = self._client()
@@ -100,7 +132,7 @@ class LLMClient:
                 messages=[{"role": "user", "content": prompt}],
                 **self._request_kwargs(),
             )
-            return (response.choices[0].message.content or "").strip() or None
+            return self._extract_content(response)
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM 调用失败：%s", exc)
             return None
@@ -130,7 +162,7 @@ class LLMClient:
                 messages=[{"role": "user", "content": content}],
                 **self._request_kwargs(),
             )
-            return (response.choices[0].message.content or "").strip() or None
+            return self._extract_content(response, prompt_hint="(含原型图)")
         except Exception as exc:  # noqa: BLE001
             logger.warning("多模态 LLM 调用失败，尝试退回纯文本：%s", exc)
             # 模型不支持图片时退化为纯文本，至少还能利用需求正文

@@ -26,6 +26,14 @@ os.environ["TASK_DISPATCH_MODE"] = "eager"
 os.environ["TASK_FALLBACK_MODE"] = "eager"
 os.environ["TASK_EAGER_IN_TESTS"] = "true"
 
+# 单元测试绝不能真的调用外部大模型：
+#   1. 会让测试变慢且不稳定（一次真实请求可能几十秒，还会被网络环境影响）；
+#   2. 会把测试用的假需求发到第三方服务。
+# 开发者本地一旦在 .env 打开 LLM_EXTERNAL_ENABLED，跑测试就会真的发请求，
+# 因此这里强制关闭。需要验证 LLM 行为的用例，自行 monkeypatch 注入假客户端。
+os.environ["LLM_EXTERNAL_ENABLED"] = "false"
+os.environ["OPENAI_API_KEY"] = ""
+
 _p = str(_BACKEND)
 if _p not in sys.path:
     sys.path.insert(0, _p)

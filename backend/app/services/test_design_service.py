@@ -115,6 +115,71 @@ def _clean(text: str, max_length: int = 80) -> str:
     return re.sub(r"\s+", " ", text or "").strip(" ，。；;、")[:max_length]
 
 
+# 大模型不一定会严格照搬枚举值：常见「功能测试」「功能性」「功能用例」等变体，
+# 优先级也常回「高/中/低」。这里统一收敛到系统约定的取值，避免下游筛选、
+# 配色与统计因脏值失效。
+_CATEGORY_ALIASES: dict[str, str] = {
+    "功能": CATEGORY_FUNCTION,
+    "功能测试": CATEGORY_FUNCTION,
+    "功能性": CATEGORY_FUNCTION,
+    "正常": CATEGORY_FUNCTION,
+    "正向": CATEGORY_FUNCTION,
+    "异常": CATEGORY_EXCEPTION,
+    "异常测试": CATEGORY_EXCEPTION,
+    "负向": CATEGORY_EXCEPTION,
+    "错误": CATEGORY_EXCEPTION,
+    "边界": CATEGORY_BOUNDARY,
+    "边界值": CATEGORY_BOUNDARY,
+    "边界测试": CATEGORY_BOUNDARY,
+    "权限": CATEGORY_PERMISSION,
+    "权限测试": CATEGORY_PERMISSION,
+    "鉴权": CATEGORY_PERMISSION,
+    "安全": CATEGORY_SECURITY,
+    "安全测试": CATEGORY_SECURITY,
+}
+
+_PRIORITY_ALIASES: dict[str, str] = {
+    "p0": "P0", "最高": "P0", "最高优先级": "P0", "紧急": "P0", "critical": "P0",
+    "blocker": "P0", "高": "P1", "高优先级": "P1", "重要": "P1", "high": "P1",
+    "p1": "P1",
+    "中": "P2", "中等": "P2", "一般": "P2", "medium": "P2", "normal": "P2",
+    "p2": "P2",
+    "低": "P3", "低优先级": "P3", "次要": "P3", "low": "P3", "minor": "P3",
+    "p3": "P3",
+}
+
+
+def normalize_category(value: Any) -> str:
+    """把模型给的各种分类写法收敛到 功能/异常/边界/权限/安全."""
+    text = str(value or "").strip()
+    if not text:
+        return CATEGORY_FUNCTION
+    # 精确匹配优先，其次做包含匹配（如「功能测试类」）
+    if text in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[text]
+    lowered = text.lower()
+    for alias, canonical in _CATEGORY_ALIASES.items():
+        if alias.lower() in lowered:
+            return canonical
+    return CATEGORY_FUNCTION
+
+
+def normalize_priority(value: Any, default: str = "P1") -> str:
+    """把「高/中/低」「High」等写法收敛到 P0-P3."""
+    text = str(value or "").strip()
+    if not text:
+        return default
+    if text.upper() in {"P0", "P1", "P2", "P3"}:
+        return text.upper()
+    lowered = text.lower()
+    if lowered in _PRIORITY_ALIASES:
+        return _PRIORITY_ALIASES[lowered]
+    for alias, canonical in _PRIORITY_ALIASES.items():
+        if alias in lowered:
+            return canonical
+    return default
+
+
 def build_questions(
     title: str,
     requirement_text: str,
@@ -235,14 +300,84 @@ def generate_test_points_by_rules(
 
 
 def _parse_json_payload(content: str) -> Any | None:
+    """从模型回复中解析 JSON.
+
+    推理类模型常把 JSON 包在 ```json 代码块里，或在数组前后加一句解释。
+    这里依次尝试：整体解析 -> 去代码块 -> 截取首个完整 [...] / {...}。
+
+    注意：被 max_tokens 截断的回复不能退而求其次地解析出内部的半截对象，
+    否则会把残缺结果当成有效数据（数量少一半却无人察觉）。因此只在能取到
+    **完整**括号片段时才采用截取结果。
+    """
     text = (content or "").strip()
+    if not text:
+        return None
+
     fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+
+    for candidate in (text, _first_json_slice(text)):
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
+def _first_json_slice(text: str) -> str | None:
+    """截出第一个**完整**的 JSON 数组或对象（跳过前后的解释性文字）.
+
+    括号未闭合（模型输出被截断）时返回 None —— 宁可让上层判定失败并回落到
+    规则引擎，也不能把残缺数据当作有效结果。
+
+    类型选择有讲究：先出现的括号类型决定期望的片段形态。若文本以 ``[`` 开头，
+    就只接受完整的数组；不能因为数组没闭合就退而取内部第一个对象，那会把
+    「列表被截断」误判成「只有一条数据」。
+    """
+    first_array = text.find("[")
+    first_object = text.find("{")
+    if first_array < 0 and first_object < 0:
         return None
+
+    if first_array >= 0 and (first_object < 0 or first_array < first_object):
+        shape = ("[", "]")
+    else:
+        shape = ("{", "}")
+
+    return _balanced_slice(text, *shape)
+
+
+def _balanced_slice(text: str, opener: str, closer: str) -> str | None:
+    """从第一个 opener 起截出括号配对的完整片段；未闭合返回 None."""
+    start = text.find(opener)
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+    return None
 
 
 def generate_test_points(
@@ -293,8 +428,8 @@ def generate_test_points(
             TestPointDraft(
                 module=str(entry.get("module") or title or "通用功能")[:32],
                 point=point_text[:256],
-                category=str(entry.get("category") or CATEGORY_FUNCTION)[:16],
-                priority=str(entry.get("priority") or "P1")[:8],
+                category=normalize_category(entry.get("category")),
+                priority=normalize_priority(entry.get("priority")),
                 trace_source=str(entry.get("trace_source") or "")[:256] or None,
             )
         )
@@ -494,8 +629,8 @@ def generate_cases(
             CaseDraft(
                 title=title[:256],
                 module=str(entry.get("module") or "通用功能")[:128],
-                category=str(entry.get("category") or CATEGORY_FUNCTION)[:16],
-                priority=str(entry.get("priority") or "P1")[:8],
+                category=normalize_category(entry.get("category")),
+                priority=normalize_priority(entry.get("priority")),
                 preconditions=str(entry.get("preconditions") or ""),
                 steps=[str(step) for step in steps][:20],
                 expected=str(entry.get("expected") or ""),

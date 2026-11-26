@@ -185,3 +185,77 @@ def test_normalize_test_data_handles_messy_input():
     long_value = "x" * 1000
     item = svc._normalize_test_data({"f": long_value})[0]
     assert len(item["value"]) <= 512
+
+
+# ---------------------------------------------------------------------------
+# 模型输出容错：推理模型的空输出、脏枚举值、带说明文字的 JSON
+# ---------------------------------------------------------------------------
+def test_parse_json_payload_handles_fence_with_language():
+    assert svc._parse_json_payload('```json\n[{"a": 1}]\n```') == [{"a": 1}]
+
+
+def test_parse_json_payload_handles_surrounding_prose():
+    """模型常在 JSON 前后加一句解释，必须能截出来."""
+    text = '好的，以下是测试点：\n[{"a": 1}, {"b": 2}]\n以上共 2 条。'
+    assert svc._parse_json_payload(text) == [{"a": 1}, {"b": 2}]
+
+
+def test_parse_json_payload_handles_object_payload():
+    assert svc._parse_json_payload('说明文字 {"a": 1} 结尾') == {"a": 1}
+
+
+def test_parse_json_payload_ignores_brackets_inside_strings():
+    """字符串里的 ] 不能误判为数组结束."""
+    text = '[{"point": "导入 [必填] 字段"}]'
+    assert svc._parse_json_payload(text) == [{"point": "导入 [必填] 字段"}]
+
+
+def test_parse_json_payload_returns_none_for_truncated_json():
+    """被 max_tokens 截断的 JSON 无法解析，应返回 None 交由上层回落."""
+    assert svc._parse_json_payload('[{"a": 1}, {"b":') is None
+
+
+def test_normalize_category_maps_model_variants():
+    assert svc.normalize_category("功能测试") == svc.CATEGORY_FUNCTION
+    assert svc.normalize_category("异常场景") == svc.CATEGORY_EXCEPTION
+    assert svc.normalize_category("边界值") == svc.CATEGORY_BOUNDARY
+    assert svc.normalize_category("权限校验") == svc.CATEGORY_PERMISSION
+    assert svc.normalize_category("安全测试") == svc.CATEGORY_SECURITY
+    # 未知值收敛为功能，避免脏值进库
+    assert svc.normalize_category("随便写的") == svc.CATEGORY_FUNCTION
+    assert svc.normalize_category(None) == svc.CATEGORY_FUNCTION
+
+
+def test_normalize_priority_maps_model_variants():
+    assert svc.normalize_priority("高") == "P1"
+    assert svc.normalize_priority("High") == "P1"
+    assert svc.normalize_priority("最高") == "P0"
+    assert svc.normalize_priority("中") == "P2"
+    assert svc.normalize_priority("低") == "P3"
+    assert svc.normalize_priority("p0") == "P0"
+    assert svc.normalize_priority("??") == "P1"
+    assert svc.normalize_priority(None) == "P1"
+
+
+def test_generated_cases_use_normalized_enums():
+    """模型返回「功能测试」「高」时，落库值必须是约定的枚举."""
+    payload = """[{"title": "用例", "category": "功能测试", "priority": "高",
+                   "steps": ["a"], "expected": "b"}]"""
+    cases, engine = svc.generate_cases(
+        [svc.TestPointDraft("m", "p", "功能", "P0")],
+        "t", "body", ai_service=FakeClient(payload),
+    )
+    assert engine == svc.ENGINE_LLM
+    assert cases[0].category == svc.CATEGORY_FUNCTION
+    assert cases[0].priority == "P1"
+
+
+def test_generated_points_use_normalized_enums():
+    payload = """[{"module": "m", "point": "p", "category": "边界值",
+                   "priority": "最高"}]"""
+    points, engine = svc.generate_test_points(
+        "t", "body", ai_service=FakeClient(payload),
+    )
+    assert engine == svc.ENGINE_LLM
+    assert points[0].category == svc.CATEGORY_BOUNDARY
+    assert points[0].priority == "P0"
