@@ -433,3 +433,84 @@ def test_knowledge_base_reference_is_recorded(client):
     assert detail["knowledge_base_name"] == "技术文档"
     # 检索命中与否取决于关键词，只要不报错且字段可用即可
     assert isinstance(detail["knowledge_refs"], list)
+
+
+# ---------------------------------------------------------------------------
+# 可执行用例：产出形态、测试数据与接口请求落库
+# ---------------------------------------------------------------------------
+def test_session_stores_output_mode(client):
+    manual = _create_session(client, mode="quick")
+    assert manual["output_mode"] == "manual"
+
+    api = _create_session(client, mode="quick", output_mode="api")
+    assert api["output_mode"] == "api"
+
+
+def test_invalid_output_mode_falls_back_to_manual(client):
+    session = _create_session(client, mode="quick", output_mode="不存在的形态")
+    assert session["output_mode"] == "manual"
+
+
+def test_generated_cases_payload_contains_executable_fields(client):
+    """用例 payload 必须带 test_data 与 executable 标记."""
+    session, detail = _session_with_points(client)
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-cases", json={})
+    detail = client.get(f"/api/v1/test-design/sessions/{session['id']}").json()["data"]
+    assert detail["cases"]
+    case = detail["cases"][0]
+    for field in ("test_data", "request_headers", "assertions", "executable"):
+        assert field in case
+    # 规则引擎不产出请求定义，因此不可执行
+    assert case["executable"] is False
+
+
+def test_import_writes_executable_api_case(client, db_session):
+    """带 method+url 的用例导入时，应同时写入接口用例库."""
+    from app.models.api_case_record import ApiCaseRecord
+
+    session, _ = _session_with_points(client)
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-cases", json={})
+
+    # 直接给已生成的用例补上可执行字段（模拟 LLM 产出接口形态用例）
+    case = db_session.query(GeneratedCase).filter_by(session_id=session["id"]).first()
+    case.request_method = "POST"
+    case.request_url = "/api/v1/import/check"
+    case.request_headers = {"Content-Type": "application/json"}
+    case.request_body = {"billNo": "XJ001"}
+    case.assertions = [{"type": "status_code", "operator": "eq", "expected": 400}]
+    case.test_data = [{"field": "分单号", "value": "XJ001", "note": "已存在"}]
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/test-design/sessions/{session['id']}/import-cases", json={}
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    # 只有被补齐请求定义的那一条会进接口用例库
+    assert data["created_count"] >= 1
+    assert len(data["api_case_ids"]) == 1
+
+    api_case = db_session.get(ApiCaseRecord, data["api_case_ids"][0])
+    assert api_case.method == "POST"
+    assert api_case.url == "/api/v1/import/check"
+    assert api_case.body == {"billNo": "XJ001"}
+    # 异常分类映射为接口用例的 exception 场景
+    assert api_case.case_type in {"normal", "exception"}
+
+    functional = db_session.get(FunctionalTestCase, data["test_case_ids"][0])
+    assert functional.test_data == [
+        {"field": "分单号", "value": "XJ001", "note": "已存在"}
+    ]
+    assert functional.request_method == "POST"
+
+
+def test_import_skips_api_case_without_request(client, db_session):
+    """没有请求定义的用例（人工形态）不写接口用例库."""
+    session, _ = _session_with_points(client)
+    client.post(f"/api/v1/test-design/sessions/{session['id']}/generate-cases", json={})
+    response = client.post(
+        f"/api/v1/test-design/sessions/{session['id']}/import-cases", json={}
+    )
+    data = response.json()["data"]
+    assert data["api_case_ids"] == []
+    assert data["created_count"] >= 1

@@ -11,7 +11,9 @@ from app.services.requirement_document_parser import (
     DocumentParseError,
     _clean_pdf_layout,
     _detect_repeated_page_furniture,
+    extract_image_data_urls,
     parse_document,
+    strip_image_markers,
     summarize_document,
 )
 
@@ -85,10 +87,20 @@ def test_parse_docx_empty_document_warns():
 
 
 def test_parse_image_warns_about_missing_ocr():
+    """图片不做 OCR，但保留原型图本身供多模态模型理解.
+
+    早期实现直接丢弃图片内容（正文为空），导致启用了大模型也无法利用
+    页面原型；现在把图以 data URL 存入正文，同时保留 OCR 告警。
+    """
     parsed = parse_document("截图.png", b"\x89PNG\r\n\x1a\n" + b"0" * 32)
     assert parsed.file_type == "png"
-    assert parsed.is_empty
     assert any("OCR" in warning for warning in parsed.warnings)
+    # 正文里保留可被多模态使用的原型图 data URL
+    urls = extract_image_data_urls(parsed.content)
+    assert len(urls) == 1
+    assert urls[0].startswith("data:image/png;base64,")
+    # 去掉标记后没有可读文本，仍视为「无文本正文」
+    assert strip_image_markers(parsed.content) == ""
 
 
 def test_parse_corrupt_pdf_raises_parse_error():

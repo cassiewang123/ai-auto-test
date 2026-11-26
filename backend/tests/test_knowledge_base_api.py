@@ -126,8 +126,9 @@ def test_upload_image_returns_ocr_warning(client):
     assert response.status_code == 200
     document = response.json()["data"]
     assert document["warnings"]
-    assert document["status"] == "failed"
-    assert document["error_message"]
+    # 图片不做 OCR，但原型图本身会存入正文并建立索引（可被多模态模型使用），
+    # 因此状态是 indexed 而不是 failed。
+    assert document["status"] == "indexed"
 
 
 def test_list_and_delete_document(client, db_session):

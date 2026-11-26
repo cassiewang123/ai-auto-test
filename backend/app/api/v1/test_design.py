@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.database import get_db
+from app.models.api_case_record import ApiCaseRecord
 from app.models.functional_test_case import FunctionalTestCase
 from app.models.knowledge_base import KnowledgeBase
 from app.models.requirement import Requirement
@@ -51,8 +52,15 @@ from app.schemas.test_design import (
 )
 from app.services.auth_service import get_current_user
 from app.services.knowledge_base_service import KnowledgeBaseService
+from app.services.requirement_document_parser import (
+    extract_image_data_urls,
+    strip_image_markers,
+)
 from app.services.test_design_service import (
     DEFAULT_REVIEW_DIMENSIONS,
+    MODE_API,
+    MODE_MANUAL,
+    VALID_OUTPUT_MODES,
     CaseDraft,
     TestPointDraft,
     build_questions,
@@ -66,6 +74,15 @@ router = APIRouter()
 _VALID_MODES = {"quick", "stepwise"}
 _MAX_DIMENSION_WEIGHT = 5
 _knowledge_service = KnowledgeBaseService()
+
+# 用例分类 -> 接口用例库的场景类型
+_API_CASE_TYPE_BY_CATEGORY = {
+    "功能": "normal",
+    "异常": "exception",
+    "边界": "boundary",
+    "权限": "permission",
+    "安全": "permission",
+}
 
 
 # ===========================================================================
@@ -146,6 +163,7 @@ def _session_response(
     data.messages = list(session.messages or [])
     data.knowledge_refs = list(session.knowledge_refs or [])
     data.case_ids = list(session.case_ids or [])
+    data.output_mode = session.output_mode or MODE_MANUAL
 
     if session.requirement_id:
         requirement = db.get(Requirement, session.requirement_id)
@@ -291,6 +309,12 @@ def _replace_cases(
             steps=draft.steps,
             expected=draft.expected,
             trace_source=draft.trace_source,
+            test_data=draft.test_data,
+            request_method=draft.request_method,
+            request_url=draft.request_url,
+            request_headers=draft.request_headers,
+            request_body=draft.request_body,
+            assertions=draft.assertions,
             selected=True,
         )
         db.add(case)
@@ -320,6 +344,14 @@ def _cases_payload(db: Session, session: TestDesignSession) -> list[dict[str, An
             "steps": list(case.steps or []),
             "expected": case.expected,
             "trace_source": case.trace_source,
+            "test_data": list(case.test_data or []),
+            "request_method": case.request_method,
+            "request_url": case.request_url,
+            "request_headers": dict(case.request_headers or {}),
+            "request_body": case.request_body,
+            "assertions": list(case.assertions or []),
+            # 有 method + url 才算可被引擎直接执行
+            "executable": bool(case.request_method and case.request_url),
         }
         for case in cases
     ]
@@ -391,6 +423,11 @@ def create_session(
         requirement_id=payload.requirement_id,
         knowledge_base_id=payload.knowledge_base_id,
         mode=payload.mode,
+        output_mode=(
+            payload.output_mode
+            if payload.output_mode in VALID_OUTPUT_MODES
+            else MODE_MANUAL
+        ),
         status="clarifying",
         review_dimensions=_normalize_dimensions(payload.review_dimensions),
         prompt=payload.prompt,
@@ -520,13 +557,23 @@ def generate_points(
         for item in ui_descriptions
         if isinstance(item, dict)
     ]
+    # 需求附件里的页面原型图：交给多模态模型，让它看到真实界面
+    prototype_images = extract_image_data_urls(requirement_text)
     drafts, engine = generate_test_points(
         title=session.title or (session.prompt or "测试范围"),
-        requirement_text=requirement_text or (session.prompt or ""),
+        requirement_text=strip_image_markers(requirement_text or (session.prompt or "")),
         function_items=function_items,
         descriptions=descriptions,
         knowledge_context=knowledge_context,
+        prototype_images=prototype_images,
     )
+    if prototype_images:
+        _append_message(
+            session,
+            "assistant",
+            f"已识别 {len(prototype_images)} 张页面原型图，本次生成已结合原型。",
+            kind="prototype",
+        )
 
     _replace_points(db, session, drafts)
     session.engine = engine
@@ -636,11 +683,20 @@ def generate_cases_endpoint(
             session.prompt or requirement_text[:2000],
         )
 
+    # 产出形态：本次请求可临时指定，否则沿用会话设置
+    output_mode = payload.output_mode
+    if output_mode not in VALID_OUTPUT_MODES:
+        output_mode = session.output_mode or MODE_MANUAL
+    else:
+        session.output_mode = output_mode
+
     case_drafts, engine = generate_cases(
         points=drafts,
         requirement_title=session.title or "需求",
-        requirement_text=requirement_text,
+        requirement_text=strip_image_markers(requirement_text),
         knowledge_context=knowledge_context,
+        output_mode=output_mode,
+        prototype_images=extract_image_data_urls(requirement_text),
     )
 
     point_by_title = {point.point: point.id for point in chosen}
@@ -718,6 +774,7 @@ def import_cases(
 
     project_id = payload.project_id or session.project_id
     created_ids: list[str] = []
+    api_case_ids: list[str] = []
     for case in cases:
         functional_case = FunctionalTestCase(
             title=case.title,
@@ -728,6 +785,13 @@ def import_cases(
             steps=list(case.steps or []),
             expected=case.expected,
             trace_source=case.trace_source,
+            # 测试数据与可执行请求一并落库，便于人工按数据执行
+            test_data=list(case.test_data or []),
+            request_method=case.request_method,
+            request_url=case.request_url,
+            request_headers=dict(case.request_headers or {}),
+            request_body=case.request_body,
+            assertions=list(case.assertions or []),
             status="active",
             source="ai",
             requirement_id=session.requirement_id,
@@ -738,6 +802,30 @@ def import_cases(
         db.flush()
         case.imported_case_id = functional_case.id
         created_ids.append(functional_case.id)
+
+        # 接口形态且具备 method+url 的用例，同时写入接口用例库，
+        # 这样「可执行」才算兑现：导入后能在用例管理/接口列表里直接跑。
+        if case.request_method and case.request_url:
+            api_case = ApiCaseRecord(
+                title=case.title[:256],
+                method=str(case.request_method).upper()[:16],
+                url=str(case.request_url)[:2048],
+                headers=dict(case.request_headers or {}),
+                params={},
+                body=case.request_body,
+                assertions=list(case.assertions or []),
+                case_type=_API_CASE_TYPE_BY_CATEGORY.get(case.category, "normal"),
+                priority=case.priority if case.priority in {"P0", "P1", "P2", "P3"} else "P1",
+                status="active",
+                source="ai",
+                description=case.expected,
+                interface_name=(case.title or "")[:256] or None,
+                group_path=(case.module or "")[:256] or None,
+                project_id=project_id,
+            )
+            db.add(api_case)
+            db.flush()
+            api_case_ids.append(api_case.id)
 
     # 回写需求的用例关联，保持需求覆盖率统计准确
     if session.requirement_id:
@@ -752,15 +840,15 @@ def import_cases(
 
     session.case_ids = list(dict.fromkeys([*(session.case_ids or []), *created_ids]))
     session.status = "imported"
-    _append_message(
-        session,
-        "assistant",
-        f"已写入功能测试用例库 {len(created_ids)} 条用例",
-        kind="import",
-    )
+    message = f"已写入功能测试用例库 {len(created_ids)} 条用例"
+    if api_case_ids:
+        message += f"，其中 {len(api_case_ids)} 条可执行用例已同时写入接口用例库"
+    _append_message(session, "assistant", message, kind="import")
     db.commit()
     return DataResponse[ImportCasesResponse](
         data=ImportCasesResponse(
-            created_count=len(created_ids), test_case_ids=created_ids
+            created_count=len(created_ids),
+            test_case_ids=created_ids,
+            api_case_ids=api_case_ids,
         )
     )

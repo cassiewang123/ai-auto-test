@@ -1412,6 +1412,8 @@ export const testDesignApi = {
     requirement_id?: string | null;
     knowledge_base_id?: string | null;
     mode: 'quick' | 'stepwise';
+    /** manual 人工执行 / api 接口自动化（含可执行请求与断言） */
+    output_mode?: 'manual' | 'api';
     prompt?: string | null;
     review_dimensions?: Record<string, number>;
   }) => api.post<unknown, ApiResponse<any>>('/test-design/sessions', data),
@@ -1441,10 +1443,10 @@ export const testDesignApi = {
     api.put<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/points`, {
       points,
     }),
-  generateCases: (id: string, pointIds?: string[]) =>
+  generateCases: (id: string, pointIds?: string[], outputMode?: 'manual' | 'api') =>
     api.post<unknown, ApiResponse<any>>(
       `/test-design/sessions/${id}/generate-cases`,
-      { point_ids: pointIds || null }
+      { point_ids: pointIds || null, output_mode: outputMode || null }
     ),
   review: (id: string, dimensions?: Record<string, number>) =>
     api.post<unknown, ApiResponse<any>>(`/test-design/sessions/${id}/review`, {

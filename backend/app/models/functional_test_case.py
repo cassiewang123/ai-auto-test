@@ -49,6 +49,14 @@ class FunctionalTestCase(Base):
     expected: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 需求追溯：来自需求中的哪句话
     trace_source: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # 测试数据：[{"field": "分单号", "value": "XJ001", "note": "已存在"}]
+    test_data: Mapped[list] = mapped_column(JSONText, default=list)
+    # 可执行请求定义（接口形态用例）：导入后可直接由引擎执行
+    request_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    request_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    request_headers: Mapped[dict] = mapped_column(JSONText, default=dict)
+    request_body: Mapped[dict | list | None] = mapped_column(JSONText, nullable=True)
+    assertions: Mapped[list] = mapped_column(JSONText, default=list)
     # 状态：draft 草稿 / active 可执行 / deprecated 已废弃
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)
     # 来源：ai 由 AI 生成 / manual 手工创建

@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4"  # 未启用外部 LLM 时的占位模型名
     LLM_BASE_URL: str = ""
+    # 生成用例时偏向稳定输出，温度取低值；需要多样性时可调高
+    LLM_TEMPERATURE: float = 0.2
+    # 单次补全的输出上限；生成大批用例时可调大（<=0 表示不传该参数）
+    LLM_MAX_TOKENS: int = 8000
 
     # InfluxDB（可选）
     INFLUXDB_URL: str = ""

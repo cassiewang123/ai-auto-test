@@ -45,6 +45,8 @@ class TestDesignSession(Base):
     )
     # 生成模式：quick 快速生成 / stepwise 分步生成
     mode: Mapped[str] = mapped_column(String(16), default="quick")
+    # 产出形态：manual 人工执行（步骤型）/ api 接口自动化（含请求与断言）
+    output_mode: Mapped[str] = mapped_column(String(16), default="manual")
     # 会话状态：clarifying 追问中 / points_ready 测试点待确认 /
     # cases_ready 用例草稿待写入 / imported 已写入用例库
     status: Mapped[str] = mapped_column(String(16), default="clarifying", index=True)
@@ -129,6 +131,14 @@ class GeneratedCase(Base):
     expected: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 需求追溯
     trace_source: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # 测试数据：[{"field": "分单号", "value": "XJ001", "note": "已存在"}]
+    test_data: Mapped[list] = mapped_column(JSONText, default=list)
+    # 接口自动化字段（output_mode=api 时填充），导入接口库后可直接执行
+    request_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    request_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    request_headers: Mapped[dict] = mapped_column(JSONText, default=dict)
+    request_body: Mapped[dict | list | None] = mapped_column(JSONText, nullable=True)
+    assertions: Mapped[list] = mapped_column(JSONText, default=list)
     selected: Mapped[bool] = mapped_column(Boolean, default=True)
     # 写入用例库后对应的 TestCase ID
     imported_case_id: Mapped[str | None] = mapped_column(

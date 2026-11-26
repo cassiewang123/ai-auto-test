@@ -111,6 +111,10 @@ class TestDesignSessionCreate(BaseModel):
     review_dimensions: dict[str, int] = Field(
         default_factory=dict, description="评审维度权重：{维度名: 1-5}"
     )
+    output_mode: str = Field(
+        default="manual",
+        description="产出形态：manual 人工执行 / api 接口自动化（含可执行请求与断言）",
+    )
 
 
 class TestPointItem(BaseModel):
@@ -162,6 +166,15 @@ class GeneratedCaseItem(BaseModel):
     trace_source: str | None = None
     selected: bool = True
     imported_case_id: str | None = None
+    # 可执行补充字段
+    test_data: list[dict[str, Any]] = Field(default_factory=list)
+    request_method: str | None = None
+    request_url: str | None = None
+    request_headers: dict[str, Any] = Field(default_factory=dict)
+    request_body: Any = None
+    assertions: list[dict[str, Any]] = Field(default_factory=list)
+    # 是否具备可被接口引擎执行的请求定义
+    executable: bool = False
 
 
 class TestDesignSessionResponse(BaseModel):
@@ -179,6 +192,7 @@ class TestDesignSessionResponse(BaseModel):
     mode: str = "quick"
     status: str = "clarifying"
     engine: str = "rule"
+    output_mode: str = "manual"
     review_dimensions: dict[str, int] = Field(default_factory=dict)
     prompt: str | None = None
     messages: list[dict[str, Any]] = Field(default_factory=list)
@@ -201,6 +215,10 @@ class GenerateCasesRequest(BaseModel):
 
     point_ids: list[str] | None = Field(
         default=None, description="为空时使用全部已勾选测试点"
+    )
+    output_mode: str | None = Field(
+        default=None,
+        description="产出形态：manual 人工执行 / api 接口自动化；为空时沿用会话设置",
     )
 
 
@@ -233,3 +251,5 @@ class ImportCasesResponse(BaseModel):
 
     created_count: int = 0
     test_case_ids: list[str] = Field(default_factory=list)
+    # 同时写入接口用例库的可执行用例 ID（output_mode=api 且具备请求定义时）
+    api_case_ids: list[str] = Field(default_factory=list)

@@ -580,14 +580,15 @@ export default function RequirementsPage() {
                   beforeUpload={handleUpload}
                 >
                   <Button icon={<UploadOutlined />} size="small">
-                    上传附件
+                    上传附件 / 页面原型
                   </Button>
                 </Upload>
               }
               style={{ marginBottom: 12 }}
             >
               <Text type="secondary">
-                支持图片、PDF、DOCX、txt/md/log/json、csv，单文件 &lt;20MB；图片不做 OCR，需补充正文
+                支持图片（页面原型截图）、PDF、DOCX、txt/md/log/json、csv，单文件 &lt;20MB；
+                图片不做 OCR，启用大模型后会作为页面原型随需求一起交给 AI 理解
               </Text>
               <Spin spinning={documentsLoading}>
                 {documents.length === 0 ? (

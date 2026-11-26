@@ -56,6 +56,8 @@ type TestPoint = {
   trace_source?: string | null;
 };
 
+type TestDataRow = { field: string; value: string; note?: string };
+
 type GeneratedCase = {
   id: string;
   title: string;
@@ -68,6 +70,16 @@ type GeneratedCase = {
   trace_source?: string | null;
   selected: boolean;
   imported_case_id?: string | null;
+  /** 本用例实际使用的字段与取值 */
+  test_data?: TestDataRow[];
+  /** 接口自动化形态的请求定义与断言 */
+  request_method?: string | null;
+  request_url?: string | null;
+  request_headers?: Record<string, unknown>;
+  request_body?: unknown;
+  assertions?: Array<Record<string, unknown>>;
+  /** 有 method + url 才能被执行引擎直接跑 */
+  executable?: boolean;
 };
 
 type Session = {
@@ -80,6 +92,8 @@ type Session = {
   mode: string;
   status: string;
   engine: string;
+  /** manual 人工执行 / api 接口自动化 */
+  output_mode?: string;
   prompt?: string | null;
   messages: Array<{ role: string; content: string; kind?: string }>;
   knowledge_refs: Array<{ chunk_id: string; document_name: string; score: number }>;
@@ -95,6 +109,15 @@ const CATEGORY_COLOR: Record<string, string> = {
   边界: 'gold',
   权限: 'purple',
   安全: 'red',
+};
+
+/** 接口形态用例的请求方法配色 */
+const METHOD_COLOR: Record<string, string> = {
+  GET: 'green',
+  POST: 'blue',
+  PUT: 'orange',
+  PATCH: 'purple',
+  DELETE: 'red',
 };
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -139,6 +162,8 @@ export default function AiCaseGenerationPage() {
   const [requirementId, setRequirementId] = useState<string | undefined>();
   const [knowledgeBaseId, setKnowledgeBaseId] = useState<string | undefined>();
   const [mode, setMode] = useState<'quick' | 'stepwise'>('quick');
+  // 产出形态：manual 人工执行 / api 接口自动化（含可执行请求与断言）
+  const [outputMode, setOutputMode] = useState<'manual' | 'api'>('manual');
   const [prompt, setPrompt] = useState('');
   const [reviewEnabled, setReviewEnabled] = useState(true);
   const [weights, setWeights] = useState<Record<string, number>>(
@@ -203,6 +228,7 @@ export default function AiCaseGenerationPage() {
         requirement_id: requirementId || null,
         knowledge_base_id: knowledgeBaseId || null,
         mode,
+        output_mode: outputMode,
         prompt: prompt || null,
         review_dimensions: reviewEnabled ? weights : {},
       });
@@ -585,7 +611,7 @@ export default function AiCaseGenerationPage() {
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="描述要测的范围，例如：覆盖登录失败与锁定策略"
                 />
-                <Space>
+                <Space wrap>
                   <Segmented
                     value={mode}
                     onChange={(value) => setMode(value as 'quick' | 'stepwise')}
@@ -594,6 +620,16 @@ export default function AiCaseGenerationPage() {
                       { label: '分步生成（需求分析 → 测试点 → 用例）', value: 'stepwise' },
                     ]}
                   />
+                  <Tooltip title="人工执行：前置条件+步骤+预期+测试数据；接口自动化：额外生成可执行的请求与断言">
+                    <Segmented
+                      value={outputMode}
+                      onChange={(value) => setOutputMode(value as 'manual' | 'api')}
+                      options={[
+                        { label: '人工执行', value: 'manual' },
+                        { label: '接口自动化', value: 'api' },
+                      ]}
+                    />
+                  </Tooltip>
                   <Button
                     type="primary"
                     icon={<ThunderboltOutlined />}
@@ -790,6 +826,58 @@ export default function AiCaseGenerationPage() {
                                   <Text strong>预期结果：</Text>
                                   {record.expected || '-'}
                                 </Paragraph>
+
+                                {/* 测试数据：直接照着填的字段与取值 */}
+                                {record.test_data && record.test_data.length > 0 && (
+                                  <>
+                                    <Paragraph style={{ marginBottom: 4 }}>
+                                      <Text strong>测试数据：</Text>
+                                    </Paragraph>
+                                    <Table<TestDataRow>
+                                      size="small"
+                                      rowKey={(row) => `${row.field}-${row.value}`}
+                                      pagination={false}
+                                      dataSource={record.test_data}
+                                      columns={[
+                                        { title: '字段', dataIndex: 'field', width: 160 },
+                                        {
+                                          title: '取值',
+                                          dataIndex: 'value',
+                                          render: (v: string) => <Text code>{v || '(空)'}</Text>,
+                                        },
+                                        { title: '构造意图', dataIndex: 'note' },
+                                      ]}
+                                    />
+                                  </>
+                                )}
+
+                                {/* 接口形态：请求与断言，可直接导入接口库执行 */}
+                                {record.executable && (
+                                  <>
+                                    <Paragraph style={{ marginTop: 12, marginBottom: 4 }}>
+                                      <Text strong>接口请求：</Text>
+                                      <Tag color={METHOD_COLOR[record.request_method || ''] || 'default'}>
+                                        {record.request_method}
+                                      </Tag>
+                                      <Text code>{record.request_url}</Text>
+                                    </Paragraph>
+                                    {record.request_headers &&
+                                      Object.keys(record.request_headers).length > 0 && (
+                                        <Paragraph style={{ marginBottom: 4 }}>
+                                          <Text strong>请求头：</Text>
+                                          <Text code>{JSON.stringify(record.request_headers)}</Text>
+                                        </Paragraph>
+                                      )}
+                                    <Paragraph style={{ marginBottom: 4 }}>
+                                      <Text strong>请求体：</Text>
+                                      <Text code>{JSON.stringify(record.request_body ?? null)}</Text>
+                                    </Paragraph>
+                                    <Paragraph style={{ marginBottom: 0 }}>
+                                      <Text strong>断言：</Text>
+                                      <Text code>{JSON.stringify(record.assertions || [])}</Text>
+                                    </Paragraph>
+                                  </>
+                                )}
                               </div>
                             ),
                           }}

@@ -320,9 +320,23 @@ def _extract_pdf_with_pdfplumber(
     return pages
 
 
-def _parse_image(warnings: list[str]) -> str:
+# 图片以 data URL 存入 content 的标记前缀：多模态模型据此识别原型图
+IMAGE_CONTENT_PREFIX = "[原型图]"
+
+
+def _parse_image(data: bytes, filename: str, warnings: list[str]) -> str:
+    """把页面原型图编码为 data URL 存入 content.
+
+    本地不做 OCR（没有可用的 OCR 依赖），但多模态模型可以直接读图，
+    因此保留原图而不是丢弃：content 里存 ``[原型图]<data URL>``，
+    生成测试点时由 llm_client 解码为图片附件一并发送。
+    没有 OCR 时仍提示补充文字说明，避免纯靠图导致理解偏差。
+    """
     _add_warning(warnings, _IMAGE_OCR_WARNING)
-    return ""
+    url = image_data_url(filename, data)
+    if not url:
+        return ""
+    return f"{IMAGE_CONTENT_PREFIX}{url}"
 
 
 def parse_document(filename: str, data: bytes) -> ParsedDocument:
@@ -346,7 +360,7 @@ def parse_document(filename: str, data: bytes) -> ParsedDocument:
     elif extension == ".pdf":
         content = _parse_pdf(data, warnings)
     elif extension in IMAGE_EXTENSIONS:
-        content = _parse_image(warnings)
+        content = _parse_image(data, filename, warnings)
     else:
         content = _parse_text(data, warnings)
 
@@ -369,6 +383,31 @@ def image_data_url(filename: str, data: bytes) -> str | None:
     mime = "jpeg" if extension in {"jpg", "jpeg"} else extension
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:image/{mime};base64,{encoded}"
+
+
+def extract_image_data_urls(text: str) -> list[str]:
+    """从文档正文中提取原型图 data URL（多模态生成时使用）."""
+    urls: list[str] = []
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(IMAGE_CONTENT_PREFIX):
+            url = stripped[len(IMAGE_CONTENT_PREFIX):].strip()
+            if url.startswith("data:image/"):
+                urls.append(url)
+    return urls
+
+
+def strip_image_markers(text: str) -> str:
+    """去掉正文里的原型图标记，只保留可读文本.
+
+    提示词里不宜塞入超长 base64，图片通过多模态通道单独发送。
+    """
+    lines = [
+        line
+        for line in (text or "").splitlines()
+        if not line.strip().startswith(IMAGE_CONTENT_PREFIX)
+    ]
+    return "\n".join(lines).strip()
 
 
 def summarize_document(parsed: ParsedDocument) -> dict[str, Any]:

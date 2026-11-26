@@ -19,10 +19,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services.ai_service import AIService
+from app.services.llm_client import LLMClient, get_llm_client
 
 ENGINE_RULE = "rule"
 ENGINE_LLM = "llm"
+
+# 用例产出形态：人工执行（步骤型）/ 接口自动化（请求+断言型）
+MODE_MANUAL = "manual"
+MODE_API = "api"
+VALID_OUTPUT_MODES = {MODE_MANUAL, MODE_API}
 
 # 评审维度：勾选维度并设置权重（1-5，越高越优先）
 DEFAULT_REVIEW_DIMENSIONS: dict[str, int] = {
@@ -69,7 +74,13 @@ class TestPointDraft:
 
 @dataclass
 class CaseDraft:
-    """用例草稿."""
+    """用例草稿.
+
+    ``test_data`` 与 ``api_*`` 是为「可执行」补充的字段：
+    - 人工执行形态用 ``test_data`` 列出具体输入值；
+    - 接口自动化形态用 ``api_*`` 描述可被执行引擎直接跑的请求与断言。
+    两种形态按会话的 ``output_mode`` 二选一填充，另一个留空。
+    """
 
     title: str
     module: str
@@ -80,6 +91,19 @@ class CaseDraft:
     expected: str = ""
     trace_source: str | None = None
     point_title: str = ""
+    # 测试数据：[{"field": "分单号", "value": "ABC123", "note": "已存在"}]
+    test_data: list[dict[str, Any]] = field(default_factory=list)
+    # 接口自动化字段
+    request_method: str | None = None
+    request_url: str | None = None
+    request_headers: dict[str, Any] = field(default_factory=dict)
+    request_body: Any = None
+    assertions: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def executable(self) -> bool:
+        """是否可被接口执行引擎直接执行."""
+        return bool(self.request_method and self.request_url)
 
 
 def _sentences(text: str) -> list[str]:
@@ -227,13 +251,18 @@ def generate_test_points(
     function_items: list[dict[str, Any]] | None = None,
     descriptions: list[str] | None = None,
     knowledge_context: str = "",
-    ai_service: AIService | None = None,
+    ai_service: Any | None = None,
     max_points: int = 60,
+    prototype_images: list[str] | None = None,
 ) -> tuple[list[TestPointDraft], str]:
-    """生成测试点，返回 ``(测试点列表, 引擎标识)``."""
-    service = ai_service or AIService()
-    llm = service._get_llm()  # noqa: SLF001
-    if llm is None:
+    """生成测试点，返回 ``(测试点列表, 引擎标识)``.
+
+    ``ai_service`` 参数保留为可注入依赖（测试用），实际调用走 LLMClient。
+    ``prototype_images`` 是页面原型图的 data URL 列表，会以多模态方式
+    随提示词一起发送，让模型看到真实页面而不是只读文字。
+    """
+    client: LLMClient = ai_service or get_llm_client()
+    if not client.enabled():
         return (
             generate_test_points_by_rules(
                 title, requirement_text, function_items, descriptions, max_points
@@ -242,11 +271,8 @@ def generate_test_points(
         )
 
     prompt = build_points_prompt(title, requirement_text, function_items, knowledge_context)
-    try:
-        response = llm.invoke(prompt)
-        payload = _parse_json_payload(getattr(response, "content", "") or "")
-    except Exception:
-        payload = None
+    content = client.complete_with_images(prompt, prototype_images)
+    payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
         return (
@@ -287,21 +313,47 @@ def build_points_prompt(
     requirement_text: str,
     function_items: list[dict[str, Any]] | None = None,
     knowledge_context: str = "",
+    has_prototype: bool = False,
 ) -> str:
-    """组装测试点拆解 Prompt."""
+    """组装测试点拆解 Prompt.
+
+    这里刻意用强约束压制「模板套话」：明确要求引用需求原文、给出具体
+    字段与取值，并禁止「系统按预期完成处理」这类无法执行的措辞。
+    """
     summary = json.dumps(function_items or [], ensure_ascii=False)[:4000]
+    prototype_hint = (
+        "\n本次附带了页面原型截图，请据此补充**界面上真实存在的**字段、"
+        "控件、按钮、提示文案与交互约束（哪些字段必填、按钮在什么状态下可用）。\n"
+        if has_prototype
+        else ""
+    )
     prompt = (
-        "你是资深测试工程师。请结合需求与知识库内容，拆解出可执行的测试点，"
-        "返回 JSON 数组，不要包含解释文字。\n\n"
-        "每个元素的字段：\n"
-        '- module: 所属模块\n'
-        '- point: 测试点描述（一句话，可验证）\n'
+        "你是资深测试工程师，正在为一条真实业务需求设计测试点。\n"
+        "目标：产出**可被执行者直接照做**的测试点，而不是空泛的场景描述。\n\n"
+        "【硬性要求】\n"
+        "1. 必须逐条对应需求原文：每条测试点都要引用需求里的具体句子/规则，"
+        "写进 trace_source 字段。\n"
+        "2. 必须落到具体字段与取值：例如「分单号」而非「某字段」，"
+        "「已存在的分单号 XJ2024001」而非「重复数据」。\n"
+        "3. 禁止使用这些套话作为测试点主体："
+        "「按预期完成处理」「符合约定」「给出明确错误提示」「不泄露敏感信息」"
+        "「边界值校验」——如果确实要测，必须写清测的是哪个字段、什么数值、"
+        "期望什么具体提示文案或状态。\n"
+        "4. 需求里明确写了规则的（如「只有暂存状态可删除」「必填项缺失时提示："
+        "必填项缺失，导入不成功」），要原样引用它的条件与文案。\n"
+        "5. 一条测试点只测一件事；不要把正常/异常/边界混在一条里。\n"
+        "6. 需求中没写、需要猜测的内容，不要编造；这类点放进 clarifications 之外的"
+        "字段不要臆造，宁可少写。\n\n"
+        "返回 JSON 数组，不要包含解释文字。每个元素字段：\n"
+        '- module: 所属模块（用需求里的功能名）\n'
+        '- point: 测试点（一句话，含具体字段与条件，可直接照做）\n'
         '- category: 功能/异常/边界/权限/安全\n'
         '- priority: P0/P1/P2/P3\n'
-        '- trace_source: 该测试点来自需求中的哪句话\n\n'
+        '- trace_source: 需求原文中对应的那句话（原样摘录）\n\n'
         f"需求标题：{title}\n"
-        f"功能清单：{summary}\n"
+        f"功能清单（来自需求分析，可参考但以原文为准）：{summary}\n"
         f"需求正文：\n{(requirement_text or '')[:8000]}\n"
+        f"{prototype_hint}"
     )
     if knowledge_context:
         prompt += f"\n{knowledge_context}\n"
@@ -391,24 +443,39 @@ def generate_cases(
     requirement_title: str,
     requirement_text: str = "",
     knowledge_context: str = "",
-    ai_service: AIService | None = None,
+    ai_service: Any | None = None,
     max_cases: int = 200,
+    output_mode: str = MODE_MANUAL,
+    prototype_images: list[str] | None = None,
 ) -> tuple[list[CaseDraft], str]:
-    """为已确认的测试点生成用例草稿，返回 ``(用例列表, 引擎标识)``."""
+    """为已确认的测试点生成用例草稿，返回 ``(用例列表, 引擎标识)``.
+
+    ``output_mode`` 决定产出形态：
+    - ``manual``：前置条件/操作步骤/预期结果 + 具体测试数据，供人工执行；
+    - ``api``：额外给出 method/url/请求体/断言，可导入接口库自动执行。
+    """
     if not points:
         return [], ENGINE_RULE
+    if output_mode not in VALID_OUTPUT_MODES:
+        output_mode = MODE_MANUAL
 
-    service = ai_service or AIService()
-    llm = service._get_llm()  # noqa: SLF001
-    if llm is None:
-        return generate_cases_by_rules(points, requirement_title, max_cases), ENGINE_RULE
+    client: LLMClient = ai_service or get_llm_client()
+    if not client.enabled():
+        return (
+            generate_cases_by_rules(points, requirement_title, max_cases),
+            ENGINE_RULE,
+        )
 
-    prompt = build_cases_prompt(points, requirement_title, requirement_text, knowledge_context)
-    try:
-        response = llm.invoke(prompt)
-        payload = _parse_json_payload(getattr(response, "content", "") or "")
-    except Exception:
-        payload = None
+    prompt = build_cases_prompt(
+        points,
+        requirement_title,
+        requirement_text,
+        knowledge_context,
+        output_mode=output_mode,
+        has_prototype=bool(prototype_images),
+    )
+    content = client.complete_with_images(prompt, prototype_images)
+    payload = _parse_json_payload(content or "")
 
     if not isinstance(payload, list) or not payload:
         return generate_cases_by_rules(points, requirement_title, max_cases), ENGINE_RULE
@@ -434,6 +501,12 @@ def generate_cases(
                 expected=str(entry.get("expected") or ""),
                 trace_source=str(entry.get("trace_source") or "")[:256] or None,
                 point_title=str(entry.get("point_title") or title)[:256],
+                test_data=_normalize_test_data(entry.get("test_data")),
+                request_method=_normalize_method(entry.get("request_method")),
+                request_url=_normalize_url(entry.get("request_url")),
+                request_headers=_normalize_dict(entry.get("request_headers")),
+                request_body=entry.get("request_body"),
+                assertions=_normalize_assertions(entry.get("assertions")),
             )
         )
     if not cases:
@@ -441,33 +514,143 @@ def generate_cases(
     return cases, ENGINE_LLM
 
 
+def _normalize_test_data(raw: Any) -> list[dict[str, Any]]:
+    """把模型返回的测试数据统一成 ``[{field, value, note}]``.
+
+    模型可能返回字典 ``{"字段": "值"}``、也可能是列表，这里都收敛成
+    列表形态，方便前端表格展示与落库。
+    """
+    items: list[dict[str, Any]] = []
+    if isinstance(raw, dict):
+        for field_name, value in raw.items():
+            items.append(
+                {
+                    "field": str(field_name)[:128],
+                    "value": "" if value is None else str(value)[:512],
+                    "note": "",
+                }
+            )
+        return items[:50]
+    if isinstance(raw, list):
+        for entry in raw[:50]:
+            if isinstance(entry, dict):
+                field_name = entry.get("field") or entry.get("name")
+                if not field_name:
+                    continue
+                value = entry.get("value")
+                items.append(
+                    {
+                        "field": str(field_name)[:128],
+                        "value": "" if value is None else str(value)[:512],
+                        "note": str(entry.get("note") or "")[:256],
+                    }
+                )
+            elif isinstance(entry, str) and entry.strip():
+                items.append(
+                    {"field": entry.strip()[:128], "value": "", "note": ""}
+                )
+    return items
+
+
+def _normalize_method(value: Any) -> str | None:
+    if not value:
+        return None
+    method = str(value).strip().upper()
+    return method[:16] if method else None
+
+
+def _normalize_url(value: Any) -> str | None:
+    if not value:
+        return None
+    url = str(value).strip()
+    return url[:2048] if url else None
+
+
+def _normalize_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_assertions(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)][:50]
+
+
 def build_cases_prompt(
     points: list[TestPointDraft],
     requirement_title: str,
     requirement_text: str = "",
     knowledge_context: str = "",
+    output_mode: str = MODE_MANUAL,
+    has_prototype: bool = False,
 ) -> str:
-    """组装用例生成 Prompt（仅针对已确认的测试点）."""
+    """组装用例生成 Prompt（仅针对已确认的测试点）.
+
+    两种形态共用同一批测试点，只是要求模型补充的字段不同：
+    ``manual`` 着重「照着点得下去」的步骤与具体数据；
+    ``api`` 额外要求给出可被引擎执行的请求与断言。
+    """
     point_lines = "\n".join(
         f"- [{point.module}][{point.category}][{point.priority}] {point.point}"
+        f"（来源：{point.trace_source or '未标注'}）"
         for point in points[:200]
     )
+    prototype_hint = (
+        "\n本次附带了页面原型截图，请让操作步骤中的字段名、按钮文案、"
+        "提示语与截图中完全一致。\n"
+        if has_prototype
+        else ""
+    )
+
+    if output_mode == MODE_API:
+        shape_rules = (
+            "本次要求产出【接口自动化用例】，必须给出可被测试引擎直接执行的请求定义：\n"
+            "- request_method: GET/POST/PUT/PATCH/DELETE\n"
+            "- request_url: 相对路径或完整 URL（需求没写就按业务语义给合理路径，"
+            "并在 description 里标注「URL 需按实际接口确认」）\n"
+            "- request_headers: 对象，如 {\"Content-Type\": \"application/json\"}\n"
+            "- request_body: 对象或数组，**必须是该用例真实要发的报文**，"
+            "字段名取自需求/原型，取值用下面 test_data 里的具体值\n"
+            "- assertions: 数组，每项 {\"type\": \"status_code|json_path|business_status\","
+            " \"expression\": \"$.xxx\", \"operator\": \"eq\", \"expected\": ...}，"
+            "失败场景要断言具体的错误码/错误文案\n"
+        )
+    else:
+        shape_rules = (
+            "本次要求产出【人工执行用例】：\n"
+            "- steps: 操作步骤数组，每步一个动作，写到「在哪个界面、点什么、填什么」"
+            "这个粒度，禁止写「执行核心流程」这类空话\n"
+            "- expected: 预期结果，要写清界面反馈、数据变化、提示文案\n"
+        )
+
     prompt = (
-        "你是资深测试工程师。请为下面已确认的测试点生成具体测试用例，"
+        "你是资深测试工程师。请为下面已确认的测试点生成**具体、可执行**的测试用例。\n"
         "返回 JSON 数组，不要包含解释文字。\n\n"
+        "【硬性要求】\n"
+        "1. 用例标题必须包含具体被测对象与条件，例如"
+        "「分单号 XJ2024001 已存在时暂存导入被拒绝并提示」，"
+        "禁止写成「按预期完成处理」「符合约定」这类无法判断对错的标题。\n"
+        "2. 预期结果必须写具体：具体提示文案、具体状态码或字段值。\n"
+        "3. test_data 必须给出本用例实际使用的字段与取值："
+        "数组，每项 {\"field\": \"字段名\", \"value\": \"具体值\", "
+        "\"note\": \"该值的构造意图，如「已存在的分单号」\"}。"
+        "不要把值写成「某个值」「测试数据」这种占位。\n"
+        "4. 一条用例只验证一个判定点；不同输入条件拆成多条。\n"
+        "5. trace_source 原样摘录需求中对应的那句话，便于追溯。\n\n"
         "每个元素的字段：\n"
-        '- title: 用例标题\n'
-        '- module: 所属模块\n'
-        '- category: 功能/异常/边界/权限/安全\n'
-        '- priority: P0/P1/P2/P3\n'
-        '- preconditions: 前置条件\n'
+        '- title, module, category(功能/异常/边界/权限/安全), priority(P0-P3)\n'
+        '- preconditions: 前置条件（账号/数据/状态，写具体）\n'
         '- steps: 操作步骤数组\n'
         '- expected: 预期结果\n'
-        '- trace_source: 需求追溯来源\n'
-        "- point_title: 对应的测试点\n\n"
+        '- test_data: 测试数据数组（见上）\n'
+        '- trace_source, point_title\n'
+        f"{shape_rules}\n"
         f"需求标题：{requirement_title}\n"
         f"需求正文：\n{(requirement_text or '')[:6000]}\n"
         f"已确认测试点：\n{point_lines}\n"
+        f"{prototype_hint}"
     )
     if knowledge_context:
         prompt += f"\n{knowledge_context}\n"
