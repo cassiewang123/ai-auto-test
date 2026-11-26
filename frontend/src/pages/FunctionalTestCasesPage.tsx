@@ -118,6 +118,10 @@ export default function FunctionalTestCasesPage() {
   const [executing, setExecuting] = useState(false);
   const [execForm] = Form.useForm();
 
+  // 批量删除：勾选集合与提交中状态
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+
   const loadData = useCallback(
     async (p = page, ps = pageSize) => {
       setLoading(true);
@@ -148,6 +152,29 @@ export default function FunctionalTestCasesPage() {
       // 统计失败不阻断列表
     }
   }, []);
+
+  async function handleBatchDelete() {
+    if (selectedRowKeys.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = await functionalTestCaseApi.batchRemove(
+        selectedRowKeys.map(String)
+      );
+      const deleted = res.data?.deleted ?? 0;
+      const missing = res.data?.missing ?? 0;
+      message.success(
+        `已删除 ${deleted} 条用例${missing > 0 ? `（${missing} 条已不存在）` : ''}`
+      );
+      setSelectedRowKeys([]);
+      // 删除后当前页可能被删空，回到第一页重新加载更稳妥
+      setPage(1);
+      await Promise.all([loadData(1, pageSize), loadStats()]);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setBatchDeleting(false);
+    }
+  }
 
   useEffect(() => {
     loadData(1, pageSize);
@@ -449,11 +476,35 @@ export default function FunctionalTestCasesPage() {
           />
         )}
 
+        {selectedRowKeys.length > 0 && (
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Tag color="blue">已选 {selectedRowKeys.length} 条</Tag>
+            <Popconfirm
+              title={`确认删除选中的 ${selectedRowKeys.length} 条用例？`}
+              description="删除后不可恢复，用例的执行记录也会一并删除。"
+              okText="确认删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={handleBatchDelete}
+            >
+              <Button danger icon={<DeleteOutlined />} loading={batchDeleting}>
+                批量删除（{selectedRowKeys.length}）
+              </Button>
+            </Popconfirm>
+            <Button onClick={() => setSelectedRowKeys([])}>取消选择</Button>
+          </Space>
+        )}
+
         <Table
           rowKey="id"
           loading={loading}
           dataSource={data}
           columns={columns}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+            // 翻页后保留已勾选，避免跨页选择被清空
+            preserveSelectedRowKeys: true,
+          }}
           pagination={{
             current: page,
             pageSize,

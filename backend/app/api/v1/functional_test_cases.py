@@ -7,16 +7,22 @@
     GET    /functional-test-cases              — 列表（按模块/优先级/状态/需求筛选）
     GET    /functional-test-cases/stats        — 统计
     POST   /functional-test-cases              — 手工创建
+    GET    /functional-test-cases/export       — 导出 Excel
+    POST   /functional-test-cases/batch-delete — 批量删除
     GET    /functional-test-cases/{id}         — 详情
     PUT    /functional-test-cases/{id}         — 更新
     DELETE /functional-test-cases/{id}         — 删除
     POST   /functional-test-cases/{id}/executions  — 登记人工执行结果
     GET    /functional-test-cases/{id}/executions  — 执行历史
+
+注意：``/stats``、``/export``、``/batch-delete`` 必须声明在 ``/{case_id}``
+之前，避免被通配路由抢先匹配。
 """
 from __future__ import annotations
 
 import io
 from datetime import datetime
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query
@@ -24,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -323,6 +330,73 @@ def export_functional_cases(
                 f"filename*=UTF-8''{quoted}"
             )
         },
+    )
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除选中的功能测试用例."""
+
+    case_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("case_ids", mode="before")
+    @classmethod
+    def _clean(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("case_ids 必须是数组")
+        return [str(item) for item in value if item]
+
+
+@router.post("/batch-delete", response_model=DataResponse[dict])
+def batch_delete_functional_cases(
+    payload: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """批量删除功能测试用例（含执行记录），并同步需求覆盖统计.
+
+    逐条复用单条删除的清理逻辑：先删执行记录再删用例，最后按涉及的需求
+    重新计算覆盖率，避免需求里残留已删除用例的 ID。
+    注意：本路由必须声明在 ``/{case_id}`` 之前，否则会被通配路由匹配。
+    """
+    case_ids = [item for item in payload.case_ids if item]
+    if not case_ids:
+        raise ValidationError("请选择要删除的用例")
+
+    items = (
+        db.execute(
+            select(FunctionalTestCase).where(FunctionalTestCase.id.in_(case_ids))
+        )
+        .scalars()
+        .all()
+    )
+    if not items:
+        # 全部 ID 都不存在时视为无操作，而不是报错——前端可能重复提交
+        return DataResponse[dict](data={"deleted": 0, "requested": len(case_ids)})
+
+    requirement_ids = {item.requirement_id for item in items if item.requirement_id}
+    found_ids = [item.id for item in items]
+
+    db.execute(
+        delete(FunctionalCaseExecution).where(
+            FunctionalCaseExecution.case_id.in_(found_ids)
+        )
+    )
+    db.execute(
+        delete(FunctionalTestCase).where(FunctionalTestCase.id.in_(found_ids))
+    )
+    db.commit()
+
+    for requirement_id in requirement_ids:
+        _sync_requirement_cases(db, requirement_id)
+
+    return DataResponse[dict](
+        data={
+            "deleted": len(found_ids),
+            "requested": len(case_ids),
+            # 请求里不存在（可能已被他人删除）的 ID，便于前端提示
+            "missing": len(case_ids) - len(found_ids),
+        }
     )
 
 

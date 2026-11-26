@@ -1365,6 +1365,12 @@ export const functionalTestCaseApi = {
     api.put<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`, data),
   remove: (id: string) =>
     api.delete<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`),
+  /** 批量删除选中的用例（同时删除其执行记录） */
+  batchRemove: (caseIds: string[]) =>
+    api.post<unknown, ApiResponse<{ deleted: number; requested: number; missing: number }>>(
+      '/functional-test-cases/batch-delete',
+      { case_ids: caseIds }
+    ),
   // 导出 Excel：返回后端相对路径，由页面带 token 拉取后下载
   exportUrl: (params?: {
     project_id?: string;

@@ -270,3 +270,100 @@ def test_export_includes_latest_execution_result(client):
     headers = [cell.value for cell in sheet[1]]
     result_col = headers.index("最近执行结果") + 1
     assert sheet.cell(row=2, column=result_col).value == "失败"
+
+
+# ---------------------------------------------------------------------------
+# 批量删除
+# ---------------------------------------------------------------------------
+def test_batch_delete_removes_cases_and_executions(client, db_session):
+    """批量删除应清掉用例与其执行记录."""
+    ids = []
+    for i in range(3):
+        item = client.post(
+            "/api/v1/functional-test-cases",
+            json={"title": f"批量删除-{i}", "steps": ["a"], "expected": "b"},
+        ).json()["data"]
+        ids.append(item["id"])
+        client.post(
+            f"/api/v1/functional-test-cases/{item['id']}/executions",
+            json={"result": "passed"},
+        )
+
+    response = client.post(
+        "/api/v1/functional-test-cases/batch-delete", json={"case_ids": ids}
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["deleted"] == 3
+    assert data["missing"] == 0
+
+    left = client.get("/api/v1/functional-test-cases").json()
+    assert left["total"] == 0
+    # 执行记录必须一并清理，不能留孤儿数据
+    from app.models.functional_test_case import FunctionalCaseExecution
+
+    assert db_session.query(FunctionalCaseExecution).count() == 0
+
+
+def test_batch_delete_only_affects_given_ids(client):
+    keep = client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "保留的用例", "steps": ["a"], "expected": "b"},
+    ).json()["data"]
+    drop = client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "要删的用例", "steps": ["a"], "expected": "b"},
+    ).json()["data"]
+
+    client.post(
+        "/api/v1/functional-test-cases/batch-delete",
+        json={"case_ids": [drop["id"]]},
+    )
+
+    listed = client.get("/api/v1/functional-test-cases").json()
+    assert listed["total"] == 1
+    assert listed["data"][0]["id"] == keep["id"]
+
+
+def test_batch_delete_reports_missing_ids(client):
+    item = client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "存在的用例", "steps": ["a"], "expected": "b"},
+    ).json()["data"]
+    response = client.post(
+        "/api/v1/functional-test-cases/batch-delete",
+        json={"case_ids": [item["id"], "not-exist-id"]},
+    )
+    data = response.json()["data"]
+    assert data["deleted"] == 1
+    assert data["missing"] == 1
+
+
+def test_batch_delete_requires_ids(client):
+    response = client.post(
+        "/api/v1/functional-test-cases/batch-delete", json={"case_ids": []}
+    )
+    assert response.status_code == 422
+
+
+def test_batch_delete_tolerates_all_unknown_ids(client):
+    """全部 ID 都不存在时视为无操作，而不是 500."""
+    response = client.post(
+        "/api/v1/functional-test-cases/batch-delete",
+        json={"case_ids": ["a", "b"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["deleted"] == 0
+
+
+def test_batch_delete_route_not_shadowed_by_detail_route(client):
+    """/batch-delete 不能被 /{case_id} 通配路由吃掉."""
+    item = client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "路由验证", "steps": ["a"], "expected": "b"},
+    ).json()["data"]
+    client.post(
+        "/api/v1/functional-test-cases/batch-delete",
+        json={"case_ids": [item["id"]]},
+    )
+    assert client.get(f"/api/v1/functional-test-cases/{item['id']}").status_code == 404
