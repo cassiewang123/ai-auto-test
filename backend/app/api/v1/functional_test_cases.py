@@ -31,7 +31,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -68,6 +68,30 @@ def _get_or_404(db: Session, case_id: str) -> FunctionalTestCase:
     return item
 
 
+def _normalize_module(value: str | None) -> str:
+    """规范化模块路径：去空白、去首尾与重复斜杠."""
+    parts = [part.strip() for part in (value or "").split("/")]
+    return "/".join(part for part in parts if part)
+
+
+def _module_filter_clause(module: str):
+    """构造「本模块及其所有子模块」的筛选条件.
+
+    模块字段在功能用例里是自由文本（如「多式联运模块优化需求」），但使用者
+    可能用 `A/B` 表达层级。选中父模块时包含其下子模块，避免选到父级显示 0 条；
+    空串表示「未填写模块」。
+    """
+    path = _normalize_module(module)
+    if not path:
+        return or_(
+            FunctionalTestCase.module.is_(None), FunctionalTestCase.module == ""
+        )
+    return or_(
+        FunctionalTestCase.module == path,
+        FunctionalTestCase.module.startswith(f"{path}/", autoescape=True),
+    )
+
+
 def _latest_execution(
     db: Session, case_id: str
 ) -> FunctionalCaseExecution | None:
@@ -102,7 +126,9 @@ def _to_response(
 def list_functional_cases(
     project_id: str | None = Query(None),
     requirement_id: str | None = Query(None),
-    module: str | None = Query(None),
+    module: str | None = Query(
+        None, description="按模块筛选；父模块包含其下所有子模块，空串表示未填模块"
+    ),
     category: str | None = Query(None),
     priority: str | None = Query(None),
     status: str | None = Query(None),
@@ -118,7 +144,6 @@ def list_functional_cases(
     for field, value in (
         (FunctionalTestCase.project_id, project_id),
         (FunctionalTestCase.requirement_id, requirement_id),
-        (FunctionalTestCase.module, module),
         (FunctionalTestCase.category, category),
         (FunctionalTestCase.priority, priority),
         (FunctionalTestCase.status, status),
@@ -126,6 +151,12 @@ def list_functional_cases(
         if value:
             query = query.where(field == value)
             count_q = count_q.where(field == value)
+    if module:
+        # 模块用「路径」表达层级（如 多式联运/导入校验）：选中父模块时应包含
+        # 其下所有子模块，否则选顶级模块会显示 0 条。空串表示「未填模块」。
+        clause = _module_filter_clause(module)
+        query = query.where(clause)
+        count_q = count_q.where(clause)
     if keyword:
         pattern = f"%{keyword}%"
         query = query.where(FunctionalTestCase.title.like(pattern))
@@ -147,6 +178,56 @@ def list_functional_cases(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/modules", response_model=DataResponse[list[dict]])
+def list_functional_case_modules(
+    project_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """模块列表：返回题库里出现过的全部模块及其用例数.
+
+    前端「按模块查找」据此生成下拉选项。模块可能写成 `A/B` 表达层级，
+    这里同时补齐父级路径（A），并用 total_count 给出「含子模块」的累计
+    数量，便于按模块统计与筛选。
+    """
+    query = select(FunctionalTestCase.module).where(
+        FunctionalTestCase.module.is_not(None), FunctionalTestCase.module != ""
+    )
+    if project_id:
+        query = query.where(FunctionalTestCase.project_id == project_id)
+    raw_modules = [m for m in db.execute(query).scalars().all() if m]
+
+    direct_counts: dict[str, int] = {}
+    for raw in raw_modules:
+        path = _normalize_module(raw)
+        if not path:
+            continue
+        direct_counts[path] = direct_counts.get(path, 0) + 1
+
+    all_paths: set[str] = set()
+    for path in direct_counts:
+        parts = path.split("/")
+        for index in range(1, len(parts) + 1):
+            all_paths.add("/".join(parts[:index]))
+
+    modules = []
+    for path in sorted(all_paths):
+        total = sum(
+            count
+            for case_path, count in direct_counts.items()
+            if case_path == path or case_path.startswith(f"{path}/")
+        )
+        modules.append(
+            {
+                "path": path,
+                "name": path.rsplit("/", 1)[-1],
+                "parent_path": path.rsplit("/", 1)[0] if "/" in path else None,
+                "direct_count": direct_counts.get(path, 0),
+                "total_count": total,
+            }
+        )
+    return DataResponse[list[dict]](data=modules)
 
 
 @router.get("/stats", response_model=DataResponse[FunctionalTestCaseStats])
@@ -221,13 +302,15 @@ def export_functional_cases(
     for field, value in (
         (FunctionalTestCase.project_id, project_id),
         (FunctionalTestCase.requirement_id, requirement_id),
-        (FunctionalTestCase.module, module),
         (FunctionalTestCase.category, category),
         (FunctionalTestCase.priority, priority),
         (FunctionalTestCase.status, status),
     ):
         if value:
             query = query.where(field == value)
+    if module:
+        # 与列表接口保持同一语义：父模块包含其下所有子模块
+        query = query.where(_module_filter_clause(module))
     if keyword:
         query = query.where(FunctionalTestCase.title.like(f"%{keyword}%"))
 

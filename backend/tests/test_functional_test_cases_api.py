@@ -367,3 +367,102 @@ def test_batch_delete_route_not_shadowed_by_detail_route(client):
         json={"case_ids": [item["id"]]},
     )
     assert client.get(f"/api/v1/functional-test-cases/{item['id']}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 按模块查找
+# ---------------------------------------------------------------------------
+def test_modules_endpoint_lists_modules_with_counts(client):
+    for title, module in (
+        ("甲", "多式联运"),
+        ("乙", "多式联运"),
+        ("丙", "多式联运/导入校验"),
+        ("丁", "报关"),
+    ):
+        client.post(
+            "/api/v1/functional-test-cases",
+            json={"title": title, "module": module, "steps": ["a"], "expected": "b"},
+        )
+
+    modules = client.get("/api/v1/functional-test-cases/modules").json()["data"]
+    by_path = {item["path"]: item for item in modules}
+
+    # 父子路径都被补齐
+    assert set(by_path) == {"多式联运", "多式联运/导入校验", "报关"}
+    assert by_path["多式联运"]["direct_count"] == 2
+    # 含子模块的累计数
+    assert by_path["多式联运"]["total_count"] == 3
+    assert by_path["多式联运/导入校验"]["parent_path"] == "多式联运"
+    assert by_path["报关"]["parent_path"] is None
+
+
+def test_modules_endpoint_excludes_empty_module(client):
+    client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "无模块", "steps": ["a"], "expected": "b"},
+    )
+    modules = client.get("/api/v1/functional-test-cases/modules").json()["data"]
+    assert modules == []
+
+
+def test_list_filters_by_module_including_children(client):
+    for title, module in (
+        ("父模块用例", "多式联运"),
+        ("子模块用例", "多式联运/导入校验"),
+        ("其他模块", "报关"),
+    ):
+        client.post(
+            "/api/v1/functional-test-cases",
+            json={"title": title, "module": module, "steps": ["a"], "expected": "b"},
+        )
+
+    parent = client.get(
+        "/api/v1/functional-test-cases", params={"module": "多式联运"}
+    ).json()
+    assert parent["total"] == 2
+    assert {item["title"] for item in parent["data"]} == {"父模块用例", "子模块用例"}
+
+    child = client.get(
+        "/api/v1/functional-test-cases", params={"module": "多式联运/导入校验"}
+    ).json()
+    assert child["total"] == 1
+    assert child["data"][0]["title"] == "子模块用例"
+
+
+def test_module_filter_does_not_match_sibling_prefix(client):
+    client.post(
+        "/api/v1/functional-test-cases",
+        json={"title": "同类前缀", "module": "多式联运二期", "steps": ["a"], "expected": "b"},
+    )
+    result = client.get(
+        "/api/v1/functional-test-cases", params={"module": "多式联运"}
+    ).json()
+    assert result["total"] == 0
+
+
+def test_export_respects_module_filter(client):
+    for title, module in (
+        ("导出A", "多式联运"),
+        ("导出B", "报关"),
+    ):
+        client.post(
+            "/api/v1/functional-test-cases",
+            json={"title": title, "module": module, "steps": ["a"], "expected": "b"},
+        )
+    response = client.get(
+        "/api/v1/functional-test-cases/export", params={"module": "多式联运"}
+    )
+    assert response.status_code == 200
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    sheet = load_workbook(BytesIO(response.content)).active
+    headers = [cell.value for cell in sheet[1]]
+    # 导出第 1 列是序号，标题按表头名定位，避免列顺序变动导致误判
+    title_col = headers.index("用例标题") + 1
+    titles = [
+        sheet.cell(row=r, column=title_col).value
+        for r in range(2, sheet.max_row + 1)
+    ]
+    assert titles == ["导出A"]

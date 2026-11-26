@@ -1357,6 +1357,20 @@ export const functionalTestCaseApi = {
     api.get<unknown, PageResponse<any>>('/functional-test-cases', { params }),
   stats: (params?: { project_id?: string }) =>
     api.get<unknown, ApiResponse<any>>('/functional-test-cases/stats', { params }),
+  /** 模块列表（含用例数），供「按模块查找」下拉使用 */
+  modules: (params?: { project_id?: string }) =>
+    api.get<
+      unknown,
+      ApiResponse<
+        Array<{
+          path: string;
+          name: string;
+          parent_path: string | null;
+          direct_count: number;
+          total_count: number;
+        }>
+      >
+    >('/functional-test-cases/modules', { params }),
   get: (id: string) =>
     api.get<unknown, ApiResponse<any>>(`/functional-test-cases/${id}`),
   create: (data: any) =>

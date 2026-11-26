@@ -105,6 +105,11 @@ export default function FunctionalTestCasesPage() {
   const [keyword, setKeyword] = useState('');
   const [priority, setPriority] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
+  // 按模块查找：moduleFilter 为空表示不按模块过滤
+  const [moduleFilter, setModuleFilter] = useState<string | undefined>();
+  const [moduleOptions, setModuleOptions] = useState<
+    Array<{ label: string; value: string }>
+  >([]);
   const [stats, setStats] = useState<Record<string, number>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -130,6 +135,7 @@ export default function FunctionalTestCasesPage() {
           page: p,
           page_size: ps,
           keyword: keyword || undefined,
+          module: moduleFilter,
           priority,
           status,
         });
@@ -141,7 +147,7 @@ export default function FunctionalTestCasesPage() {
         setLoading(false);
       }
     },
-    [keyword, page, pageSize, priority, status]
+    [keyword, moduleFilter, page, pageSize, priority, status]
   );
 
   const loadStats = useCallback(async () => {
@@ -176,16 +182,37 @@ export default function FunctionalTestCasesPage() {
     }
   }
 
+  const loadModules = useCallback(async () => {
+    try {
+      const res = await functionalTestCaseApi.modules();
+      const items = res.data || [];
+      setModuleOptions(
+        items.map((item) => ({
+          // 带用例数，便于判断哪个模块值得先看
+          label: `${item.path}（${item.total_count}）`,
+          value: item.path,
+        }))
+      );
+    } catch {
+      // 模块列表失败不阻断列表主体
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModules();
+  }, [loadModules]);
+
   useEffect(() => {
     loadData(1, pageSize);
     loadStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [priority, status]);
+  }, [priority, status, moduleFilter]);
 
   async function handleExport() {
     // 直接下载需要携带 JWT，用 fetch 拉取 blob 后触发浏览器下载
     const url = functionalTestCaseApi.exportUrl({
       keyword: keyword || undefined,
+      module: moduleFilter,
       priority,
       status,
     });
@@ -438,6 +465,20 @@ export default function FunctionalTestCasesPage() {
                 setPage(1);
               }}
               options={STATUS_OPTIONS}
+            />
+            <Select
+              placeholder="按模块查找"
+              allowClear
+              showSearch
+              // 模块可能很多，用 label 搜索（含用例数后缀也能命中）
+              optionFilterProp="label"
+              style={{ width: 220 }}
+              value={moduleFilter}
+              onChange={(value) => {
+                setModuleFilter(value);
+                setPage(1);
+              }}
+              options={moduleOptions}
             />
             <Button icon={<ReloadOutlined />} onClick={() => loadData()}>
               刷新
