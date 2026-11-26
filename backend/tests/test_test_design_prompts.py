@@ -259,3 +259,48 @@ def test_generated_points_use_normalized_enums():
     assert engine == svc.ENGINE_LLM
     assert points[0].category == svc.CATEGORY_BOUNDARY
     assert points[0].priority == "P0"
+
+
+# ---------------------------------------------------------------------------
+# 规则引擎兜底：带上真实字段名，并明确标注待补充
+# ---------------------------------------------------------------------------
+def test_rule_fallback_extracts_field_names_from_requirement():
+    """规则引擎应从需求原文提取带引号的字段名，而不是写「某字段」."""
+    point = svc.TestPointDraft(
+        module="进口食品申报",
+        point='商品表体"生产日期"留空时提交应拦截',
+        category="异常",
+        priority="P0",
+        trace_source='商品表体"生产日期"不可为空',
+    )
+    cases = svc.generate_cases_by_rules([point], "信天翁1125")
+    case = cases[0]
+
+    assert any("生产日期" in step for step in case.steps)
+    # 测试数据不再是空数组，而是带字段名的待补充项
+    assert case.test_data
+    assert case.test_data[0]["field"] == "生产日期"
+
+
+def test_rule_fallback_marks_placeholders_explicitly():
+    """兜底用例必须明确标注待补充，避免被当成最终用例误用."""
+    point = svc.TestPointDraft("m", "某个没有引号字段的测试点", "功能", "P0")
+    cases = svc.generate_cases_by_rules([point], "需求")
+    case = cases[0]
+
+    assert "【规则引擎生成】" in case.preconditions
+    assert any("【待补充】" in step for step in case.steps)
+    assert case.test_data[0]["note"].startswith("【待补充】")
+
+
+def test_extract_quoted_terms_handles_multiple_quote_styles():
+    text = '单证"分单号"为空时提示「必填项缺失，导入不成功」，参见『导入规范』'
+    terms = svc._extract_quoted_terms(text)
+    assert "分单号" in terms
+    assert "必填项缺失，导入不成功" in terms
+    assert "导入规范" in terms
+
+
+def test_extract_quoted_terms_returns_empty_without_quotes():
+    assert svc._extract_quoted_terms("没有任何引号的普通句子") == []
+    assert svc._extract_quoted_terms(None) == []

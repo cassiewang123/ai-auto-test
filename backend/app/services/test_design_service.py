@@ -527,58 +527,107 @@ def generate_cases_by_rules(
     return cases
 
 
+def _extract_quoted_terms(text: str) -> list[str]:
+    """从需求原文中提取被引号括起来的字段名/提示语.
+
+    规则引擎读不懂语义，但需求里「生产日期」「必填项缺失，导入不成功」这类
+    带引号的词往往是字段名或错误文案。把它们提出来，能让兜底用例至少带上
+    真实字段名，而不是清一色的「某字段」。
+    """
+    patterns = [
+        r"[“\"]([^”\"]{2,30})[”\"]",
+        r"「([^」]{2,30})」",
+        r"『([^』]{2,30})』",
+    ]
+    found: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text or ""):
+            term = match.group(1).strip()
+            if term and term not in found:
+                found.append(term)
+    return found[:6]
+
+
 def _case_from_point(
     point: TestPointDraft, requirement_title: str, index: int
 ) -> CaseDraft:
-    """按测试点分类生成不同形态的步骤."""
+    """按测试点分类生成不同形态的步骤.
+
+    规则引擎只做关键词级推断，无法给出真正可执行的界面操作与测试数据。
+    因此这里的目标不是「编得很像」，而是：
+      1. 尽量带上从需求原文提取到的真实字段名；
+      2. 明确标注「待人工补充」，避免把模板当成最终用例使用。
+
+    要产出详细步骤与具体测试数据，需要启用大模型（见 llm_client）。
+    """
     subject = point.trace_source or point.point
+    terms = _extract_quoted_terms(subject) or _extract_quoted_terms(point.point)
+    # 用提取到的字段名做步骤主语，比「某字段」更有信息量
+    field_hint = "、".join(terms) if terms else "被测字段"
+    needs_input = (
+        f"【待补充】{field_hint} 的具体取值（正常值、边界值、非法值）"
+        if terms
+        else "【待补充】本次用例涉及的具体字段与取值"
+    )
+
     if point.category == CATEGORY_EXCEPTION:
         steps = [
-            "准备满足前置条件的测试数据",
-            f"构造异常输入触发「{subject}」失败路径",
-            "提交请求并观察系统响应",
-            "检查错误提示、日志与数据状态",
+            f"【待补充】准备触发条件：{subject}",
+            f"对字段「{field_hint}」构造不符合规则的输入",
+            f"提交后检查提示信息是否与需求约定一致（{subject}）",
+            "确认数据未落库、状态未变更",
         ]
-        expected = "系统给出明确且不泄露敏感信息的错误提示，数据保持一致，不产生脏数据"
+        expected = f"按需求规则拦截，提示信息与需求描述一致：{subject}"
     elif point.category == CATEGORY_BOUNDARY:
         steps = [
-            "准备最小长度、最大长度、空值与特殊字符四组边界数据",
-            f"逐组输入并触发「{subject}」",
-            "记录每组数据的系统响应",
+            f"对字段「{field_hint}」分别构造：空值、最小长度、最大长度、超长值",
+            "逐组提交并记录每组的系统响应",
+            "比对每组结果是否符合需求约定的边界",
         ]
-        expected = "边界内数据通过校验，越界与空值被明确拦截并给出提示"
+        expected = "边界内数据通过校验，越界与空值被拦截且提示明确"
     elif point.category == CATEGORY_PERMISSION:
         steps = [
-            "分别准备有权限与无权限两类账号",
-            f"使用无权限账号尝试「{subject}」",
-            "使用有权限账号执行相同操作作为对照",
+            "准备「有该操作权限」与「无该操作权限」两个账号",
+            f"用无权限账号执行：{subject}",
+            "再用有权限账号执行同一操作作为对照",
         ]
-        expected = "无权限操作被拒绝并返回约定的状态码，有权限操作正常完成"
+        expected = "无权限操作被拒绝并返回约定状态码，有权限操作正常完成"
     elif point.category == CATEGORY_SECURITY:
         steps = [
-            "构造越权/注入类恶意输入",
-            f"对「{subject}」发起请求",
-            "检查响应与日志",
+            "构造越权与注入类输入（如篡改 ID、SQL 片段）",
+            f"针对「{subject}」发起请求",
+            "检查响应与日志是否泄露敏感信息或产生越权",
         ]
-        expected = "恶意输入被安全拦截，未泄露敏感数据，未产生越权操作"
+        expected = "恶意输入被拦截，未泄露敏感数据，未产生越权操作"
     else:
         steps = [
-            "准备符合前置条件的测试数据",
-            f"执行「{subject}」的核心操作流程",
-            "校验返回结果与数据落库情况",
+            f"【待补充】准备满足条件的数据：{subject}",
+            f"按业务界面操作至「{field_hint}」所在页面并提交",
+            "核对结果、状态流转与数据落库",
         ]
-        expected = "核心流程按需求预期完成，返回成功结果且数据持久化正确"
+        expected = f"功能按需求完成，且满足需求描述的规则：{subject}"
 
     return CaseDraft(
         title=point.point[:256],
         module=point.module,
         category=point.category,
         priority=point.priority,
-        preconditions=f"已完成「{requirement_title}」相关环境与账号准备",
+        preconditions=(
+            f"【规则引擎生成】已完成「{requirement_title}」环境与账号准备；"
+            "详细前置数据需人工确认"
+        ),
         steps=steps,
         expected=expected,
         trace_source=point.trace_source,
         point_title=point.point,
+        # 规则引擎读不出具体业务数据，明确留空并标注，避免误用
+        test_data=[
+            {
+                "field": field_hint,
+                "value": "",
+                "note": needs_input,
+            }
+        ],
     )
 
 
