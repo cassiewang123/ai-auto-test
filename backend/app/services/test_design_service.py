@@ -17,12 +17,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.llm_client import LLMClient, get_llm_client
 
 logger = logging.getLogger(__name__)
+
+# 分批调用的并发度：兼顾速度与网关限流风险（过高容易触发 429）
+# 实测该网关单批约 4-10 秒，6 路并发能显著压缩总时长；过高会触发限流
+_BATCH_WORKERS = 6
+# 超过该数量的测试点直接走并发分批，不再尝试一次性生成
+_SINGLE_CALL_POINT_LIMIT = 4
 
 ENGINE_RULE = "rule"
 ENGINE_LLM = "llm"
@@ -415,52 +422,43 @@ def _generate_test_points_in_batches(
     """分批生成测试点，绕开单次输出被 max_tokens 截断的问题.
 
     思路：一次性要 60 个点时，模型输出往往超出 token 上限，JSON 在中间被
-    切断，导致整批作废。改为每批只要求少量条目，并告诉模型「这是第 N 批，
-    跳过已列出的点」，多轮累积。
+    切断，导致整批作废。改为每批只要求少量条目，多轮累积。
 
     只要有一批成功，就不算失败；全部批次都失败才返回 None（交由调用方回退）。
+
+    并发：批与批之间独立，串行会让总耗时随批数线性增长（实测单批约 13 秒，
+    8 批超过 100 秒，叠加首轮失败就很容易撞上前端超时）。这里并发发起，
+    总耗时接近单批耗时。
     """
-    collected: list[TestPointDraft] = []
-    seen_points: set[str] = set()
-    # 每批条数不宜过大——输出越长越容易再次被截断
     per_batch = max(3, min(8, max_points))
     max_batches = 8
+    total_batches = max(1, min(max_batches, (max_points + per_batch - 1) // per_batch))
 
-    for batch_index in range(max_batches):
-        remaining = max_points - len(collected)
-        if remaining <= 0:
-            break
-        want = min(per_batch, remaining)
-        already = "、".join(sorted(seen_points)[:20]) or "无"
-
+    def run_batch(batch_index: int) -> list[TestPointDraft]:
         batch_prompt = build_points_prompt(
             title, requirement_text, function_items, knowledge_context,
             has_prototype=bool(prototype_images),
         )
+        # 并发时无法告知「已产出过什么」，改为按批次划分需求维度，降低重复率
         batch_prompt += (
-            f"\n\n【分批要求】这是第 {batch_index + 1} 批，"
-            f"本次只需输出 {want} 条**新的**测试点，不要重复以下已产出的点：\n"
-            f"{already}\n"
-            f"请尽量覆盖需求中尚未涉及的部分。只返回 JSON 数组。"
+            f"\n\n【分批要求】这是第 {batch_index + 1}/{total_batches} 批，"
+            f"本次只需输出 {min(per_batch, max_points)} 条测试点。"
+            "请专注于需求中不同的校验规则/字段，避免与其他批次重复，"
+            "只返回 JSON 数组。"
         )
-
         content = client.complete_with_images(batch_prompt, prototype_images)
         payload = _parse_json_payload(content or "")
-        if not isinstance(payload, list) or not payload:
-            # 这一批失败：若此前已有结果就用已有的，否则继续尝试下一批
-            logger.info("第 %d 批测试点生成失败，已累计 %d 条",
-                        batch_index + 1, len(collected))
-            continue
-
-        added = 0
-        for entry in payload[:want]:
+        if not isinstance(payload, list):
+            logger.info("测试点分批生成：第 %d 批失败（不影响其它批）", batch_index + 1)
+            return []
+        drafts: list[TestPointDraft] = []
+        for entry in payload[:per_batch]:
             if not isinstance(entry, dict):
                 continue
             point_text = str(entry.get("point") or "").strip()
-            if not point_text or point_text in seen_points:
+            if not point_text:
                 continue
-            seen_points.add(point_text)
-            collected.append(
+            drafts.append(
                 TestPointDraft(
                     module=str(entry.get("module") or title or "通用功能")[:32],
                     point=point_text[:256],
@@ -469,13 +467,20 @@ def _generate_test_points_in_batches(
                     trace_source=str(entry.get("trace_source") or "")[:256] or None,
                 )
             )
-            added += 1
+        return drafts
+
+    collected: list[TestPointDraft] = []
+    seen_points: set[str] = set()
+    workers = min(_BATCH_WORKERS, total_batches)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for drafts in pool.map(run_batch, range(total_batches)):
+            for draft in drafts:
+                if draft.point in seen_points or len(collected) >= max_points:
+                    continue
+                seen_points.add(draft.point)
+                collected.append(draft)
             if len(collected) >= max_points:
                 break
-
-        if added == 0:
-            # 模型已无新点可给，提前结束，避免空转
-            break
 
     return collected or None
 
@@ -503,6 +508,37 @@ def generate_test_points(
     if not client.enabled():
         reason = _client_disabled_reason(client)
         logger.info("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
+        return (
+            generate_test_points_by_rules(
+                title, requirement_text, function_items, descriptions, max_points
+            ),
+            ENGINE_RULE,
+        )
+
+    # 目标点数较多时直接并发分批：单次输出越长越慢，也越容易被 max_tokens
+    # 截断（截断后整批作废反而更慢）。少量点数仍走一次性调用。
+    if max_points > _SINGLE_CALL_POINT_LIMIT:
+        logger.info(
+            "目标 %d 个测试点，超过单次调用上限 %d，改用并发分批生成",
+            max_points,
+            _SINGLE_CALL_POINT_LIMIT,
+        )
+        batched_points = _generate_test_points_in_batches(
+            client,
+            title,
+            requirement_text,
+            function_items,
+            knowledge_context,
+            max_points,
+            prototype_images,
+        )
+        if batched_points is not None:
+            logger.info("并发分批生成测试点成功，共 %d 个", len(batched_points))
+            return batched_points, ENGINE_LLM
+        reason = "大模型分批生成全部失败（详见后端日志）"
+        logger.warning("AI 用例生成回退规则引擎：%s", reason)
         if fallback_reason is not None:
             fallback_reason.append(reason)
         return (
@@ -794,19 +830,25 @@ def _generate_cases_in_batches(
 
     用例本身比测试点长得多（含前置条件、步骤、预期、测试数据），因此每批
     点数要比测试点更少。
+
+    并发：各批之间互不依赖，串行调用会让总耗时随批数线性增长（实测单批
+    ~13 秒，11 批就要 140 秒以上，前端必然超时）。这里用线程池并发发起，
+    总耗时接近单批耗时；并发度保守取值，避免触发网关限流。
     """
     if not points:
         return None
-    # 每条用例的输出远长于测试点，每批只放少量测试点
-    points_per_batch = 3
-    collected: list[CaseDraft] = []
-    seen_titles: set[str] = set()
+    # 每批 2 个测试点：实测单条用例约 3.5 秒（其中思考占大部分），
+    # 一次要 3 条时输出变长、耗时涨到 40 秒以上。批次越小越稳定，
+    # 且批次之间并发执行，整体耗时由「最慢的一批」决定。
+    points_per_batch = 2
+    batches = [
+        points[start : start + points_per_batch]
+        for start in range(0, len(points), points_per_batch)
+    ]
+    max_batches = min(len(batches), max(1, (max_cases + points_per_batch - 1) // points_per_batch))
+    batches = batches[:max_batches]
 
-    for start in range(0, len(points), points_per_batch):
-        batch = points[start : start + points_per_batch]
-        if len(collected) >= max_cases:
-            break
-
+    def run_batch(batch: list[TestPointDraft]) -> list[CaseDraft]:
         batch_prompt = build_cases_prompt(
             batch,
             requirement_title,
@@ -819,25 +861,32 @@ def _generate_cases_in_batches(
             f"\n\n【分批要求】本次只针对上面 {len(batch)} 个测试点生成用例，"
             "每个测试点 1 条用例即可，保证 JSON 完整闭合。只返回 JSON 数组。"
         )
-
         content = client.complete_with_images(batch_prompt, prototype_images)
         payload = _parse_json_payload(content or "")
-        if not isinstance(payload, list) or not payload:
-            logger.info(
-                "用例分批生成：第 %d 批失败，已累计 %d 条",
-                start // points_per_batch + 1,
-                len(collected),
-            )
-            continue
-
+        if not isinstance(payload, list):
+            logger.info("用例分批生成：某批失败（已并发执行，不影响其它批）")
+            return []
+        drafts: list[CaseDraft] = []
         for entry in payload:
             if not isinstance(entry, dict):
                 continue
             draft = _normalize_case_entry(entry)
-            if draft is None or draft.title in seen_titles:
-                continue
-            seen_titles.add(draft.title)
-            collected.append(draft)
+            if draft is not None:
+                drafts.append(draft)
+        return drafts
+
+    collected: list[CaseDraft] = []
+    seen_titles: set[str] = set()
+    # 并发度取 4：兼顾速度与网关限流风险
+    workers = min(_BATCH_WORKERS, len(batches))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        # 按提交顺序收集结果，保证用例顺序与测试点一致
+        for drafts in pool.map(run_batch, batches):
+            for draft in drafts:
+                if draft.title in seen_titles or len(collected) >= max_cases:
+                    continue
+                seen_titles.add(draft.title)
+                collected.append(draft)
             if len(collected) >= max_cases:
                 break
 
@@ -870,6 +919,38 @@ def generate_cases(
     if not client.enabled():
         reason = _client_disabled_reason(client)
         logger.info("AI 用例生成回退规则引擎：%s", reason)
+        if fallback_reason is not None:
+            fallback_reason.append(reason)
+        return (
+            generate_cases_by_rules(points, requirement_title, max_cases),
+            ENGINE_RULE,
+        )
+
+    # 测试点较多时直接走并发分批：
+    #   1. 单次调用输出越长越慢（实测 3 个点约 13s，9 个点约 55s），
+    #      点数再多就必然撞上前端超时；
+    #   2. 输出越长越容易被 max_tokens 截断，一次作废反而更慢。
+    # 少量测试点仍走一次性调用，避免不必要的多次请求。
+    if len(points) > _SINGLE_CALL_POINT_LIMIT:
+        logger.info(
+            "测试点 %d 个，超过单次调用上限 %d，改用并发分批生成",
+            len(points),
+            _SINGLE_CALL_POINT_LIMIT,
+        )
+        batched = _generate_cases_in_batches(
+            client,
+            points,
+            requirement_title,
+            requirement_text,
+            knowledge_context,
+            output_mode,
+            prototype_images,
+            max_cases,
+        )
+        if batched is not None:
+            return batched, ENGINE_LLM
+        reason = "大模型分批生成全部失败（详见后端日志）"
+        logger.warning("AI 用例生成回退规则引擎：%s", reason)
         if fallback_reason is not None:
             fallback_reason.append(reason)
         return (
