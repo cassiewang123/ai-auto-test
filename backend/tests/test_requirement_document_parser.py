@@ -341,3 +341,44 @@ def test_supported_extensions_cover_common_office_formats():
 
     for ext in (".pdf", ".docx", ".xlsx", ".csv", ".png", ".md", ".html"):
         assert ext in SUPPORTED_EXTENSIONS
+
+
+def test_parse_xlsx_does_not_truncate_long_sheets():
+    """业务表格动辄上万行，不能悄悄截断（用户明确要求不限制行数）."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "COMPLEX"
+    sheet.append(["字段", "规则"])
+    total_rows = 8000
+    for i in range(1, total_rows + 1):
+        sheet.append([f"字段{i}", f"规则{i}"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+
+    parsed = parse_document("大表.xlsx", buffer.getvalue())
+
+    assert parsed.warnings == []
+    body_lines = parsed.content.strip().splitlines()
+    # 表头 + 全部数据行，一行都不少
+    assert len(body_lines) == total_rows + 2  # 含工作表标题行
+    assert "字段1 | 规则1" in parsed.content
+    assert f"字段{total_rows} | 规则{total_rows}" in parsed.content
+
+
+def test_parse_xlsx_skips_fully_empty_rows_only():
+    """只跳过整行为空的行，避免把空行算进去影响列对齐判断."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["字段", "值"])
+    sheet.append([None, None])
+    sheet.append(["分单号", "XJ001"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+
+    parsed = parse_document("含空行.xlsx", buffer.getvalue())
+    body = [line for line in parsed.content.splitlines() if "|" in line]
+    assert body == ["字段 | 值", "分单号 | XJ001"]

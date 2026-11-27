@@ -371,6 +371,9 @@ def _parse_spreadsheet(data: bytes, warnings: list[str]) -> str:
 
     需求里常有「必填项一览」「字段对照」这类表格，按行展开比丢给模型一堆
     逗号更易读；单元格为空时用空串占位，保持列对齐。
+
+    不限制行数：业务表格动辄上万行，截断会悄悄丢掉后半张表，比慢一点更糟。
+    真正的保护留在 `_truncate`（按字符总量）与文件大小上限，那是最后兜底。
     """
     try:
         from openpyxl import load_workbook
@@ -393,9 +396,6 @@ def _parse_spreadsheet(data: bytes, warnings: list[str]) -> str:
                 continue
             lines.append(" | ".join(cells).rstrip(" |"))
             row_count += 1
-            if row_count >= 5000:
-                _add_warning(warnings, f"工作表 {sheet.title} 超过 5000 行，已截断")
-                break
         if row_count:
             blocks.append("\n".join(lines))
     workbook.close()
